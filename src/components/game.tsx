@@ -4,6 +4,7 @@ import { useEffect, useRef, useState } from "react";
 import { signOut } from "@/app/(auth)/actions";
 import {
   CATEGORY_LABELS,
+  MAX_ALLIANCE_SIZE,
   DIFFICULTY_LABELS,
   COMBATANTS,
   DEFENSES,
@@ -459,8 +460,14 @@ function Raids({ snap, live, now, run }: { snap: GameSnapshot; live: PlayerState
     await run({ type: "raid", target });
     setBusy(null);
   };
-  const players = snap.rivals.filter((r) => !r.isLord);
+  const players = snap.rivals.filter((r) => !r.isLord && !r.allied);
+  const allies = snap.rivals.filter((r) => r.allied);
   const lords = snap.rivals.filter((r) => r.isLord);
+  const invite = async (target: string) => {
+    setBusy(target);
+    await run({ type: "alliance_invite", target });
+    setBusy(null);
+  };
 
   return (
     <>
@@ -475,6 +482,17 @@ function Raids({ snap, live, now, run }: { snap: GameSnapshot; live: PlayerState
       <p className="raid-state">
         {cooldown > 0 ? `⏳ Tes troupes se reposent encore ${duration(cooldown)}.` : "⚔️ Tes troupes sont prêtes."}
       </p>
+      <Alliance snap={snap} run={run} />
+      {allies.length > 0 && (
+        <>
+          <h3 className="section-title">Alliés</h3>
+          <div className="list">
+            {allies.map((r) => (
+              <AllyRow key={r.id} r={r} live={live} run={run} />
+            ))}
+          </div>
+        </>
+      )}
       <h3 className="section-title">Seigneurs voisins</h3>
       <div className="list">
         {lords.map((r) => (
@@ -485,7 +503,17 @@ function Raids({ snap, live, now, run }: { snap: GameSnapshot; live: PlayerState
       <div className="list">
         {players.length === 0 && <p className="empty">Personne d&apos;autre au royaume pour l&apos;instant. Invite tes amis !</p>}
         {players.map((r) => (
-          <RivalRow key={r.id} r={r} now={now} busy={busy} onRaid={raid} onSpy={spy} spyPrice={spyPrice} stone={live.stone} />
+          <RivalRow
+            key={r.id}
+            r={r}
+            now={now}
+            busy={busy}
+            onRaid={raid}
+            onSpy={spy}
+            spyPrice={spyPrice}
+            stone={live.stone}
+            onInvite={snap.alliance && !r.allianceName && snap.alliance.members.length < MAX_ALLIANCE_SIZE ? invite : undefined}
+          />
         ))}
       </div>
       <h3 className="section-title">Chronique</h3>
@@ -502,6 +530,7 @@ function RivalRow({
   onSpy,
   spyPrice,
   stone: myStone,
+  onInvite,
 }: {
   r: RivalView;
   now: number;
@@ -510,6 +539,7 @@ function RivalRow({
   onSpy: (id: string) => void;
   spyPrice: number;
   stone: number;
+  onInvite?: (id: string) => void;
 }) {
   const intel = r.intelUntil > now;
   // La pierre du rival progresse en direct entre deux nouvelles du serveur.
@@ -528,6 +558,7 @@ function RivalRow({
           {r.name}
           {r.isLord && <span className={`badge badge-level-${r.difficulty ?? 1}`}>{DIFFICULTY_LABELS[r.difficulty ?? 1]}</span>}
           {r.revenge && <span className="badge badge-revenge">revanche !</span>}
+          {r.allianceName && <span className="badge">🤝 {r.allianceName}</span>}
         </div>
         <div className="row-desc num">
           {r.temper ? `${r.temper} · ` : ""}
@@ -551,6 +582,11 @@ function RivalRow({
             {pct} % de succès
           </span>
         </button>
+        {onInvite && (
+          <button className="btn" disabled={busy !== null} onClick={() => onInvite(r.id)}>
+            ✉️ Inviter
+          </button>
+        )}
         {!intel && (
           <button className="btn" disabled={busy !== null || myStone < spyPrice} onClick={() => onSpy(r.id)} title="Révèle l'armée exacte pendant 1 h. Il peut être repéré.">
             🕵️ Espionner
@@ -558,6 +594,148 @@ function RivalRow({
           </button>
         )}
       </div>
+    </div>
+  );
+}
+
+/** Mon alliance : fondation, invitations, troupes postées. */
+function Alliance({ snap, run }: { snap: GameSnapshot; run: ReturnType<typeof useGame>["run"] }) {
+  const [name, setName] = useState("");
+  const [busy, setBusy] = useState(false);
+  const act = async (action: Parameters<typeof run>[0]) => {
+    setBusy(true);
+    await run(action);
+    setBusy(false);
+  };
+  const a = snap.alliance;
+  return (
+    <div className="alliance">
+      <h3 className="section-title">Alliance</h3>
+      {a ? (
+        <>
+          <p className="row-desc">
+            🤝 <strong>{a.name}</strong> · {a.members.map((m) => (m.id === snap.userId ? "toi" : m.name)).join(", ")} ({a.members.length}/{MAX_ALLIANCE_SIZE})
+          </p>
+          <p className="note">
+            Entre alliés, pas de pillage. Les troupes envoyées chez un allié défendent son domaine et partent en raid avec lui (le butin revient à
+            celui qui lance le raid, les pertes sont partagées au prorata).
+          </p>
+        </>
+      ) : (
+        <>
+          {snap.invites.map((inv) => (
+            <div key={inv.allianceId} className="row">
+              <div className="row-icon" aria-hidden>
+                ✉️
+              </div>
+              <div className="row-desc">
+                {inv.inviterName} t&apos;invite dans l&apos;alliance <strong>{inv.allianceName}</strong>.
+              </div>
+              <div className="row-actions">
+                <button className="btn btn-primary" disabled={busy} onClick={() => act({ type: "alliance_accept", alliance: inv.allianceId })}>
+                  Rejoindre
+                </button>
+                <button className="btn" disabled={busy} onClick={() => act({ type: "alliance_decline", alliance: inv.allianceId })}>
+                  Refuser
+                </button>
+              </div>
+            </div>
+          ))}
+          <form
+            className="alliance-form"
+            onSubmit={(e) => {
+              e.preventDefault();
+              void act({ type: "alliance_create", name });
+            }}
+          >
+            <input className="input" value={name} maxLength={30} placeholder="Nom de ton alliance" onChange={(e) => setName(e.target.value)} />
+            <button className="btn btn-primary" disabled={busy || name.trim().length < 2}>
+              Fonder
+            </button>
+          </form>
+        </>
+      )}
+      {snap.reinforcements.length > 0 && (
+        <p className="row-desc">
+          Renforts chez toi :{" "}
+          {snap.reinforcements.map((g) => (
+            <span key={g.id} className="num">
+              {g.name} {armyIcons(g.troops)}{" "}
+            </span>
+          ))}
+        </p>
+      )}
+      {snap.abroad.map((g) => (
+        <div key={g.id} className="row">
+          <div className="row-icon" aria-hidden>
+            🏕️
+          </div>
+          <div className="row-desc num">
+            Tes troupes chez {g.name} : {armyIcons(g.troops)}
+          </div>
+          <button className="btn" disabled={busy} onClick={() => act({ type: "recall", host: g.id })}>
+            Rappeler
+          </button>
+        </div>
+      ))}
+      {a && (
+        <button className="btn btn-ghost alliance-leave" disabled={busy} onClick={() => act({ type: "alliance_leave" })}>
+          Quitter l&apos;alliance
+        </button>
+      )}
+    </div>
+  );
+}
+
+/** Un allié : son armée exacte et l'envoi de renforts. */
+function AllyRow({ r, live, run }: { r: RivalView; live: PlayerState; run: ReturnType<typeof useGame>["run"] }) {
+  const available = UNITS.filter((u) => (live.troops[u.id] ?? 0) > 0);
+  const [unit, setUnit] = useState<string>("");
+  const [qty, setQty] = useState(1);
+  const [busy, setBusy] = useState(false);
+  const chosen = available.find((u) => u.id === unit) ?? available[0];
+  const max = chosen ? (live.troops[chosen.id] ?? 0) : 0;
+  const send = async () => {
+    if (!chosen) return;
+    setBusy(true);
+    await run({ type: "reinforce", target: r.id, unit: chosen.id, qty: Math.min(qty, max) });
+    setBusy(false);
+  };
+  return (
+    <div className="row">
+      <div className="row-icon" aria-hidden>
+        🤝
+      </div>
+      <div>
+        <div className="row-title">{r.name}</div>
+        <div className="row-desc army-line num">{armyIcons(r.army)}</div>
+        {chosen ? (
+          <div className="reinforce">
+            <select className="input" value={chosen.id} onChange={(e) => setUnit(e.target.value)} aria-label="Troupe à envoyer">
+              {available.map((u) => (
+                <option key={u.id} value={u.id}>
+                  {u.icon} {u.plural} ({live.troops[u.id]})
+                </option>
+              ))}
+            </select>
+            <input
+              className="input input-qty"
+              type="number"
+              min={1}
+              max={max}
+              value={qty}
+              onChange={(e) => setQty(Math.max(1, Math.floor(Number(e.target.value) || 1)))}
+              aria-label="Nombre"
+            />
+          </div>
+        ) : (
+          <div className="row-desc">Aucune troupe disponible chez toi à envoyer.</div>
+        )}
+      </div>
+      <button className="btn btn-primary" disabled={busy || !chosen} onClick={send}>
+        Envoyer
+        <span className="cost">en renfort</span>
+      </button>
     </div>
   );
 }

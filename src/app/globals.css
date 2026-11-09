@@ -479,6 +479,39 @@ a {
   background: #4b1f5e;
   color: #fff;
 }
+.input {
+  font: inherit;
+  color: var(--ink);
+  background: var(--bg);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 6px 10px;
+  min-height: 40px;
+  min-width: 0;
+}
+.input:focus {
+  outline: 2px solid var(--gold);
+  outline-offset: 1px;
+}
+.input-qty {
+  width: 76px;
+}
+.alliance-form,
+.reinforce {
+  display: flex;
+  gap: 8px;
+  margin: 6px 0;
+}
+.alliance-form .input {
+  flex: 1;
+}
+.reinforce select {
+  flex: 1;
+  max-width: 220px;
+}
+.alliance-leave {
+  margin-top: 6px;
+}
 .row-actions {
   display: flex;
   flex-direction: column;

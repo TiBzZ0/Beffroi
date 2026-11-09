@@ -274,6 +274,8 @@ export const CHANCE_SIMULATIONS = 40;
 // Espions : sans rapport, on ne voit qu'une estimation floue de l'armée adverse.
 /** Prix d'un espion : une minute de sa propre production, au moins 200 pierres. */
 export const SPY_MIN_COST = 200;
+/** Membres au plus par alliance. */
+export const MAX_ALLIANCE_SIZE = 4;
 export const SPY_COST_SECONDS = 60;
 /** Durée pendant laquelle un rapport montre l'armée exacte (et à jour) de la cible. */
 export const SPY_INTEL_MS = 60 * 60 * 1000;

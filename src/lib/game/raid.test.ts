@@ -14,6 +14,9 @@ import {
   spyDetectChance,
   newPlayerState,
   rebuildRuin,
+  recallReinforcements,
+  sendReinforcements,
+  splitTroopLosses,
   resolveRaid,
   ruinCost,
   type PlayerState,
@@ -171,6 +174,35 @@ describe("batailles", () => {
     const a = { milicien: 12, arbaletrier: 3 };
     const d = { tour: 2, piquier: 4, garde: 3 };
     expect(estimateChance(a, d)).toBe(estimateChance(a, d));
+  });
+});
+
+describe("alliances et renforts", () => {
+  it("on ne pille pas un allié", () => {
+    const r = resolveRaid(player(), player({ troops: {} }), ctx({ allied: true }));
+    expect(r.ok).toBe(false);
+  });
+
+  it("envoyer puis rappeler des renforts", () => {
+    const sent = sendReinforcements(player({ troops: { piquier: 10 } }), player({ troops: {} }), "a", "piquier", 4);
+    if (!sent.ok) throw new Error(sent.error);
+    expect(sent.value.sender.troops).toEqual({ piquier: 6 });
+    expect(sent.value.host.stationed).toEqual({ a: { piquier: 4 } });
+    expect(defenseArmy(sent.value.host)).toMatchObject({ piquier: 4 });
+    expect(sendReinforcements(player({ troops: { piquier: 1 } }), player(), "a", "piquier", 2).ok).toBe(false);
+    const back = recallReinforcements(sent.value.sender, sent.value.host, "a");
+    if (!back.ok) throw new Error(back.error);
+    expect(back.value.owner.troops).toEqual({ piquier: 10 });
+    expect(back.value.host.stationed).toEqual({});
+  });
+
+  it("les renforts partent en raid avec l'allié et partagent les pertes au prorata", () => {
+    const host = player({ troops: { milicien: 6 }, stationed: { ally: { milicien: 4 } } });
+    const split = splitTroopLosses(host, { milicien: 5 });
+    expect(split.byOwner).toEqual({ "": { milicien: 3 }, ally: { milicien: 2 } });
+    expect(split.troops).toEqual({ milicien: 3 });
+    expect(split.stationed).toEqual({ ally: { milicien: 2 } });
+    expect(splitTroopLosses(host, { milicien: 10 }).stationed).toEqual({});
   });
 });
 

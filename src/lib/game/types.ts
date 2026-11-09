@@ -32,6 +32,10 @@ export interface RivalView {
   rate: number;
   /** Pierre qu'un raid rapporterait maintenant (estimation). */
   loot: number;
+  /** Membre de mon alliance : on ne peut pas le piller, on peut lui envoyer des renforts. */
+  allied: boolean;
+  /** Nom de son alliance, s'il en a une. */
+  allianceName: string | null;
   /** Rapport d'espion valable jusqu'à cet instant (0 = aucun : armée et chance sont alors floues). */
   intelUntil: number;
   /** Armée qui défendrait le domaine (troupes, fortifications, gardes), et ta chance estimée de l'emporter. */
@@ -74,6 +78,11 @@ export interface GameSnapshot {
   worksite: WorksiteView;
   season: SeasonView;
   rivals: RivalView[];
+  alliance: AllianceView | null;
+  invites: InviteView[];
+  /** Mes troupes postées chez des alliés, et les renforts d'alliés postés chez moi. */
+  abroad: GarrisonAbroad[];
+  reinforcements: GarrisonAbroad[];
   /** Fournie lors des synchronisations et des raids ; sinon le client garde la précédente. */
   chronicle?: ChronicleEntry[];
 }
@@ -98,7 +107,33 @@ export type GameAction =
   | { type: "raid"; target: string }
   | { type: "rebuild"; generator: string }
   | { type: "army"; kind: "unit" | "defense"; id: string; qty: number }
-  | { type: "spy"; target: string };
+  | { type: "spy"; target: string }
+  | { type: "alliance_create"; name: string }
+  | { type: "alliance_invite"; target: string }
+  | { type: "alliance_accept"; alliance: number }
+  | { type: "alliance_decline"; alliance: number }
+  | { type: "alliance_leave" }
+  | { type: "reinforce"; target: string; unit: string; qty: number }
+  | { type: "recall"; host: string };
+
+export interface AllianceView {
+  id: number;
+  name: string;
+  members: { id: string; name: string }[];
+}
+
+export interface InviteView {
+  allianceId: number;
+  allianceName: string;
+  inviterName: string;
+}
+
+/** Troupes postées chez un allié (les miennes chez lui, ou les siennes chez moi). */
+export interface GarrisonAbroad {
+  id: string;
+  name: string;
+  troops: Record<string, number>;
+}
 
 export type ActionResponse =
   | { ok: true; snapshot: GameSnapshot; message?: string }

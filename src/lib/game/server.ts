@@ -10,6 +10,7 @@ import {
   LORD_MIN_BUDGET,
   REVENGE_MS,
   SPY_INTEL_MS,
+  MAX_ALLIANCE_SIZE,
   GUARDS_PER_DOMAIN,
   COMBATANTS,
   SEASON_DAYS,
@@ -29,6 +30,8 @@ import {
   lootOf,
   fuzzyArmy,
   spyCost,
+  recallReinforcements,
+  sendReinforcements,
   spyDetectChance,
 
   productionPerSecond,
@@ -56,6 +59,9 @@ import {
   type RivalView,
   type SeasonView,
   type WorksiteView,
+  type AllianceView,
+  type GarrisonAbroad,
+  type InviteView,
 } from "./types";
 import { armyFromBudget, estimateChance, type Army } from "./battle";
 import { recordContribution, topContributors } from "@/lib/redis";
@@ -92,6 +98,8 @@ interface PlayerRow {
   defenses: Record<string, number> | null;
   click_strikes?: number | null;
   click_paused_until?: string | null;
+  alliance_id?: number | null;
+  stationed?: Record<string, Record<string, number>> | null;
   next_raid_at: string | null;
   next_contrib_at: string | null;
   version: number;
@@ -118,6 +126,7 @@ interface Entity {
   lastSeen: number;
   nextRaidAt: number | null;
   nextContribAt: number | null;
+  allianceId: number | null;
 }
 
 const ms = (t: string | null | undefined) => (t ? Date.parse(t) : 0);
@@ -152,6 +161,7 @@ function toEntity(row: PlayerRow): Entity {
     lastSeen: ms(row.last_seen),
     nextRaidAt: row.next_raid_at ? ms(row.next_raid_at) : null,
     nextContribAt: row.next_contrib_at ? ms(row.next_contrib_at) : null,
+    allianceId: row.alliance_id ?? null,
     state: {
       stone: Number(row.stone),
       generators: counts(row.generators),
@@ -173,6 +183,11 @@ function toEntity(row: PlayerRow): Entity {
       defenses: armyCounts(row.defenses, DEFENSE_IDS),
       clickStrikes: Number(row.click_strikes ?? 0),
       clickPausedUntil: ms(row.click_paused_until),
+      stationed: Object.fromEntries(
+        Object.entries(row.stationed ?? {})
+          .map(([owner, group]) => [owner, armyCounts(group, UNIT_IDS)] as const)
+          .filter(([, g]) => Object.keys(g).length > 0),
+      ),
     },
   };
 }
@@ -199,6 +214,7 @@ function toJson(e: Entity, state: PlayerState, extra: Record<string, unknown> = 
     total_plundered: state.totalPlundered,
     troops: state.troops,
     defenses: state.defenses,
+    stationed: state.stationed,
     click_strikes: state.clickStrikes,
     click_paused_until: iso(state.clickPausedUntil),
     ...extra,
@@ -419,7 +435,163 @@ async function loadIntel(admin: SupabaseClient, seasonId: number, spyId: string,
   return out;
 }
 
-function rivalsFor(me: Entity, myState: PlayerState, entities: Map<string, Entity>, world: WorldState, flat: Map<string, number>, now: number, intel: Map<string, number>): RivalView[] {
+function isAllied(a: Entity, b: Entity): boolean {
+  return a.allianceId !== null && a.allianceId === b.allianceId && a.id !== b.id;
+}
+
+/** Mon alliance, mes invitations, mes troupes chez les alliés et leurs renforts chez moi. */
+async function loadAllianceNames(admin: SupabaseClient, seasonId: number): Promise<Map<number, string>> {
+  const { data } = await admin.from("alliances").select("id, name").eq("season_id", seasonId);
+  return new Map((data ?? []).map((r) => [Number(r.id), r.name as string]));
+}
+
+async function allianceInfo(admin: SupabaseClient, seasonId: number, me: Entity, myState: PlayerState, entities: Map<string, Entity>, names: Map<number, string>) {
+  const name = (id: string) => entities.get(id)?.name ?? "Inconnu";
+  let alliance: AllianceView | null = null;
+  if (me.allianceId !== null && names.has(me.allianceId)) {
+    const members = [...entities.values()].filter((e) => e.allianceId === me.allianceId).map((e) => ({ id: e.id, name: e.name }));
+    alliance = { id: me.allianceId, name: names.get(me.allianceId)!, members };
+  }
+  const { data: inv } = await admin
+    .from("alliance_invites")
+    .select("alliance_id, inviter_id, alliances(name)")
+    .eq("season_id", seasonId)
+    .eq("invitee_id", me.id);
+  const invites: InviteView[] = ((inv ?? []) as unknown as { alliance_id: number; inviter_id: string; alliances: { name: string } | null }[]).map((r) => ({
+    allianceId: Number(r.alliance_id),
+    allianceName: r.alliances?.name ?? "?",
+    inviterName: name(r.inviter_id),
+  }));
+  const abroad: GarrisonAbroad[] = [...entities.values()]
+    .filter((e) => e.id !== me.id && e.state.stationed[me.id])
+    .map((e) => ({ id: e.id, name: e.name, troops: e.state.stationed[me.id] as Record<string, number> }));
+  const reinforcements: GarrisonAbroad[] = Object.entries(myState.stationed).map(([owner, troops]) => ({ id: owner, name: name(owner), troops: troops as Record<string, number> }));
+  return { alliance, invites, abroad, reinforcements };
+}
+
+type AllianceAction = Extract<GameAction, { type: `alliance_${string}` | "reinforce" | "recall" }>;
+const ALLIANCE_ACTIONS = new Set(["alliance_create", "alliance_invite", "alliance_accept", "alliance_decline", "alliance_leave", "reinforce", "recall"]);
+
+/** Écrit plusieurs états ensemble (le premier est celui du joueur). */
+async function writeStates(admin: SupabaseClient, seasonId: number, list: { e: Entity; state: PlayerState }[], action: string, details: Record<string, unknown>): Promise<"ok" | "conflict"> {
+  const { data, error } = await admin.rpc("apply_states", {
+    p_season: seasonId,
+    p_states: list.map(({ e, state }) => toJson(e, state)),
+    p_action: action,
+    p_details: details,
+  });
+  if (error?.message.includes("beffroi_conflict") || (data as { conflict?: boolean } | null)?.conflict) return "conflict";
+  if (error) throw new Error(`Enregistrement impossible : ${error.message}`);
+  return "ok";
+}
+
+/** Rend toutes les troupes postées entre `me` et ses alliés (départ d'une alliance). */
+function unwindGarrisons(me: Entity, myState: PlayerState, entities: Map<string, Entity>, advanceOf: (e: Entity) => PlayerState) {
+  let mine = myState;
+  const others: { e: Entity; state: PlayerState }[] = [];
+  for (const e of entities.values()) {
+    if (e.id === me.id || e.isLord) continue;
+    let theirs = advanceOf(e);
+    let touched = false;
+    if (theirs.stationed[me.id]) {
+      const r = recallReinforcements(mine, theirs, me.id);
+      if (r.ok) ({ owner: mine, host: theirs } = r.value);
+      touched = true;
+    }
+    if (mine.stationed[e.id]) {
+      const r = recallReinforcements(theirs, mine, e.id);
+      if (r.ok) ({ owner: theirs, host: mine } = r.value);
+      touched = true;
+    }
+    if (touched) others.push({ e, state: theirs });
+  }
+  return { mine, others };
+}
+
+async function runAllianceAction(
+  admin: SupabaseClient,
+  seasonId: number,
+  me: Entity,
+  current: PlayerState,
+  entities: Map<string, Entity>,
+  action: AllianceAction,
+  advanceOf: (e: Entity) => PlayerState,
+): Promise<"conflict" | { error?: string; message?: string; state?: PlayerState }> {
+  const members = (id: number) => [...entities.values()].filter((e) => e.allianceId === id);
+  switch (action.type) {
+    case "alliance_create": {
+      const name = String(action.name ?? "").trim().replace(/\s+/g, " ");
+      if (me.allianceId !== null) return { error: "Tu fais déjà partie d'une alliance." };
+      if (name.length < 2 || name.length > 30) return { error: "Le nom doit faire entre 2 et 30 caractères." };
+      const { data, error } = await admin.from("alliances").insert({ season_id: seasonId, name }).select("id").single();
+      if (error || !data) throw new Error(`Alliance impossible : ${error?.message}`);
+      await admin.from("player_states").update({ alliance_id: data.id }).eq("season_id", seasonId).eq("user_id", me.id);
+      await admin.from("alliance_invites").delete().eq("season_id", seasonId).eq("invitee_id", me.id);
+      return { message: `🤝 L'alliance « ${name} » est fondée. Invite tes amis depuis la liste des joueurs.` };
+    }
+    case "alliance_invite": {
+      const target = entities.get(String(action.target));
+      if (me.allianceId === null) return { error: "Fonde d'abord une alliance." };
+      if (!target || target.isLord || target.id === me.id) return { error: "Joueur inconnu." };
+      if (target.allianceId !== null) return { error: `${target.name} fait déjà partie d'une alliance.` };
+      if (members(me.allianceId).length >= MAX_ALLIANCE_SIZE) return { error: `Une alliance compte ${MAX_ALLIANCE_SIZE} membres au plus.` };
+      await admin
+        .from("alliance_invites")
+        .upsert({ season_id: seasonId, alliance_id: me.allianceId, invitee_id: target.id, inviter_id: me.id }, { onConflict: "alliance_id,invitee_id", ignoreDuplicates: true });
+      return { message: `✉️ Invitation envoyée à ${target.name}.` };
+    }
+    case "alliance_accept": {
+      const id = Number(action.alliance);
+      if (me.allianceId !== null) return { error: "Quitte d'abord ton alliance actuelle." };
+      const { data: inv } = await admin.from("alliance_invites").select("id").eq("alliance_id", id).eq("invitee_id", me.id).maybeSingle();
+      if (!inv) return { error: "Cette invitation n'existe plus." };
+      if (members(id).length >= MAX_ALLIANCE_SIZE) return { error: "Cette alliance est déjà au complet." };
+      await admin.from("player_states").update({ alliance_id: id }).eq("season_id", seasonId).eq("user_id", me.id);
+      await admin.from("alliance_invites").delete().eq("season_id", seasonId).eq("invitee_id", me.id);
+      return { message: "🤝 Bienvenue dans l'alliance !" };
+    }
+    case "alliance_decline": {
+      await admin.from("alliance_invites").delete().eq("alliance_id", Number(action.alliance)).eq("invitee_id", me.id);
+      return {};
+    }
+    case "alliance_leave": {
+      if (me.allianceId === null) return { error: "Tu n'as pas d'alliance." };
+      const { mine, others } = unwindGarrisons(me, current, entities, advanceOf);
+      if (others.length > 0 && (await writeStates(admin, seasonId, [{ e: me, state: mine }, ...others], "alliance_leave", {})) === "conflict") return "conflict";
+      const left = me.allianceId;
+      await admin.from("player_states").update({ alliance_id: null }).eq("season_id", seasonId).eq("user_id", me.id);
+      if (members(left).length <= 1) await admin.from("alliances").delete().eq("id", left);
+      return { message: "Tu as quitté l'alliance. Les troupes postées sont rentrées chez elles.", state: mine };
+    }
+    case "reinforce": {
+      const host = entities.get(String(action.target));
+      if (!host || !isAllied(me, host)) return { error: "On n'envoie des renforts qu'à un allié." };
+      const r = sendReinforcements(current, advanceOf(host), me.id, String(action.unit), Number(action.qty));
+      if (!r.ok) return { error: r.error };
+      if ((await writeStates(admin, seasonId, [{ e: me, state: r.value.sender }, { e: host, state: r.value.host }], "reinforce", { target: host.id, unit: action.unit, qty: action.qty })) === "conflict") return "conflict";
+      return { message: `🛡️ Renforts envoyés chez ${host.name} : ils défendront et attaqueront avec lui.`, state: r.value.sender };
+    }
+    case "recall": {
+      const host = entities.get(String(action.host));
+      if (!host) return { error: "Domaine inconnu." };
+      const r = recallReinforcements(current, advanceOf(host), me.id);
+      if (!r.ok) return { error: r.error };
+      if ((await writeStates(admin, seasonId, [{ e: me, state: r.value.owner }, { e: host, state: r.value.host }], "recall", { host: host.id })) === "conflict") return "conflict";
+      return { message: `Tes troupes rentrent de chez ${host.name}.`, state: r.value.owner };
+    }
+  }
+}
+
+function rivalsFor(
+  me: Entity,
+  myState: PlayerState,
+  entities: Map<string, Entity>,
+  world: WorldState,
+  flat: Map<string, number>,
+  now: number,
+  intel: Map<string, number>,
+  allianceNames: Map<number, string>,
+): RivalView[] {
   const armies = lordArmies(entities);
   return [...entities.values()]
     .filter((e) => e.id !== me.id)
@@ -427,10 +599,11 @@ function rivalsFor(me: Entity, myState: PlayerState, entities: Map<string, Entit
       const s = advanceEntity(e, now, world, flat);
       const rate = currentRate(e, s, now, world, flat);
       const revenge = hasRevenge(myState, e.id, now);
-      const ctx = { now, attackerId: me.id, victimId: e.id, victimRate: rate, defenderArmy: e.isLord ? armies.get(e.id)?.defense : undefined };
+      const allied = isAllied(me, e);
+      const ctx = { now, attackerId: me.id, victimId: e.id, victimRate: rate, allied, defenderArmy: e.isLord ? armies.get(e.id)?.defense : undefined };
       const fight = raidArmies(myState, s, ctx);
       const intelUntil = intel.get(e.id) ?? 0;
-      const seen = intelUntil > now ? fight.defense : fuzzyArmy(fight.defense);
+      const seen = intelUntil > now || allied ? fight.defense : fuzzyArmy(fight.defense);
       const loot = lootOf(s.stone, rate, revenge);
       return {
         id: e.id,
@@ -445,6 +618,8 @@ function rivalsFor(me: Entity, myState: PlayerState, entities: Map<string, Entit
         rate,
         loot,
         intelUntil,
+        allied,
+        allianceName: e.allianceId !== null ? (allianceNames.get(e.allianceId) ?? null) : null,
         army: seen as Record<string, number>,
         chance: estimateChance(fight.attack, seen, { attackBonus: fight.attackBonus }),
         shieldUntil: s.shieldUntil,
@@ -542,7 +717,14 @@ export async function runAction(admin: SupabaseClient, userId: string, action: G
     let error: string | null = null;
     let message: string | undefined;
 
-    if (action.type === "spy") {
+    if (ALLIANCE_ACTIONS.has(action.type)) {
+      const r = await runAllianceAction(admin, season.id, me, current, entities, action as AllianceAction, (e) => advanceEntity(e, now, world, flat));
+      if (r === "conflict") continue;
+      if (r.error) error = r.error;
+      message = r.message;
+      if (r.state) finalState = r.state;
+      entities = await loadEntities(admin, season.id, userId);
+    } else if (action.type === "spy") {
       const target = entities.get(String(action.target));
       const cost = spyCost(current, world, now);
       if (!target || target.id === me.id) error = "Cible inconnue.";
@@ -583,6 +765,7 @@ export async function runAction(admin: SupabaseClient, userId: string, action: G
           victimId: victim.id,
           victimRate: currentRate(victim, victimState, now, world, flat),
           defenderArmy: victim.isLord ? lordArmies(entities).get(victim.id)?.defense : undefined,
+          allied: isAllied(me, victim),
         };
         const armiesNow = raidArmies(current, victimState, ctx);
         const chance = estimateChance(armiesNow.attack, armiesNow.defense, { attackBonus: armiesNow.attackBonus });
@@ -637,6 +820,7 @@ export async function runAction(admin: SupabaseClient, userId: string, action: G
       if (contribution > 0) await recordContribution(season.id, userId, finalState.totalContributed);
     }
 
+    const [intel, allianceNames] = await Promise.all([loadIntel(admin, season.id, userId, now), loadAllianceNames(admin, season.id)]);
     const snapshot: GameSnapshot = {
       serverNow: now,
       userId,
@@ -644,7 +828,8 @@ export async function runAction(admin: SupabaseClient, userId: string, action: G
       state: finalState,
       worksite,
       season,
-      rivals: rivalsFor(me, finalState, entities, worldFrom(worksite), flat, now, await loadIntel(admin, season.id, userId, now)),
+      rivals: rivalsFor(entities.get(userId) ?? me, finalState, entities, worldFrom(worksite), flat, now, intel, allianceNames),
+      ...(await allianceInfo(admin, season.id, entities.get(userId) ?? me, finalState, entities, allianceNames)),
       chronicle: wantsChronicle ? await loadChronicle(admin, season.id, entities) : undefined,
     };
     return error ? { ok: false, error, snapshot } : { ok: true, snapshot, message };

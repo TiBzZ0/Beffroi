@@ -15,6 +15,7 @@ import {
   OFFLINE_CAP_MS,
   PROTECTED_PER_TYPE,
   DEFENSE_IDS,
+  UNIT_IDS,
   DEFENSE_REPAIR_RATE,
   DEFENSES,
   GUARDS_PER_DOMAIN,
@@ -72,6 +73,8 @@ export interface PlayerState {
   /** Anti-triche : envois trop rapides d'affilée, et fin de la pause forcée du marteau. */
   clickStrikes: number;
   clickPausedUntil: number;
+  /** Troupes d'alliés postées ici : elles défendent et attaquent avec ce joueur. */
+  stationed: Record<string, Partial<Record<UnitId, number>>>;
 }
 
 /** Ce que le joueur doit savoir du monde pour calculer sa production. */
@@ -106,6 +109,7 @@ export function newPlayerState(now: number): PlayerState {
     defenses: {},
     clickStrikes: 0,
     clickPausedUntil: 0,
+    stationed: {},
   };
 }
 
@@ -344,14 +348,85 @@ export function defenseCount(state: PlayerState, id: DefenseId): number {
   return state.defenses[id] ?? 0;
 }
 
-/** Armée qui part en raid : toutes les troupes. */
-export function attackArmy(state: PlayerState): Army {
-  return cleanArmy({ ...state.troops });
+/** Troupes présentes : les siennes plus les renforts d'alliés. */
+export function troopsHere(state: PlayerState): Army {
+  const out: Army = { ...state.troops };
+  for (const group of Object.values(state.stationed ?? {})) {
+    for (const [id, n] of Object.entries(group) as [UnitId, number][]) out[id] = (out[id] ?? 0) + n;
+  }
+  return cleanArmy(out);
 }
 
-/** Armée qui défend le domaine : troupes, fortifications et gardes du château. */
+/** Armée qui part en raid : toutes les troupes présentes, renforts compris. */
+export function attackArmy(state: PlayerState): Army {
+  return troopsHere(state);
+}
+
+/** Armée qui défend le domaine : troupes (renforts compris), fortifications et gardes du château. */
 export function defenseArmy(state: PlayerState): Army {
-  return cleanArmy({ ...state.troops, ...state.defenses, garde: GUARDS_PER_DOMAIN });
+  return cleanArmy({ ...troopsHere(state), ...state.defenses, garde: GUARDS_PER_DOMAIN });
+}
+
+/**
+ * Répartit des pertes de troupes entre le joueur et ses renforts, au prorata de ce que chacun
+ * a engagé (le reste des arrondis tombe sur les plus gros contingents).
+ */
+export function splitTroopLosses(state: PlayerState, lost: Army): { troops: PlayerState["troops"]; stationed: PlayerState["stationed"]; byOwner: Record<string, Army> } {
+  const troops = { ...state.troops };
+  const stationed: PlayerState["stationed"] = Object.fromEntries(Object.entries(state.stationed ?? {}).map(([o, g]) => [o, { ...g }]));
+  const byOwner: Record<string, Army> = {};
+  for (const id of UNIT_IDS) {
+    const loss = lost[id] ?? 0;
+    if (loss <= 0) continue;
+    const holders: { key: string; n: number }[] = [{ key: "", n: troops[id] ?? 0 }, ...Object.entries(stationed).map(([o, g]) => ({ key: o, n: g[id] ?? 0 }))].filter((h) => h.n > 0);
+    const total = holders.reduce((s, h) => s + h.n, 0);
+    const take = Math.min(loss, total);
+    const shares = holders.map((h) => ({ ...h, l: Math.floor((take * h.n) / total) }));
+    let rest = take - shares.reduce((s, h) => s + h.l, 0);
+    for (const h of [...shares].sort((a, b) => b.n - b.l - (a.n - a.l))) {
+      if (rest <= 0) break;
+      if (h.l < h.n) {
+        h.l++;
+        rest--;
+      }
+    }
+    for (const h of shares) {
+      if (h.l <= 0) continue;
+      const left = h.n - h.l;
+      const target = h.key === "" ? troops : stationed[h.key];
+      if (left > 0) target[id] = left;
+      else delete target[id];
+      (byOwner[h.key] ??= {})[id] = h.l;
+    }
+  }
+  for (const [o, g] of Object.entries(stationed)) if (Object.keys(g).length === 0) delete stationed[o];
+  return { troops, stationed, byOwner };
+}
+
+/** Envoie des troupes chez un allié. */
+export function sendReinforcements(sender: PlayerState, host: PlayerState, senderId: string, unit: string, qty: number): Result<{ sender: PlayerState; host: PlayerState }> {
+  if (!(UNIT_IDS as string[]).includes(unit)) return { ok: false, error: "Troupe inconnue." };
+  const id = unit as UnitId;
+  if (!Number.isInteger(qty) || qty < 1) return { ok: false, error: "Quantité invalide." };
+  const have = sender.troops[id] ?? 0;
+  if (qty > have) return { ok: false, error: "Tu n'as pas assez de ces troupes chez toi." };
+  const troops = { ...sender.troops };
+  if (have - qty > 0) troops[id] = have - qty;
+  else delete troops[id];
+  const group = { ...(host.stationed?.[senderId] ?? {}) };
+  group[id] = (group[id] ?? 0) + qty;
+  return { ok: true, value: { sender: { ...sender, troops }, host: { ...host, stationed: { ...host.stationed, [senderId]: group } } } };
+}
+
+/** Rappelle toutes ses troupes postées chez un allié. */
+export function recallReinforcements(owner: PlayerState, host: PlayerState, ownerId: string): Result<{ owner: PlayerState; host: PlayerState }> {
+  const group = host.stationed?.[ownerId];
+  if (!group || Object.keys(group).length === 0) return { ok: false, error: "Tu n'as pas de troupes là-bas." };
+  const troops = { ...owner.troops };
+  for (const [id, n] of Object.entries(group) as [UnitId, number][]) troops[id] = (troops[id] ?? 0) + n;
+  const stationed = { ...host.stationed };
+  delete stationed[ownerId];
+  return { ok: true, value: { owner: { ...owner, troops }, host: { ...host, stationed } } };
 }
 
 /** Valeur en pierre des troupes et fortifications d'un joueur. */
@@ -397,6 +472,8 @@ export interface RaidContext {
   attackerIsLord?: boolean;
   /** Riposte d'un seigneur : il peut frapper deux fois de suite la même cible. */
   allowRepeat?: boolean;
+  /** Attaquant et cible sont dans la même alliance. */
+  allied?: boolean;
   attackerArmy?: Army;
   defenderArmy?: Army;
   /** Tirages aléatoires entre 0 et 1 (fournis pour des tests reproductibles). */
@@ -427,6 +504,7 @@ export function raidArmies(attacker: PlayerState, victim: PlayerState, ctx: Pick
 export function raidBlocker(attacker: PlayerState, victim: PlayerState, ctx: Omit<RaidContext, "rng">): string | null {
   const revenge = hasRevenge(attacker, ctx.victimId, ctx.now);
   if (ctx.attackerId === ctx.victimId) return "On ne se pille pas soi-même.";
+  if (ctx.allied) return "On ne pille pas un allié.";
   if (victim.shieldUntil > ctx.now) return "Cette cible est sous bouclier.";
   if (!revenge && !ctx.allowRepeat && attacker.lastRaidTarget === ctx.victimId) return "Pas deux raids de suite contre la même cible.";
   if (!revenge && !ctx.attackerIsLord && ctx.now - attacker.lastRaidAt < RAID_COOLDOWN_MS) return "Tes troupes se reposent encore.";
@@ -474,11 +552,12 @@ export function resolveRaid(
     }
     if (lost > 0) defenderLost[id] = lost;
   }
-  const attackerLost = ctx.attackerArmy ? {} : fight.attackerLost;
+  const attackerSplit = ctx.attackerArmy ? null : splitTroopLosses(attacker, fight.attackerLost);
+  const victimSplit = ctx.defenderArmy ? null : splitTroopLosses(victim, defenderLost);
 
   const attackerAfter: PlayerState = {
     ...attacker,
-    troops: withoutLosses(attacker.troops, attackerLost),
+    ...(attackerSplit ? { troops: attackerSplit.troops, stationed: attackerSplit.stationed } : {}),
     lastRaidAt: now,
     lastRaidTarget: ctx.victimId,
     shieldUntil: 0, // attaquer fait tomber son propre bouclier
@@ -486,7 +565,7 @@ export function resolveRaid(
   };
   const victimArmyAfter: PlayerState = ctx.defenderArmy
     ? victim
-    : { ...victim, troops: withoutLosses(victim.troops, defenderLost), defenses: withoutLosses(victim.defenses, defenderLost) };
+    : { ...victim, troops: victimSplit!.troops, stationed: victimSplit!.stationed, defenses: withoutLosses(victim.defenses, defenderLost) };
   const base: RaidReport = {
     success: fight.success,
     rounds: fight.rounds,
