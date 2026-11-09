@@ -29,7 +29,13 @@ export type GeneratorId =
   | "carriere"
   | "four"
   | "grue"
-  | "guilde";
+  | "guilde"
+  | "port"
+  | "marbre"
+  | "cite"
+  | "architectes"
+  | "atelier_royal"
+  | "merveille";
 
 export interface GeneratorDef {
   id: GeneratorId;
@@ -50,6 +56,12 @@ export const GENERATORS: readonly GeneratorDef[] = [
   { id: "four", name: "Four à chaux", plural: "Fours à chaux", icon: "🔥", description: "Cuit le calcaire pour le mortier.", baseCost: 130_000, baseRate: 260 },
   { id: "grue", name: "Grue à roue", plural: "Grues à roue", icon: "🎡", description: "Deux hommes marchent, les blocs s'envolent.", baseCost: 1_400_000, baseRate: 1_400 },
   { id: "guilde", name: "Guilde des bâtisseurs", plural: "Guildes des bâtisseurs", icon: "🏰", description: "Les maîtres d'œuvre de tout le royaume.", baseCost: 20_000_000, baseRate: 7_800 },
+  { id: "port", name: "Port fluvial", plural: "Ports fluviaux", icon: "⚓", description: "Des barges entières de pierre descendent le fleuve.", baseCost: 330_000_000, baseRate: 44_000 },
+  { id: "marbre", name: "Mine de marbre", plural: "Mines de marbre", icon: "💎", description: "La pierre la plus noble, pour les plus beaux ouvrages.", baseCost: 5_100_000_000, baseRate: 260_000 },
+  { id: "cite", name: "Cité des maçons", plural: "Cités des maçons", icon: "🏘️", description: "Une ville entière vouée à la pierre.", baseCost: 75_000_000_000, baseRate: 1_600_000 },
+  { id: "architectes", name: "Ordre des architectes", plural: "Ordres des architectes", icon: "📐", description: "Leurs plans font pousser les tours.", baseCost: 1_000_000_000_000, baseRate: 10_000_000 },
+  { id: "atelier_royal", name: "Atelier royal", plural: "Ateliers royaux", icon: "👑", description: "Le roi lui-même finance tes chantiers.", baseCost: 14_000_000_000_000, baseRate: 65_000_000 },
+  { id: "merveille", name: "Merveille du royaume", plural: "Merveilles du royaume", icon: "✨", description: "On en parlera dans mille ans.", baseCost: 170_000_000_000_000, baseRate: 430_000_000 },
 ];
 
 export const GENERATOR_IDS = GENERATORS.map((g) => g.id);
@@ -78,17 +90,30 @@ const GENERATOR_UPGRADE_NAMES: Record<GeneratorId, [string, string]> = {
   four: ["Soufflets de forge", "Chaux vive de qualité"],
   grue: ["Poulies mouflées", "Roues d'écureuil géantes"],
   guilde: ["Chartes royales", "Secrets de compagnons"],
+  port: ["Écluses de bois", "Flottille de barges"],
+  marbre: ["Scies à eau", "Veines secrètes"],
+  cite: ["Halles couvertes", "Remparts de la cité"],
+  architectes: ["Compas d'or", "Traités d'architecture"],
+  atelier_royal: ["Sceau du roi", "Trésor de la couronne"],
+  merveille: ["Pèlerins émerveillés", "Légende éternelle"],
 };
+
+/** Paliers avancés (50, 100, 150, 200 bâtiments), communs à tous les types. */
+const ADVANCED_TIER_NAMES = ["Savoir-faire", "Maîtrise", "Excellence", "Légende"];
 
 function generatorUpgrades(): UpgradeDef[] {
   const tiers = [
     { count: 10, costFactor: 50 },
     { count: 25, costFactor: 1_000 },
+    { count: 50, costFactor: 50_000 },
+    { count: 100, costFactor: 5_000_000 },
+    { count: 150, costFactor: 500_000_000 },
+    { count: 200, costFactor: 50_000_000_000 },
   ];
   return GENERATORS.flatMap((g) =>
     tiers.map((tier, i) => ({
       id: `${g.id}_${i + 1}`,
-      name: GENERATOR_UPGRADE_NAMES[g.id][i],
+      name: i < 2 ? GENERATOR_UPGRADE_NAMES[g.id][i] : `${ADVANCED_TIER_NAMES[i - 2]} : ${g.plural.toLowerCase()}`,
       description: `Production des ${g.plural.toLowerCase()} ×2.`,
       cost: g.baseCost * tier.costFactor,
       effect: { kind: "generator" as const, generator: g.id, multiplier: 2 },
@@ -103,6 +128,11 @@ export const UPGRADES: readonly UpgradeDef[] = [
   { id: "marteau_maitre", name: "Marteau de maître", description: "Chaque coup rapporte en plus 5 % de ta production par seconde.", cost: 60_000, effect: { kind: "clickFromProduction", fraction: 0.05 }, requires: { generator: "charrette", count: 5 } },
   { id: "benediction", name: "Bénédiction de l'évêque", description: "Toute la production +10 %.", cost: 2_000_000, effect: { kind: "production", multiplier: 1.1 }, requires: { generator: "four", count: 5 } },
   { id: "corvee_royale", name: "Corvée royale", description: "Toute la production +25 %.", cost: 80_000_000, effect: { kind: "production", multiplier: 1.25 }, requires: { generator: "grue", count: 10 } },
+  { id: "foire", name: "Foire de la Saint-Jean", description: "Toute la production +25 %.", cost: 2_000_000_000, effect: { kind: "production", multiplier: 1.25 }, requires: { generator: "guilde", count: 10 } },
+  { id: "marteau_runique", name: "Marteau runique", description: "Chaque coup rapporte en plus 10 % de ta production par seconde.", cost: 5_000_000_000, effect: { kind: "clickFromProduction", fraction: 0.1 }, requires: { generator: "port", count: 5 } },
+  { id: "routes_pavees", name: "Routes pavées", description: "Toute la production +50 %.", cost: 100_000_000_000, effect: { kind: "production", multiplier: 1.5 }, requires: { generator: "marbre", count: 10 } },
+  { id: "privilege_royal", name: "Privilège royal", description: "Toute la production +50 %.", cost: 5_000_000_000_000, effect: { kind: "production", multiplier: 1.5 }, requires: { generator: "cite", count: 10 } },
+  { id: "age_or", name: "Âge d'or", description: "Toute la production ×2.", cost: 300_000_000_000_000, effect: { kind: "production", multiplier: 2 }, requires: { generator: "atelier_royal", count: 10 } },
   ...generatorUpgrades(),
 ];
 
