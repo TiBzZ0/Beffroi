@@ -628,7 +628,7 @@ function fortressView(me: Entity, state: PlayerState, f: FortressRow, entities: 
     mine,
     army: seen as Record<string, number>,
     exact: mine,
-    chance: estimateChance(attackArmy(state), seen),
+    chance: vagueChance(estimateChance(attackArmy(state), defense), mine),
     blocker: fortressBlocker(me, state, f, now),
     garrison: mine ? Object.entries(garrison).map(([id, troops]) => ({ id, name: entities.get(id)?.name ?? "Inconnu", troops: troops as Record<string, number> })) : [],
     myGarrison: (garrison[me.id] ?? {}) as Record<string, number>,
@@ -641,6 +641,16 @@ function warView(me: Entity, wars: WarRow[], names: Map<number, string>): WarVie
   const meA = w.alliance_a === me.allianceId;
   const enemyId = meA ? w.alliance_b : w.alliance_a;
   return { id: w.id, enemyId, enemyName: names.get(enemyId) ?? "?", myScore: meA ? w.score_a : w.score_b, enemyScore: meA ? w.score_b : w.score_a, endsAt: ms(w.ends_at) };
+}
+
+/**
+ * Chance affichée. Elle est toujours calculée sur l'armée réelle (une estimation sur l'armée arrondie
+ * peut se tromper du tout au tout) ; sans espion, on ne montre qu'une fourchette de 10 %, jamais 0 ou 100 %
+ * si l'issue n'est pas certaine.
+ */
+function vagueChance(chance: number, exact: boolean): number {
+  if (exact || chance <= 0 || chance >= 1) return chance;
+  return Math.min(0.9, Math.max(0.1, Math.round(chance * 10) / 10));
 }
 
 function isAllied(a: Entity, b: Entity): boolean {
@@ -835,7 +845,7 @@ function rivalsFor(
         atWar,
         allianceName: e.allianceId !== null ? (allianceNames.get(e.allianceId) ?? null) : null,
         army: seen as Record<string, number>,
-        chance: estimateChance(fight.attack, seen, { attackBonus: fight.attackBonus }),
+        chance: vagueChance(estimateChance(fight.attack, fight.defense, { attackBonus: fight.attackBonus }), intelUntil > now || allied),
         shieldUntil: s.shieldUntil,
         burnedUntil: s.burnedUntil,
         totalPlundered: s.totalPlundered,
