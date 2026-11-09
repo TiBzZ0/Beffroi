@@ -95,6 +95,41 @@ export async function signUp(_prev: AuthState, formData: FormData): Promise<Auth
   return { info: `Presque fini ! Un e-mail de confirmation a été envoyé à ${email}. Clique sur le lien pour entrer au royaume.` };
 }
 
+export async function requestPasswordReset(_prev: AuthState, formData: FormData): Promise<AuthState> {
+  const identifier = String(formData.get("identifier") ?? "").trim();
+  const fields = { identifier };
+  if (!identifier) return { error: "Renseigne ton e-mail ou ton pseudo.", fields };
+  if (!(await rateLimit("auth", `reset:${await clientIp()}`))) return { error: "Trop de tentatives, réessaie dans une minute.", fields };
+
+  let email: string | null = identifier.includes("@") ? identifier.toLowerCase() : null;
+  if (!email) {
+    const userId = await findUserIdByUsername(identifier);
+    if (userId) email = (await createAdminClient().auth.admin.getUserById(userId)).data.user?.email ?? null;
+  }
+  if (email) {
+    const supabase = await createClient();
+    await supabase.auth.resetPasswordForEmail(email, {
+      redirectTo: `${await siteOrigin()}/auth/callback?next=/nouveau-mot-de-passe`,
+    });
+  }
+  // Même réponse dans tous les cas, pour ne pas révéler quels comptes existent.
+  return { info: "Si ce compte existe, un e-mail avec un lien pour choisir un nouveau mot de passe vient d'être envoyé." };
+}
+
+export async function updatePassword(_prev: AuthState, formData: FormData): Promise<AuthState> {
+  const password = String(formData.get("password") ?? "");
+  const confirm = String(formData.get("confirm") ?? "");
+  if (password.length < 8) return { error: "Mot de passe trop court (8 caractères minimum)." };
+  if (password !== confirm) return { error: "Les deux mots de passe ne correspondent pas." };
+
+  const supabase = await createClient();
+  const { data } = await supabase.auth.getUser();
+  if (!data.user) return { error: "Le lien a expiré. Redemande un e-mail de réinitialisation." };
+  const { error } = await supabase.auth.updateUser({ password });
+  if (error) return { error: translate(error.message) };
+  redirect("/");
+}
+
 export async function signOut(): Promise<void> {
   const supabase = await createClient();
   await supabase.auth.signOut();

@@ -4,7 +4,7 @@ Un idle médiéval pour 3 à 10 amis, jouable dans le navigateur (mobile compris
 
 Ce dépôt contient le **MVP (saison 0)** du document de conception :
 
-- connexion par e-mail, pseudo et mot de passe (connexion possible avec l'e-mail ou le pseudo) ;
+- connexion par e-mail, pseudo et mot de passe (connexion possible avec l'e-mail ou le pseudo), sans confirmation d'e-mail, avec « Mot de passe oublié » ;
 - une ressource (la pierre), 7 bâtiments et 19 améliorations (« savoirs ») ;
 - des gains hors ligne plafonnés à 8 h ;
 - des clics regroupés par lots et plafonnés à 15 par seconde côté serveur ;
@@ -36,7 +36,8 @@ src/
   app/
     (auth)/connexion, (auth)/inscription   pages de connexion et d'inscription
     (auth)/actions.ts                      Server Actions : connexion, inscription, déconnexion
-    auth/callback/route.ts                 lien de confirmation d'e-mail
+    (auth)/mot-de-passe-oublie, (auth)/nouveau-mot-de-passe   réinitialisation du mot de passe
+    auth/callback/route.ts                 liens envoyés par e-mail
     api/game/route.ts                      point d'entrée unique du jeu
     api/leaderboard/route.ts               classement
     page.tsx                               page de jeu
@@ -58,7 +59,7 @@ supabase/migrations/                       schéma SQL, RLS et fonctions
 4. Dans **Authentication → URL Configuration** (à faire après l'étape Vercel, quand tu connais l'adresse du site) :
    - **Site URL** : `https://<ton-projet>.vercel.app`
    - **Redirect URLs** : ajoute `https://<ton-projet>.vercel.app/auth/callback` et `http://localhost:3000/auth/callback`.
-5. La confirmation d'e-mail est activée par défaut (**Authentication → Sign In / Providers → Email → Confirm email**). L'envoi d'e-mails intégré à Supabase est limité à quelques messages par heure : suffisant pour inscrire une poignée d'amis, sinon branche un SMTP gratuit (Resend, Brevo…) dans **Authentication → Emails → SMTP Settings**, ou désactive la confirmation.
+5. Désactive la confirmation d'e-mail : **Authentication → Sign In / Providers → Email**, décoche **Confirm email** et enregistre. On entre ainsi dans le jeu dès l'inscription. L'e-mail ne sert plus qu'au lien « Mot de passe oublié », envoyé par le service intégré de Supabase (quelques messages par heure, largement assez pour un groupe d'amis).
 
 ### 2. Vercel (hébergement)
 

@@ -22,6 +22,9 @@ export function LoginForm({ linkError }: { linkError: boolean }) {
         {pending ? "Ouverture des portes…" : "Entrer au royaume"}
       </button>
       <p className="auth-switch">
+        <Link href="/mot-de-passe-oublie">Mot de passe oublié ?</Link>
+      </p>
+      <p className="auth-switch">
         Pas encore de compte ? <Link href="/inscription">Créer un compte</Link>
       </p>
     </form>

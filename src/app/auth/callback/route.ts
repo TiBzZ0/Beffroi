@@ -2,7 +2,7 @@ import { NextResponse, type NextRequest } from "next/server";
 import type { EmailOtpType } from "@supabase/supabase-js";
 import { createClient } from "@/lib/supabase/server";
 
-// Lien de confirmation d'e-mail : échange le code (ou le jeton) contre une session.
+// Liens envoyés par e-mail (confirmation, mot de passe oublié) : échange le code contre une session.
 export async function GET(request: NextRequest) {
   const { searchParams, origin } = request.nextUrl;
   const code = searchParams.get("code");
@@ -16,5 +16,8 @@ export async function GET(request: NextRequest) {
   } else if (tokenHash && type) {
     ok = !(await supabase.auth.verifyOtp({ token_hash: tokenHash, type })).error;
   }
-  return NextResponse.redirect(new URL(ok ? "/" : "/connexion?erreur=lien", origin));
+  // `next` ne peut être qu'un chemin interne (pas de redirection vers un autre site).
+  const next = searchParams.get("next") ?? "/";
+  const safeNext = next.startsWith("/") && !next.startsWith("//") ? next : "/";
+  return NextResponse.redirect(new URL(ok ? safeNext : "/connexion?erreur=lien", origin));
 }
