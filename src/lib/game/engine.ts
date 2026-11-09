@@ -23,6 +23,7 @@ import {
   REVENGE_MS,
   RUIN_REBUILD_FACTOR,
   SECURED_SECONDS,
+  MIN_EXPOSED_SHARE,
   SHIELD_MS,
   STAGES,
   UNITS,
@@ -347,6 +348,15 @@ export function buyArmy(state: PlayerState, kind: "unit" | "defense", id: string
 // Raids
 // ---------------------------------------------------------------------------
 
+/**
+ * Pierre qu'un raid réussi emporterait : 10 % (20 % en revanche) de la part exposée du stock.
+ * La dernière demi-heure de production est à l'abri, mais jamais plus de la moitié du stock.
+ */
+export function lootOf(stone: number, rate: number, revenge: boolean): number {
+  const secured = Math.min(rate * SECURED_SECONDS, stone * (1 - MIN_EXPOSED_SHARE));
+  return Math.floor(Math.max(0, stone - secured) * (revenge ? REVENGE_LOOT_RATE : RAID_LOOT_RATE));
+}
+
 export function hasRevenge(attacker: PlayerState, victimId: string, now: number): boolean {
   return attacker.revengeTarget === victimId && attacker.revengeUntil > now;
 }
@@ -460,8 +470,7 @@ export function resolveRaid(
   };
   if (!fight.success) return { ok: true, value: { attacker: attackerAfter, victim: victimArmyAfter, report: base } };
 
-  const secured = ctx.victimRate * SECURED_SECONDS;
-  const stolen = Math.floor(Math.max(0, victim.stone - secured) * (revenge ? REVENGE_LOOT_RATE : RAID_LOOT_RATE));
+  const stolen = lootOf(victim.stone, ctx.victimRate, revenge);
 
   // Destruction : 5 % des bâtiments (arrondi à l'inférieur), au plus un par type,
   // en commençant par les plus précieux, jamais en dessous des premiers protégés.

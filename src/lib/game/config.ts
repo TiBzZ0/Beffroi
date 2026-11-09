@@ -132,6 +132,8 @@ export const RAID_LOOT_RATE = 0.1;
 export const REVENGE_LOOT_RATE = 0.2;
 /** Stock sécurisé : N secondes de la production de la victime ne peuvent pas être volées. */
 export const SECURED_SECONDS = 30 * 60;
+/** Part du stock qui reste toujours exposée au pillage, même si la production est forte. */
+export const MIN_EXPOSED_SHARE = 0.5;
 /** Ateliers incendiés : production réduite de moitié pendant 2 h. */
 export const BURN_MS = 2 * 60 * 60 * 1000;
 export const BURN_PRODUCTION_FACTOR = 0.5;

@@ -11,9 +11,6 @@ import {
   GUARDS_PER_DOMAIN,
   COMBATANTS,
   SEASON_DAYS,
-  SECURED_SECONDS,
-  RAID_LOOT_RATE,
-  REVENGE_LOOT_RATE,
   STAGE_BASES,
   DEFENSE_IDS,
   UNIT_IDS,
@@ -27,6 +24,7 @@ import {
   buyUpgrade,
   contribute,
   hasRevenge,
+  lootOf,
 
   productionPerSecond,
   raidArmies,
@@ -334,7 +332,7 @@ async function tickLords(admin: SupabaseClient, season: SeasonView, entities: Ma
         .map((e) => {
           const s = advanceEntity(e, now, world, flat);
           const rate = currentRate(e, s, now, world, flat);
-          return { e, s, rate, loot: Math.max(0, s.stone - rate * SECURED_SECONDS) };
+          return { e, s, rate, loot: lootOf(s.stone, rate, false) };
         })
         .filter((c) => !raidBlocker(state, c.s, { now, attackerId: lord.id, victimId: c.e.id, victimRate: c.rate, attackerIsLord: true, attackerArmy: army.attack }))
         .sort((a, b) => b.loot - a.loot);
@@ -394,7 +392,7 @@ function rivalsFor(me: Entity, myState: PlayerState, entities: Map<string, Entit
       const revenge = hasRevenge(myState, e.id, now);
       const ctx = { now, attackerId: me.id, victimId: e.id, victimRate: rate, defenderArmy: e.isLord ? armies.get(e.id)?.defense : undefined };
       const fight = raidArmies(myState, s, ctx);
-      const loot = Math.floor(Math.max(0, s.stone - rate * SECURED_SECONDS) * (revenge ? REVENGE_LOOT_RATE : RAID_LOOT_RATE));
+      const loot = lootOf(s.stone, rate, revenge);
       return {
         id: e.id,
         name: e.name,

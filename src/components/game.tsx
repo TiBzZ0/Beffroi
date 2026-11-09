@@ -452,7 +452,7 @@ function Raids({ snap, live, now, run }: { snap: GameSnapshot; live: PlayerState
         Un raid est une bataille de 4 rounds au plus : toutes tes troupes contre les troupes, fortifications et 3 gardes de la cible. Chaque unité a
         ses forces et ses faiblesses, compose ton armée selon ce que tu vois en face. Tu gagnes si plus personne ne riposte en face. Les pertes sont
         réelles des deux côtés (70 % des fortifications abattues se relèvent). Un raid réussi vole 10 % de la pierre non sécurisée (la dernière
-        demi-heure de production est à l&apos;abri), incendie les ateliers 2 h et ruine quelques bâtiments ; la victime reçoit 4 h de bouclier et un
+        demi-heure de production est à l&apos;abri, mais jamais plus de la moitié du stock), incendie les ateliers 2 h et ruine quelques bâtiments ; la victime reçoit 4 h de bouclier et un
         droit de revanche (+50 % de dégâts).
       </p>
       <Garrison live={live} run={run} />

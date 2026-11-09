@@ -46,9 +46,12 @@ describe("raids", () => {
     expect(r.value.attacker.totalPlundered).toBe(10_000);
   });
 
-  it("le stock sécurisé ne peut pas être volé", () => {
-    const r = resolveRaid(player(), player({ troops: {}, stone: 10 * SECURED_SECONDS - 1 }), ctx());
-    expect(r.ok && r.value.report.stolen).toBe(0);
+  it("la dernière demi-heure de production est à l'abri, mais jamais plus de la moitié du stock", () => {
+    // Production 10/s : 18 000 pierres à l'abri, mais au plus la moitié d'un stock de 20 000.
+    const r = resolveRaid(player(), player({ troops: {}, stone: 20_000 }), ctx());
+    expect(r.ok && r.value.report.stolen).toBe(1_000);
+    const big = resolveRaid(player(), player({ troops: {}, stone: 10 * SECURED_SECONDS + 50_000 }), ctx());
+    expect(big.ok && big.value.report.stolen).toBe(5_000);
   });
 
   it("incendie, bouclier et droit de revanche pour la victime", () => {
@@ -83,9 +86,9 @@ describe("raids", () => {
 
   it("la revanche est possible sans délai et double le butin", () => {
     const attacker = player({ lastRaidAt: NOW - 1000, lastRaidTarget: "v", revengeTarget: "v", revengeUntil: NOW + 1000 });
-    const r = resolveRaid(attacker, player({ troops: {}, stone: 10 * SECURED_SECONDS + 1000 }), ctx());
+    const r = resolveRaid(attacker, player({ troops: {}, stone: 10 * SECURED_SECONDS + 50_000 }), ctx());
     if (!r.ok) throw new Error(r.error);
-    expect(r.value.report).toMatchObject({ revenge: true, stolen: 200 });
+    expect(r.value.report).toMatchObject({ revenge: true, stolen: 10_000 });
     expect(r.value.attacker.revengeTarget).toBeNull();
   });
 
