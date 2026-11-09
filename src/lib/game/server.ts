@@ -1,25 +1,65 @@
 import "server-only";
 import type { SupabaseClient } from "@supabase/supabase-js";
-import { ACTIVE_WINDOW_DAYS, GENERATOR_IDS, SEASON_DAYS, STAGE_BASES, type GeneratorId } from "./config";
+import {
+  ACTIVE_WINDOW_DAYS,
+  GENERATOR_IDS,
+  LORD_BY_ID,
+  LORD_MIN_RATE,
+  LORDS,
+  SEASON_DAYS,
+  SECURED_SECONDS,
+  RAID_LOOT_RATE,
+  REVENGE_LOOT_RATE,
+  STAGE_BASES,
+  type GeneratorId,
+  type LordDef,
+} from "./config";
 import {
   advance,
   applyClicks,
   buyGenerator,
   buyUpgrade,
   contribute,
-  newPlayerState,
+  hasRevenge,
+
+  productionPerSecond,
+  raidBlocker,
+  raidCost,
+  rateAt,
+  rebuildRuin,
+  resolveRaid,
+  stagesDoneAt,
   type PlayerState,
   type Result,
+  type WorldState,
 } from "./engine";
-import { worksiteFromRow, worldFrom, type GameAction, type GameSnapshot, type LeaderboardRow, type SeasonView, type WorksiteView } from "./types";
+import {
+  worksiteFromRow,
+  worldFrom,
+  type ChronicleEntry,
+  type GameAction,
+  type GameSnapshot,
+  type LeaderboardRow,
+  type Leaderboards,
+  type RivalView,
+  type SeasonView,
+  type WorksiteView,
+} from "./types";
 import { recordContribution, topContributors } from "@/lib/redis";
 
 // Toute la logique qui fait foi : charger l'état, le recalculer, appliquer l'intention
 // du joueur, puis enregistrer (verrouillage optimiste, avec quelques nouvelles tentatives).
+// Les seigneurs voisins jouent « paresseusement » : quand un joueur se synchronise,
+// le serveur regarde si un seigneur a une action en retard et la joue.
 
 const MAX_ATTEMPTS = 4;
+/** Un seigneur ne s'en prend qu'aux joueurs vus récemment. */
+const LORD_TARGET_RECENT_MS = 48 * 60 * 60 * 1000;
+/** Raids interdits entre deux comptes vus sur la même connexion récemment. */
+const SAME_IP_WINDOW_MS = 24 * 60 * 60 * 1000;
 
 interface PlayerRow {
+  user_id: string;
   stone: number;
   generators: Record<string, number>;
   upgrades: string[];
@@ -28,7 +68,20 @@ interface PlayerRow {
   total_clicks: number;
   last_update: string;
   last_click_at: string;
+  last_seen: string;
+  ruins: Record<string, number> | null;
+  burned_until: string | null;
+  shield_until: string | null;
+  last_raid_at: string | null;
+  last_raid_target: string | null;
+  revenge_target: string | null;
+  revenge_until: string | null;
+  total_plundered: number | null;
+  last_ip: string | null;
+  next_raid_at: string | null;
+  next_contrib_at: string | null;
   version: number;
+  profiles: { username: string; display_name: string | null; is_bot: boolean } | null;
 }
 
 interface WorksiteRow {
@@ -40,28 +93,91 @@ interface WorksiteRow {
   stage_completed_at: string[] | null;
 }
 
-function toSeason(row: { id: number; number: number; starts_at: string; ends_at: string }): SeasonView {
-  return { id: row.id, number: row.number, startsAt: Date.parse(row.starts_at), endsAt: Date.parse(row.ends_at) };
+/** Une ligne chargée : l'état du moteur plus ce qui sert à l'enregistrer. */
+interface Entity {
+  id: string;
+  name: string;
+  isLord: boolean;
+  lord?: LordDef;
+  version: number;
+  state: PlayerState;
+  lastSeen: number;
+  lastIp: string | null;
+  nextRaidAt: number | null;
+  nextContribAt: number | null;
 }
 
-const toWorksite = worksiteFromRow;
+const ms = (t: string | null | undefined) => (t ? Date.parse(t) : 0);
+const iso = (t: number) => new Date(t).toISOString();
 
-function toState(row: PlayerRow): PlayerState {
-  const generators: PlayerState["generators"] = {};
+function counts(raw: Record<string, number> | null | undefined): Partial<Record<GeneratorId, number>> {
+  const out: Partial<Record<GeneratorId, number>> = {};
   for (const id of GENERATOR_IDS) {
-    const n = Number(row.generators?.[id] ?? 0);
-    if (n > 0) generators[id] = n;
+    const n = Number(raw?.[id] ?? 0);
+    if (n > 0) out[id] = n;
   }
+  return out;
+}
+
+function toEntity(row: PlayerRow): Entity {
+  const lord = LORD_BY_ID.get(row.user_id);
   return {
-    stone: Number(row.stone),
-    generators,
-    upgrades: Array.isArray(row.upgrades) ? row.upgrades : [],
-    totalProduced: Number(row.total_produced),
-    totalContributed: Number(row.total_contributed),
-    totalClicks: Number(row.total_clicks),
-    lastUpdate: Date.parse(row.last_update),
-    lastClickAt: Date.parse(row.last_click_at),
+    id: row.user_id,
+    name: lord?.name ?? row.profiles?.display_name ?? row.profiles?.username ?? "Inconnu",
+    isLord: !!lord || !!row.profiles?.is_bot,
+    lord,
+    version: row.version,
+    lastSeen: ms(row.last_seen),
+    lastIp: row.last_ip,
+    nextRaidAt: row.next_raid_at ? ms(row.next_raid_at) : null,
+    nextContribAt: row.next_contrib_at ? ms(row.next_contrib_at) : null,
+    state: {
+      stone: Number(row.stone),
+      generators: counts(row.generators),
+      upgrades: Array.isArray(row.upgrades) ? row.upgrades : [],
+      totalProduced: Number(row.total_produced),
+      totalContributed: Number(row.total_contributed),
+      totalClicks: Number(row.total_clicks),
+      lastUpdate: ms(row.last_update),
+      lastClickAt: ms(row.last_click_at),
+      ruins: counts(row.ruins),
+      burnedUntil: ms(row.burned_until),
+      shieldUntil: ms(row.shield_until),
+      lastRaidAt: ms(row.last_raid_at),
+      lastRaidTarget: row.last_raid_target,
+      revengeTarget: row.revenge_target,
+      revengeUntil: ms(row.revenge_until),
+      totalPlundered: Number(row.total_plundered ?? 0),
+    },
   };
+}
+
+function toJson(e: Entity, state: PlayerState, extra: Record<string, unknown> = {}) {
+  return {
+    user_id: e.id,
+    version: e.version,
+    stone: state.stone,
+    generators: state.generators,
+    upgrades: state.upgrades,
+    total_produced: state.totalProduced,
+    total_contributed: state.totalContributed,
+    total_clicks: state.totalClicks,
+    last_update: iso(state.lastUpdate),
+    last_click_at: iso(state.lastClickAt),
+    ruins: state.ruins,
+    burned_until: iso(state.burnedUntil),
+    shield_until: iso(state.shieldUntil),
+    last_raid_at: iso(state.lastRaidAt),
+    last_raid_target: state.lastRaidTarget,
+    revenge_target: state.revengeTarget,
+    revenge_until: iso(state.revengeUntil),
+    total_plundered: state.totalPlundered,
+    ...extra,
+  };
+}
+
+function toSeason(row: { id: number; number: number; starts_at: string; ends_at: string }): SeasonView {
+  return { id: row.id, number: row.number, startsAt: Date.parse(row.starts_at), endsAt: Date.parse(row.ends_at) };
 }
 
 export async function getActiveSeason(admin: SupabaseClient): Promise<SeasonView> {
@@ -73,139 +189,351 @@ export async function getActiveSeason(admin: SupabaseClient): Promise<SeasonView
 async function loadWorksite(admin: SupabaseClient, seasonId: number): Promise<WorksiteView> {
   const { data, error } = await admin.from("worksites").select("*").eq("season_id", seasonId).single();
   if (error || !data) throw new Error(`Chantier introuvable : ${error?.message}`);
-  return toWorksite(data as WorksiteRow);
+  return worksiteFromRow(data as WorksiteRow);
 }
 
-async function loadPlayer(admin: SupabaseClient, userId: string, seasonId: number): Promise<{ state: PlayerState; version: number }> {
-  const select = () => admin.from("player_states").select("*").eq("user_id", userId).eq("season_id", seasonId).maybeSingle();
-  let { data } = await select();
-  if (!data) {
-    const now = new Date().toISOString();
-    await admin
-      .from("player_states")
-      .upsert({ user_id: userId, season_id: seasonId, last_update: now, last_click_at: now, last_seen: now }, { onConflict: "user_id,season_id", ignoreDuplicates: true });
-    ({ data } = await select());
+/** Charge tous les participants de la saison (au plus une dizaine de joueurs et 3 seigneurs). */
+async function loadEntities(admin: SupabaseClient, seasonId: number, userId: string): Promise<Map<string, Entity>> {
+  const select = () =>
+    admin.from("player_states").select("*, profiles(username, display_name, is_bot)").eq("season_id", seasonId);
+  let { data, error } = await select();
+  if (error) throw new Error(`Joueurs introuvables : ${error.message}`);
+  const present = new Set((data ?? []).map((r) => (r as PlayerRow).user_id));
+  const missing = [userId, ...LORDS.map((l) => l.id)].filter((id) => !present.has(id));
+  if (missing.length > 0) {
+    const now = iso(Date.now());
+    await admin.from("player_states").upsert(
+      missing.map((id) => ({ user_id: id, season_id: seasonId, last_update: now, last_click_at: now, last_seen: now })),
+      { onConflict: "user_id,season_id", ignoreDuplicates: true },
+    );
+    ({ data, error } = await select());
+    if (error) throw new Error(`Joueurs introuvables : ${error.message}`);
   }
-  if (!data) {
-    const s = newPlayerState(Date.now());
-    return { state: s, version: 0 };
-  }
-  return { state: toState(data as PlayerRow), version: (data as PlayerRow).version };
+  return new Map((data as PlayerRow[]).map((r) => [r.user_id, toEntity(r)]));
 }
 
-async function loadUsername(admin: SupabaseClient, userId: string): Promise<string> {
-  const { data } = await admin.from("profiles").select("username").eq("id", userId).maybeSingle();
-  return (data?.username as string | undefined) ?? "Inconnu";
+/** Production de base d'un seigneur : médiane des vrais joueurs × son caractère. */
+function lordRates(entities: Map<string, Entity>, world: WorldState, now: number): Map<string, number> {
+  const rates = [...entities.values()]
+    .filter((e) => !e.isLord)
+    .map((e) => productionPerSecond(e.state, world, stagesDoneAt(world, now)))
+    .sort((a, b) => a - b);
+  const median = rates.length === 0 ? 0 : rates.length % 2 ? rates[(rates.length - 1) / 2] : (rates[rates.length / 2 - 1] + rates[rates.length / 2]) / 2;
+  const out = new Map<string, number>();
+  for (const l of LORDS) out.set(l.id, Math.max(LORD_MIN_RATE, median) * l.rateFactor);
+  return out;
+}
+
+function advanceEntity(e: Entity, now: number, world: WorldState, flat: Map<string, number>): PlayerState {
+  return advance(e.state, now, world, e.isLord ? { flatRate: flat.get(e.id) ?? LORD_MIN_RATE } : {});
+}
+
+function currentRate(e: Entity, state: PlayerState, now: number, world: WorldState, flat: Map<string, number>): number {
+  return rateAt(state, world, now, e.isLord ? { flatRate: flat.get(e.id) ?? LORD_MIN_RATE } : {});
+}
+
+function jitter(hours: number): number {
+  return hours * 3_600_000 * (0.7 + Math.random() * 0.6);
+}
+
+async function addChronicle(admin: SupabaseClient, seasonId: number, entry: { kind: string; actor_id: string; target_id?: string | null; details: Record<string, unknown> }) {
+  await admin.from("chronicle").insert({ season_id: seasonId, ...entry });
+}
+
+/** Les seigneurs jouent les actions qu'ils ont en retard. Renvoie true si quelque chose a changé. */
+async function tickLords(admin: SupabaseClient, season: SeasonView, entities: Map<string, Entity>, worksite: WorksiteView, now: number): Promise<boolean> {
+  const world = worldFrom(worksite);
+  const flat = lordRates(entities, world, now);
+  let changed = false;
+
+  for (const lord of LORDS) {
+    const me = entities.get(lord.id);
+    if (!me) continue;
+    const state = advanceEntity(me, now, world, flat);
+
+    // Première visite de la saison : on planifie ses actions.
+    if (me.nextRaidAt === null && me.nextContribAt === null) {
+      const extra = {
+        next_raid_at: lord.raidEveryHours ? iso(now + jitter(lord.raidEveryHours)) : iso(now + 365 * 86_400_000),
+        next_contrib_at: lord.contribution ? iso(now + jitter(lord.contribution.everyHours)) : iso(now + 365 * 86_400_000),
+      };
+      await admin.rpc("commit_state", { p_season: season.id, p_state: toJson(me, state, extra), p_touch: false, p_contribution: 0, p_stage_bases: STAGE_BASES, p_active_window_days: ACTIVE_WINDOW_DAYS, p_action: null, p_details: null });
+      changed = true;
+      continue;
+    }
+
+    // Don au chantier (Prieure d'Aubeval).
+    if (lord.contribution && me.nextContribAt !== null && me.nextContribAt <= now) {
+      const amount = Math.floor(state.stone * lord.contribution.share);
+      const r = amount >= 1 ? contribute(state, amount) : null;
+      const next = r?.ok ? r.value : state;
+      const { data } = await admin.rpc("commit_state", {
+        p_season: season.id,
+        p_state: toJson(me, next, { next_contrib_at: iso(now + jitter(lord.contribution.everyHours)) }),
+        p_touch: false,
+        p_contribution: r?.ok ? amount : 0,
+        p_stage_bases: STAGE_BASES,
+        p_active_window_days: ACTIVE_WINDOW_DAYS,
+        p_action: r?.ok ? "contribute" : null,
+        p_details: r?.ok ? { amount } : null,
+      });
+      if ((data as { ok?: boolean } | null)?.ok && r?.ok) {
+        await addChronicle(admin, season.id, { kind: "gift", actor_id: lord.id, details: { amount } });
+      }
+      changed = true;
+      continue; // une action par visite
+    }
+
+    // Raid (Baron de Corbelune, Comte Grisemolle).
+    if (lord.raidEveryHours && me.nextRaidAt !== null && me.nextRaidAt <= now) {
+      const nextRaid = { next_raid_at: iso(now + jitter(lord.raidEveryHours)) };
+      const candidates = [...entities.values()]
+        .filter((e) => !e.isLord && now - e.lastSeen < LORD_TARGET_RECENT_MS)
+        .map((e) => {
+          const s = advanceEntity(e, now, world, flat);
+          const rate = currentRate(e, s, now, world, flat);
+          return { e, s, rate, loot: Math.max(0, s.stone - rate * SECURED_SECONDS) };
+        })
+        .filter((c) => !raidBlocker(state, c.s, { now, attackerId: lord.id, victimId: c.e.id, attackerRate: 0, victimRate: c.rate, attackerIsLord: true }))
+        .sort((a, b) => b.loot - a.loot);
+      // Le plus riche le plus souvent, mais pas toujours.
+      const pick = candidates.length > 0 ? candidates[Math.random() < 0.6 ? 0 : Math.floor(Math.random() * candidates.length)] : null;
+      if (pick) {
+        const r = resolveRaid(state, pick.s, { now, attackerId: lord.id, victimId: pick.e.id, attackerRate: 0, victimRate: pick.rate, attackerIsLord: true });
+        if (r.ok) {
+          await admin.rpc("apply_raid", {
+            p_season: season.id,
+            p_attacker: toJson(me, r.value.attacker, nextRaid),
+            p_victim: toJson(pick.e, r.value.victim),
+            p_attacker_touch: false,
+            p_chronicle: { stolen: r.value.report.stolen, destroyed: r.value.report.destroyed, revenge: false },
+          });
+          changed = true;
+          continue;
+        }
+      }
+      await admin.rpc("commit_state", { p_season: season.id, p_state: toJson(me, state, nextRaid), p_touch: false, p_contribution: 0, p_stage_bases: STAGE_BASES, p_active_window_days: ACTIVE_WINDOW_DAYS, p_action: null, p_details: null });
+      changed = true;
+    }
+  }
+  return changed;
+}
+
+async function loadChronicle(admin: SupabaseClient, seasonId: number, entities: Map<string, Entity>): Promise<ChronicleEntry[]> {
+  const { data } = await admin
+    .from("chronicle")
+    .select("id, kind, actor_id, target_id, details, created_at")
+    .eq("season_id", seasonId)
+    .order("created_at", { ascending: false })
+    .limit(20);
+  const name = (id: string | null) => (id ? (entities.get(id)?.name ?? "Un inconnu") : "");
+  return (data ?? []).map((r) => ({
+    id: Number(r.id),
+    at: Date.parse(r.created_at as string),
+    kind: r.kind as ChronicleEntry["kind"],
+    actorId: r.actor_id as string | null,
+    actorName: name(r.actor_id as string | null),
+    targetId: r.target_id as string | null,
+    targetName: name(r.target_id as string | null),
+    details: (r.details ?? {}) as ChronicleEntry["details"],
+  }));
+}
+
+function sameConnection(me: Entity, myIp: string | null, other: Entity, now: number): boolean {
+  return !other.isLord && !!myIp && other.lastIp === myIp && now - other.lastSeen < SAME_IP_WINDOW_MS;
+}
+
+function rivalsFor(me: Entity, myState: PlayerState, entities: Map<string, Entity>, world: WorldState, flat: Map<string, number>, now: number, myIp: string | null): RivalView[] {
+  const myRate = currentRate(me, myState, now, world, flat);
+  return [...entities.values()]
+    .filter((e) => e.id !== me.id)
+    .map((e) => {
+      const s = advanceEntity(e, now, world, flat);
+      const rate = currentRate(e, s, now, world, flat);
+      const revenge = hasRevenge(myState, e.id, now);
+      const guard = e.lord?.guard ?? 1;
+      const ctx = { now, attackerId: me.id, victimId: e.id, attackerRate: myRate, victimRate: rate, guard };
+      const loot = Math.floor(Math.max(0, s.stone - rate * SECURED_SECONDS) * (revenge ? REVENGE_LOOT_RATE : RAID_LOOT_RATE));
+      return {
+        id: e.id,
+        name: e.name,
+        isLord: e.isLord,
+        blazon: e.lord?.blazon,
+        temper: e.lord?.temper,
+        stone: s.stone,
+        rate,
+        loot,
+        cost: revenge ? 0 : raidCost(myRate, guard),
+        shieldUntil: s.shieldUntil,
+        burnedUntil: s.burnedUntil,
+        totalPlundered: s.totalPlundered,
+        revenge,
+        blocker: sameConnection(me, myIp, e, now) ? "Même connexion internet que toi : raid interdit." : raidBlocker(myState, s, ctx),
+      };
+    })
+    .sort((a, b) => Number(a.isLord) - Number(b.isLord) || b.loot - a.loot);
 }
 
 interface Outcome {
   state: PlayerState;
   contribution?: number;
   log?: { action: string; details: Record<string, unknown> };
-  message?: string;
 }
 
-function applyAction(state: PlayerState, action: GameAction, now: number, worksite: WorksiteView): Result<Outcome> {
-  const world = worldFrom(worksite);
+function applySimpleAction(state: PlayerState, action: GameAction, now: number, world: WorldState): Result<Outcome> {
   switch (action.type) {
     case "sync":
       return { ok: true, value: { state } };
-    case "click": {
-      const { state: next } = applyClicks(state, Number(action.count), now, world);
-      return { ok: true, value: { state: next } };
-    }
+    case "click":
+      return { ok: true, value: { state: applyClicks(state, Number(action.count), now, world).state } };
     case "buy": {
       if (!GENERATOR_IDS.includes(action.generator as GeneratorId)) return { ok: false, error: "Bâtiment inconnu." };
       const r = buyGenerator(state, action.generator as GeneratorId, Number(action.qty));
-      if (!r.ok) return r;
-      return { ok: true, value: { state: r.value, log: { action: "buy", details: { generator: action.generator, qty: action.qty } } } };
+      return r.ok ? { ok: true, value: { state: r.value, log: { action: "buy", details: { generator: action.generator, qty: action.qty } } } } : r;
+    }
+    case "rebuild": {
+      if (!GENERATOR_IDS.includes(action.generator as GeneratorId)) return { ok: false, error: "Bâtiment inconnu." };
+      const r = rebuildRuin(state, action.generator as GeneratorId);
+      return r.ok ? { ok: true, value: { state: r.value, log: { action: "rebuild", details: { generator: action.generator } } } } : r;
     }
     case "upgrade": {
       const r = buyUpgrade(state, String(action.upgrade));
-      if (!r.ok) return r;
-      return { ok: true, value: { state: r.value, log: { action: "upgrade", details: { upgrade: action.upgrade } } } };
+      return r.ok ? { ok: true, value: { state: r.value, log: { action: "upgrade", details: { upgrade: action.upgrade } } } } : r;
     }
     case "contribute": {
       const r = contribute(state, Number(action.amount));
       if (!r.ok) return r;
       const given = r.value.totalContributed - state.totalContributed;
-      return {
-        ok: true,
-        value: { state: r.value, contribution: given, log: { action: "contribute", details: { amount: given } } },
-      };
+      return { ok: true, value: { state: r.value, contribution: given, log: { action: "contribute", details: { amount: given } } } };
     }
     default:
       return { ok: false, error: "Action inconnue." };
   }
 }
 
-export type ActionResult = { ok: true; snapshot: GameSnapshot } | { ok: false; error: string; snapshot?: GameSnapshot };
+export type ActionResult = { ok: true; snapshot: GameSnapshot; message?: string } | { ok: false; error: string; snapshot?: GameSnapshot };
 
 /** Exécute une intention du joueur et renvoie l'état qui fait foi. */
-export async function runAction(admin: SupabaseClient, userId: string, action: GameAction): Promise<ActionResult> {
+export async function runAction(admin: SupabaseClient, userId: string, action: GameAction, ipHash: string | null): Promise<ActionResult> {
   const season = await getActiveSeason(admin);
-  const usernamePromise = loadUsername(admin, userId);
+  const wantsChronicle = action.type === "sync" || action.type === "raid";
 
   for (let attempt = 0; attempt < MAX_ATTEMPTS; attempt++) {
-    const [worksite, player] = await Promise.all([loadWorksite(admin, season.id), loadPlayer(admin, userId, season.id)]);
-    const now = Date.now();
-    const current = advance(player.state, now, worldFrom(worksite));
-    const outcome = applyAction(current, action, now, worksite);
-    const base = outcome.ok ? outcome.value : { state: current };
+    let [worksite, entities] = await Promise.all([loadWorksite(admin, season.id), loadEntities(admin, season.id, userId)]);
+    if (action.type === "sync" && attempt === 0 && (await tickLords(admin, season, entities, worksite, Date.now()))) {
+      [worksite, entities] = await Promise.all([loadWorksite(admin, season.id), loadEntities(admin, season.id, userId)]);
+    }
+    const me = entities.get(userId);
+    if (!me) throw new Error("Joueur introuvable.");
 
-    const { data, error } = await admin.rpc("commit_player_state", {
-      p_user: userId,
-      p_season: season.id,
-      p_expected_version: player.version,
-      p_stone: base.state.stone,
-      p_generators: base.state.generators,
-      p_upgrades: base.state.upgrades,
-      p_total_produced: base.state.totalProduced,
-      p_total_contributed: base.state.totalContributed,
-      p_total_clicks: base.state.totalClicks,
-      p_last_update: new Date(base.state.lastUpdate).toISOString(),
-      p_last_click_at: new Date(base.state.lastClickAt).toISOString(),
-      p_contribution: outcome.ok ? (outcome.value.contribution ?? 0) : 0,
-      p_stage_bases: STAGE_BASES,
-      p_active_window_days: ACTIVE_WINDOW_DAYS,
-      p_action: outcome.ok ? (outcome.value.log?.action ?? null) : null,
-      p_details: outcome.ok ? (outcome.value.log?.details ?? null) : null,
-    });
-    if (error) throw new Error(`Enregistrement impossible : ${error.message}`);
-    const result = data as { ok: boolean; conflict?: boolean; worksite?: WorksiteRow };
-    if (!result.ok && result.conflict) continue;
+    const now = Date.now();
+    const world = worldFrom(worksite);
+    const flat = lordRates(entities, world, now);
+    const current = advance(me.state, now, world);
+    let finalState = current;
+    let error: string | null = null;
+    let message: string | undefined;
+
+    if (action.type === "raid") {
+      const victim = entities.get(String(action.target));
+      if (!victim) {
+        error = "Cible inconnue.";
+      } else if (sameConnection(me, ipHash, victim, now)) {
+        error = "Même connexion internet que ta cible : raid interdit.";
+      } else {
+        const victimState = advanceEntity(victim, now, world, flat);
+        const r = resolveRaid(current, victimState, {
+          now,
+          attackerId: me.id,
+          victimId: victim.id,
+          attackerRate: currentRate(me, current, now, world, flat),
+          victimRate: currentRate(victim, victimState, now, world, flat),
+          guard: victim.lord?.guard ?? 1,
+        });
+        if (!r.ok) {
+          error = r.error;
+        } else {
+          const { data, error: rpcError } = await admin.rpc("apply_raid", {
+            p_season: season.id,
+            p_attacker: toJson(me, r.value.attacker, { last_ip: ipHash }),
+            p_victim: toJson(victim, r.value.victim),
+            p_attacker_touch: true,
+            p_chronicle: { stolen: r.value.report.stolen, destroyed: r.value.report.destroyed, revenge: r.value.report.revenge },
+          });
+          if (rpcError?.message.includes("beffroi_conflict") || (data as { conflict?: boolean } | null)?.conflict) continue;
+          if (rpcError) throw new Error(`Raid impossible : ${rpcError.message}`);
+          me.version = (data as { version: number }).version;
+          finalState = r.value.attacker;
+          const lost = Object.values(r.value.report.destroyed).reduce((a, b) => a + (b ?? 0), 0);
+          message = `Raid réussi contre ${victim.name} : ${Math.floor(r.value.report.stolen).toLocaleString("fr-FR")} pierres pillées${lost ? `, ${lost} bâtiment${lost > 1 ? "s" : ""} en ruine` : ""}.`;
+          entities = await loadEntities(admin, season.id, userId);
+        }
+      }
+      if (error) {
+        // Raid refusé : on enregistre quand même l'avancement de la production.
+        const { data } = await admin.rpc("commit_state", { p_season: season.id, p_state: toJson(me, current, { last_ip: ipHash }), p_touch: true, p_contribution: 0, p_stage_bases: STAGE_BASES, p_active_window_days: ACTIVE_WINDOW_DAYS, p_action: null, p_details: null });
+        if ((data as { conflict?: boolean } | null)?.conflict) continue;
+      }
+    } else {
+      const outcome = applySimpleAction(current, action, now, world);
+      if (outcome.ok) finalState = outcome.value.state;
+      else error = outcome.error;
+      const contribution = outcome.ok ? (outcome.value.contribution ?? 0) : 0;
+      const { data, error: rpcError } = await admin.rpc("commit_state", {
+        p_season: season.id,
+        p_state: toJson(me, finalState, { last_ip: ipHash }),
+        p_touch: true,
+        p_contribution: contribution,
+        p_stage_bases: STAGE_BASES,
+        p_active_window_days: ACTIVE_WINDOW_DAYS,
+        p_action: outcome.ok ? (outcome.value.log?.action ?? null) : null,
+        p_details: outcome.ok ? (outcome.value.log?.details ?? null) : null,
+      });
+      if (rpcError) throw new Error(`Enregistrement impossible : ${rpcError.message}`);
+      const result = data as { ok: boolean; conflict?: boolean; worksite?: WorksiteRow };
+      if (!result.ok && result.conflict) continue;
+      if (result.worksite) worksite = worksiteFromRow(result.worksite);
+      if (contribution > 0) await recordContribution(season.id, userId, finalState.totalContributed);
+    }
 
     const snapshot: GameSnapshot = {
       serverNow: now,
-      username: await usernamePromise,
-      state: base.state,
-      worksite: result.worksite ? toWorksite(result.worksite) : worksite,
+      userId,
+      username: me.name,
+      state: finalState,
+      worksite,
       season,
+      rivals: rivalsFor(me, finalState, entities, worldFrom(worksite), flat, now, ipHash),
+      chronicle: wantsChronicle ? await loadChronicle(admin, season.id, entities) : undefined,
     };
-    if (outcome.ok && outcome.value.contribution) {
-      await recordContribution(season.id, userId, base.state.totalContributed);
-    }
-    return outcome.ok ? { ok: true, snapshot } : { ok: false, error: outcome.error, snapshot };
+    return error ? { ok: false, error, snapshot } : { ok: true, snapshot, message };
   }
   return { ok: false, error: "Trop d'actions simultanées, réessaie." };
 }
 
-/** Classement des contributeurs au chantier (Redis si disponible, sinon Postgres). */
-export async function getLeaderboard(admin: SupabaseClient, limit = 20): Promise<LeaderboardRow[]> {
+/** Classements de la saison : contributeurs au chantier et pillards (seigneurs exclus). */
+export async function getLeaderboards(admin: SupabaseClient, limit = 20): Promise<Leaderboards> {
   const season = await getActiveSeason(admin);
-  let rows = await topContributors(season.id, limit);
-  if (!rows) {
-    const { data } = await admin
-      .from("player_states")
-      .select("user_id, total_contributed")
-      .eq("season_id", season.id)
-      .gt("total_contributed", 0)
-      .order("total_contributed", { ascending: false })
-      .limit(limit);
-    rows = (data ?? []).map((r) => ({ userId: r.user_id as string, total: Number(r.total_contributed) }));
-  }
-  if (rows.length === 0) return [];
-  const { data: profiles } = await admin.from("profiles").select("id, username").in("id", rows.map((r) => r.userId));
-  const names = new Map((profiles ?? []).map((p) => [p.id as string, p.username as string]));
-  return rows.map((r) => ({ ...r, username: names.get(r.userId) ?? "Inconnu" }));
+  const { data } = await admin
+    .from("player_states")
+    .select("user_id, total_contributed, total_plundered, profiles(username, is_bot)")
+    .eq("season_id", season.id);
+  type Row = { user_id: string; total_contributed: number; total_plundered: number; profiles: { username: string; is_bot: boolean } | null };
+  const humans = ((data ?? []) as unknown as Row[]).filter((r) => r.profiles && !r.profiles.is_bot);
+  const names = new Map(humans.map((r) => [r.user_id, r.profiles!.username]));
+
+  let contributors: { userId: string; total: number }[] | null = await topContributors(season.id, limit);
+  contributors = (contributors ?? humans.map((r) => ({ userId: r.user_id, total: Number(r.total_contributed) })))
+    .filter((r) => names.has(r.userId) && r.total > 0)
+    .sort((a, b) => b.total - a.total)
+    .slice(0, limit);
+  const plunderers = humans
+    .map((r) => ({ userId: r.user_id, total: Number(r.total_plundered ?? 0) }))
+    .filter((r) => r.total > 0)
+    .sort((a, b) => b.total - a.total)
+    .slice(0, limit);
+
+  const withNames = (rows: { userId: string; total: number }[]): LeaderboardRow[] => rows.map((r) => ({ ...r, username: names.get(r.userId) ?? "Inconnu" }));
+  return { contributors: withNames(contributors), plunderers: withNames(plunderers) };
 }
+

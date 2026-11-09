@@ -2,7 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import { signOut } from "@/app/(auth)/actions";
-import { GENERATORS, STAGES, UPGRADES, type GeneratorId } from "@/lib/game/config";
+import { GENERATORS, RAID_COOLDOWN_MS, STAGES, UPGRADES, type GeneratorId } from "@/lib/game/config";
 import {
   advance,
   clickValue,
@@ -11,16 +11,18 @@ import {
   maxAffordable,
   owned,
   productionMultiplier,
-  productionPerSecond,
+  rateAt,
+  ruinCost,
+  ruinsOf,
   stagesDoneAt,
   upgradeUnlocked,
   type PlayerState,
 } from "@/lib/game/engine";
 import { formatNumber, formatRate } from "@/lib/game/format";
-import { worldFrom, type GameSnapshot } from "@/lib/game/types";
+import { worldFrom, type ChronicleEntry, type GameSnapshot, type RivalView } from "@/lib/game/types";
 import { useGame, useLeaderboard, useTick } from "./use-game";
 
-type Tab = "ateliers" | "ameliorations" | "chantier" | "classement";
+type Tab = "ateliers" | "ameliorations" | "chantier" | "raids" | "classement";
 type Qty = 1 | 10 | "max";
 const DAY_MS = 86_400_000;
 
@@ -39,7 +41,7 @@ export function Game({ userId }: { userId: string }) {
   const stagesDone = stagesDoneAt(world, now);
   // État prévu « maintenant » : sert à savoir ce qui est achetable.
   const live: PlayerState = { ...advance(snap.state, now, world), stone: game.predictedStone() };
-  const rate = productionPerSecond(live, world, stagesDone);
+  const rate = rateAt(live, world, now);
   const affordableUpgrades = UPGRADES.filter((u) => !live.upgrades.includes(u.id) && upgradeUnlocked(live, u) && u.cost <= live.stone).length;
 
   return (
@@ -52,13 +54,15 @@ export function Game({ userId }: { userId: string }) {
             <TabButton id="ateliers" tab={tab} setTab={setTab} label="Ateliers" />
             <TabButton id="ameliorations" tab={tab} setTab={setTab} label="Savoirs" dot={affordableUpgrades > 0} />
             <TabButton id="chantier" tab={tab} setTab={setTab} label="Chantier" />
-            <TabButton id="classement" tab={tab} setTab={setTab} label="Classement" />
+            <TabButton id="raids" tab={tab} setTab={setTab} label="Raids" dot={snap.rivals.some((r) => r.revenge && !r.blocker)} />
+            <TabButton id="classement" tab={tab} setTab={setTab} label="Rangs" />
           </div>
           <div className="tab-body" role="tabpanel">
             {tab === "ateliers" && <Generators live={live} stagesDone={stagesDone} snap={snap} run={game.run} />}
             {tab === "ameliorations" && <Upgrades live={live} run={game.run} />}
             {tab === "chantier" && <Worksite snap={snap} live={live} run={game.run} />}
-            {tab === "classement" && <Ranking rows={leaderboard} userId={userId} />}
+            {tab === "raids" && <Raids snap={snap} live={live} now={now} run={game.run} />}
+            {tab === "classement" && <Ranking boards={leaderboard} userId={userId} />}
           </div>
         </section>
       </div>
@@ -166,6 +170,7 @@ function Hero({ snap, rate, clickGain, game }: { snap: GameSnapshot; rate: numbe
           ))}
         </div>
       </div>
+      <Status state={snap.state} now={game.serverNow()} />
       <div className="mini-site">
         <h3>{finished ? "Le beffroi est achevé !" : `Chantier : ${STAGES[w.stage].name}`}</h3>
         <div className="bar" role="progressbar" aria-valuenow={Math.round(pct)} aria-valuemin={0} aria-valuemax={100}>
@@ -191,6 +196,11 @@ function Generators({ live, stagesDone, snap, run }: { live: PlayerState; stages
   const buy = async (id: GeneratorId, n: number) => {
     setBusy(id);
     await run({ type: "buy", generator: id, qty: n });
+    setBusy(null);
+  };
+  const rebuild = async (id: GeneratorId) => {
+    setBusy(id);
+    await run({ type: "rebuild", generator: id });
     setBusy(null);
   };
 
@@ -225,9 +235,19 @@ function Generators({ live, stagesDone, snap, run }: { live: PlayerState; stages
                 </div>
               </div>
               <button className="btn btn-primary" disabled={hidden || cost > live.stone || busy !== null} onClick={() => buy(g.id, count)}>
-                {qty === "max" ? `+${count}` : `+${count}`}
+                +{count}
                 <span className="cost num">{formatNumber(cost)} 🪨</span>
               </button>
+              {ruinsOf(live, g.id) > 0 && (
+                <div className="ruins">
+                  <span>
+                    🏚️ {ruinsOf(live, g.id)} en ruine après un raid
+                  </span>
+                  <button className="btn" disabled={ruinCost(live, g.id) > live.stone || busy !== null} onClick={() => rebuild(g.id)}>
+                    Rebâtir · <span className="num">{formatNumber(ruinCost(live, g.id))} 🪨</span>
+                  </button>
+                </div>
+              )}
             </div>
           );
         })}
@@ -350,22 +370,158 @@ function Worksite({ snap, live, run }: { snap: GameSnapshot; live: PlayerState; 
   );
 }
 
-function Ranking({ rows, userId }: { rows: ReturnType<typeof useLeaderboard>; userId: string }) {
-  if (!rows) return <p className="empty">On consulte les registres…</p>;
-  if (rows.length === 0) return <p className="empty">Personne n&apos;a encore versé de pierre. Sois le premier !</p>;
-  const medals = ["🥇", "🥈", "🥉"];
+function Ranking({ boards, userId }: { boards: ReturnType<typeof useLeaderboard>; userId: string }) {
+  if (!boards) return <p className="empty">On consulte les registres…</p>;
   return (
     <>
-      <ol className="ranking">
-        {rows.map((r, i) => (
-          <li key={r.userId} className={r.userId === userId ? "me" : undefined}>
-            <span className="rank">{medals[i] ?? i + 1}</span>
-            <span>{r.username}</span>
-            <span className="num">{formatNumber(r.total)}</span>
-          </li>
-        ))}
-      </ol>
-      <p className="note">Classement des contributeurs au chantier commun pour la saison en cours.</p>
+      <h3 className="section-title">🏗️ Bâtisseurs du chantier</h3>
+      <Board rows={boards.contributors} userId={userId} empty="Personne n'a encore versé de pierre. Sois le premier !" />
+      <h3 className="section-title">⚔️ Pillards</h3>
+      <Board rows={boards.plunderers} userId={userId} empty="Aucun pillage pour l'instant." />
+      <p className="note">Classements de la saison en cours. Les seigneurs voisins n&apos;y figurent pas.</p>
     </>
+  );
+}
+
+function Board({ rows, userId, empty }: { rows: { userId: string; username: string; total: number }[]; userId: string; empty: string }) {
+  if (rows.length === 0) return <p className="empty">{empty}</p>;
+  const medals = ["🥇", "🥈", "🥉"];
+  return (
+    <ol className="ranking">
+      {rows.map((r, i) => (
+        <li key={r.userId} className={r.userId === userId ? "me" : undefined}>
+          <span className="rank">{medals[i] ?? i + 1}</span>
+          <span>{r.username}</span>
+          <span className="num">{formatNumber(r.total)}</span>
+        </li>
+      ))}
+    </ol>
+  );
+}
+
+function duration(msLeft: number): string {
+  const m = Math.max(0, Math.ceil(msLeft / 60_000));
+  if (m < 60) return `${m} min`;
+  return `${Math.floor(m / 60)} h ${String(m % 60).padStart(2, "0")}`;
+}
+
+/** Bandeau d'état sous le marteau : incendie, bouclier. */
+function Status({ state, now }: { state: PlayerState; now: number }) {
+  const burning = state.burnedUntil > now;
+  const shielded = state.shieldUntil > now;
+  if (!burning && !shielded) return null;
+  return (
+    <div className="status">
+      {burning && (
+        <p className="status-burn">
+          🔥 Ateliers incendiés : production −50 % encore {duration(state.burnedUntil - now)}. Frappe la pierre pour éteindre le feu plus vite !
+        </p>
+      )}
+      {shielded && <p className="status-shield">🛡️ Bouclier actif encore {duration(state.shieldUntil - now)}.</p>}
+    </div>
+  );
+}
+
+function Raids({ snap, live, now, run }: { snap: GameSnapshot; live: PlayerState; now: number; run: ReturnType<typeof useGame>["run"] }) {
+  const [busy, setBusy] = useState<string | null>(null);
+  const cooldown = live.lastRaidAt + RAID_COOLDOWN_MS - now;
+  const raid = async (target: string) => {
+    setBusy(target);
+    await run({ type: "raid", target });
+    setBusy(null);
+  };
+  const players = snap.rivals.filter((r) => !r.isLord);
+  const lords = snap.rivals.filter((r) => r.isLord);
+
+  return (
+    <>
+      <p className="note raid-intro">
+        Un raid vole 10 % de la pierre non sécurisée (la dernière demi-heure de production est à l&apos;abri), incendie les ateliers pendant 2 h et
+        peut ruiner quelques bâtiments. La victime reçoit 4 h de bouclier et un droit de revanche.
+      </p>
+      <p className="raid-state">
+        {cooldown > 0 ? `⏳ Tes mercenaires se reposent encore ${duration(cooldown)}.` : "⚔️ Tes mercenaires sont prêts."}
+      </p>
+      <h3 className="section-title">Seigneurs voisins</h3>
+      <div className="list">
+        {lords.map((r) => (
+          <RivalRow key={r.id} r={r} live={live} now={now} busy={busy} onRaid={raid} />
+        ))}
+      </div>
+      <h3 className="section-title">Joueurs</h3>
+      <div className="list">
+        {players.length === 0 && <p className="empty">Personne d&apos;autre au royaume pour l&apos;instant. Invite tes amis !</p>}
+        {players.map((r) => (
+          <RivalRow key={r.id} r={r} live={live} now={now} busy={busy} onRaid={raid} />
+        ))}
+      </div>
+      <h3 className="section-title">Chronique</h3>
+      <Chronicle entries={snap.chronicle ?? []} me={snap.userId} now={now} />
+    </>
+  );
+}
+
+function RivalRow({ r, live, now, busy, onRaid }: { r: RivalView; live: PlayerState; now: number; busy: string | null; onRaid: (id: string) => void }) {
+  const shielded = r.shieldUntil > now;
+  const blocked = r.blocker !== null || r.cost > live.stone;
+  return (
+    <div className="row">
+      <div className="row-icon" aria-hidden>
+        {r.isLord ? r.blazon : "🛡️"}
+      </div>
+      <div>
+        <div className="row-title">
+          {r.name}
+          {r.isLord && <span className="badge">seigneur</span>}
+          {r.revenge && <span className="badge badge-revenge">revanche !</span>}
+        </div>
+        <div className="row-desc num">
+          {r.temper ? `${r.temper} · ` : ""}
+          {formatNumber(r.stone)} pierres · {formatRate(r.rate)}/s
+          {shielded ? ` · 🛡️ ${duration(r.shieldUntil - now)}` : ""}
+          {r.burnedUntil > now ? " · 🔥" : ""}
+        </div>
+        <div className="row-desc">
+          {r.blocker ?? (r.loot > 0 ? `Butin estimé : ${formatNumber(r.loot)} pierres` : "Rien à piller pour l'instant.")}
+        </div>
+      </div>
+      <button className="btn btn-primary" disabled={blocked || busy !== null} onClick={() => onRaid(r.id)}>
+        Raider
+        <span className="cost num">{r.cost === 0 ? "gratuit" : `${formatNumber(r.cost)} 🪨`}</span>
+      </button>
+    </div>
+  );
+}
+
+function Chronicle({ entries, me, now }: { entries: ChronicleEntry[]; me: string; now: number }) {
+  if (entries.length === 0) return <p className="empty">Le royaume est calme. Pour l&apos;instant…</p>;
+  const ago = (t: number) => {
+    const m = Math.floor((now - t) / 60_000);
+    if (m < 1) return "à l'instant";
+    if (m < 60) return `il y a ${m} min`;
+    if (m < 1440) return `il y a ${Math.floor(m / 60)} h`;
+    return `il y a ${Math.floor(m / 1440)} j`;
+  };
+  const who = (id: string | null, name: string, cap = false) => (id === me ? (cap ? "Tu" : "toi") : name);
+  return (
+    <ul className="chronicle">
+      {entries.map((e) => {
+        let text: string;
+        if (e.kind === "gift") {
+          text = `${e.actorName} a offert ${formatNumber(e.details.amount ?? 0)} pierres au chantier.`;
+        } else {
+          const ruined = Object.values(e.details.destroyed ?? {}).reduce((a, b) => a + b, 0);
+          const verb = e.actorId === me ? "as pillé" : "a pillé";
+          const target = e.targetId === me ? "tes greniers" : e.targetName;
+          text = `${who(e.actorId, e.actorName, true)} ${verb} ${target}${e.details.revenge ? " (revanche)" : ""} : ${formatNumber(e.details.stolen ?? 0)} pierres${ruined ? `, ${ruined} bâtiment${ruined > 1 ? "s" : ""} en ruine` : ""}.`;
+        }
+        return (
+          <li key={e.id} className={e.targetId === me ? "hit" : undefined}>
+            <span>{text}</span>
+            <span className="when">{ago(e.at)}</span>
+          </li>
+        );
+      })}
+    </ul>
   );
 }

@@ -376,7 +376,7 @@ a {
 
 .tabs {
   display: grid;
-  grid-template-columns: repeat(4, 1fr);
+  grid-template-columns: repeat(5, 1fr);
   border-bottom: 1px solid var(--line);
 }
 .tab {
@@ -387,8 +387,8 @@ a {
   padding: 12px 4px 10px;
   cursor: pointer;
   font-family: var(--font-display), Georgia, serif;
-  font-size: 0.8rem;
-  letter-spacing: 0.03em;
+  font-size: 0.78rem;
+  letter-spacing: 0.02em;
   color: var(--ink-soft);
   position: relative;
 }
@@ -594,4 +594,98 @@ a {
   .bar > span {
     transition: none;
   }
+}
+
+/* ---------- Raids ---------- */
+.ruins {
+  grid-column: 1 / -1;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 8px;
+  font-size: 0.88rem;
+  color: var(--accent);
+  border-top: 1px dashed var(--line);
+  padding-top: 8px;
+}
+.ruins .btn {
+  min-height: 34px;
+  min-width: 0;
+  padding: 4px 10px;
+  font-size: 0.85rem;
+}
+.status {
+  margin-top: 12px;
+  text-align: left;
+  display: grid;
+  gap: 6px;
+}
+.status p {
+  margin: 0;
+  padding: 8px 10px;
+  border-radius: 8px;
+  font-size: 0.92rem;
+}
+.status-burn {
+  background: color-mix(in srgb, #d9531e 16%, transparent);
+  border: 1px solid color-mix(in srgb, #d9531e 45%, transparent);
+}
+.status-shield {
+  background: color-mix(in srgb, #3a6ea5 14%, transparent);
+  border: 1px solid color-mix(in srgb, #3a6ea5 40%, transparent);
+}
+.section-title {
+  font-size: 0.95rem;
+  margin: 16px 0 8px;
+}
+.section-title:first-child {
+  margin-top: 0;
+}
+.badge {
+  font-family: var(--font-body), Georgia, serif;
+  font-size: 0.72rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  padding: 1px 6px;
+  border-radius: 999px;
+  border: 1px solid var(--line);
+  color: var(--ink-soft);
+}
+.badge-revenge {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+.raid-intro {
+  margin-top: 0;
+}
+.raid-state {
+  margin: 8px 0 0;
+  font-weight: 600;
+}
+.chronicle {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 6px;
+}
+.chronicle li {
+  display: flex;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 8px 10px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--panel-2);
+  font-size: 0.92rem;
+}
+.chronicle li.hit {
+  border-color: var(--accent);
+  box-shadow: inset 3px 0 0 var(--accent);
+}
+.chronicle .when {
+  color: var(--ink-soft);
+  white-space: nowrap;
+  font-size: 0.82rem;
 }

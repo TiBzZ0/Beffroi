@@ -120,3 +120,68 @@ export const STAGE_BASES = STAGES.map((s) => s.basePerPlayer);
 
 /** Fenêtre pendant laquelle un joueur compte comme actif pour dimensionner le chantier. */
 export const ACTIVE_WINDOW_DAYS = 7;
+
+// ---------------------------------------------------------------------------
+// Raids (version 1)
+// ---------------------------------------------------------------------------
+
+/** Délai minimal entre deux raids lancés par un même joueur. */
+export const RAID_COOLDOWN_MS = 60 * 60 * 1000;
+/** Coût d'un raid : N secondes de la production de l'attaquant (minimum RAID_MIN_COST). */
+export const RAID_COST_SECONDS = 10 * 60;
+export const RAID_MIN_COST = 100;
+/** Part du stock non sécurisé volée (doublée en cas de revanche). */
+export const RAID_LOOT_RATE = 0.1;
+export const REVENGE_LOOT_RATE = 0.2;
+/** Stock sécurisé : N secondes de la production de la victime ne peuvent pas être volées. */
+export const SECURED_SECONDS = 30 * 60;
+/** Ateliers incendiés : production réduite de moitié pendant 2 h. */
+export const BURN_MS = 2 * 60 * 60 * 1000;
+export const BURN_PRODUCTION_FACTOR = 0.5;
+/** Chaque coup de marteau accepté écourte l'incendie d'une seconde. */
+export const BURN_CLICK_REDUCTION_MS = 1000;
+/** Part des bâtiments détruits (arrondi à l'inférieur, au plus un par type). */
+export const RAID_DESTROY_RATE = 0.05;
+/** Les N premiers bâtiments de chaque type ne peuvent pas être détruits. */
+export const PROTECTED_PER_TYPE = 5;
+/** Une ruine se rebâtit à ce facteur du prix d'un bâtiment neuf. */
+export const RUIN_REBUILD_FACTOR = 0.5;
+/** Bouclier de la victime après un raid. */
+export const SHIELD_MS = 4 * 60 * 60 * 1000;
+/** La victime peut se venger pendant ce délai (butin doublé, sans attendre ni payer). */
+export const REVENGE_MS = 24 * 60 * 60 * 1000;
+
+// ---------------------------------------------------------------------------
+// Seigneurs voisins (bots assumés)
+// ---------------------------------------------------------------------------
+
+export type LordKey = "corbelune" | "aubeval" | "grisemolle";
+
+export interface LordDef {
+  key: LordKey;
+  /** Identifiant fixe de la ligne `profiles` du seigneur. */
+  id: string;
+  username: string;
+  name: string;
+  blazon: string;
+  temper: string;
+  /** Production = médiane des vrais joueurs × ce facteur (±20 % selon le caractère). */
+  rateFactor: number;
+  /** Intervalle moyen entre deux raids du seigneur (null = ne raide jamais). */
+  raidEveryHours: number | null;
+  /** Part de son stock versée au chantier, et intervalle moyen (null = jamais). */
+  contribution: { share: number; everyHours: number } | null;
+  /** Multiplicateur du coût pour le raider (seigneur bien gardé). */
+  guard: number;
+}
+
+export const LORDS: readonly LordDef[] = [
+  { key: "corbelune", id: "00000000-0000-4000-8000-00000000c0b1", username: "Corbelune", name: "Baron de Corbelune", blazon: "🐦‍⬛", temper: "Pillard agressif", rateFactor: 1.0, raidEveryHours: 6, contribution: null, guard: 1 },
+  { key: "aubeval", id: "00000000-0000-4000-8000-00000000a0be", username: "Aubeval", name: "Prieure d'Aubeval", blazon: "⛪", temper: "Bâtisseuse pacifique", rateFactor: 0.8, raidEveryHours: null, contribution: { share: 0.2, everyHours: 12 }, guard: 1 },
+  { key: "grisemolle", id: "00000000-0000-4000-8000-0000000062e5", username: "Grisemolle", name: "Comte Grisemolle", blazon: "💰", temper: "Avare, bien gardé", rateFactor: 1.2, raidEveryHours: 24, contribution: null, guard: 3 },
+];
+
+export const LORD_BY_ID: ReadonlyMap<string, LordDef> = new Map(LORDS.map((l) => [l.id, l]));
+
+/** Production minimale d'un seigneur, pour qu'il existe même en début de saison. */
+export const LORD_MIN_RATE = 1;

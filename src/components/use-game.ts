@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { MAX_CLICKS_PER_SECOND } from "@/lib/game/config";
 import { advance, clickValue, stagesDoneAt } from "@/lib/game/engine";
-import { worksiteFromRow, worldFrom, type ActionResponse, type GameAction, type GameSnapshot, type LeaderboardRow } from "@/lib/game/types";
+import { worksiteFromRow, worldFrom, type ActionResponse, type GameAction, type GameSnapshot, type Leaderboards } from "@/lib/game/types";
 import { getBrowserClient } from "@/lib/supabase/client";
 
 const CLICK_FLUSH_MS = 3_000;
@@ -32,8 +32,10 @@ export function useGame() {
 
   const receive = useCallback((s: GameSnapshot) => {
     offset.current = s.serverNow - Date.now();
-    snapRef.current = s;
-    setSnap(s);
+    // La chronique n'est renvoyée qu'aux synchronisations : on garde la précédente sinon.
+    const next = s.chronicle ? s : { ...s, chronicle: snapRef.current?.chronicle ?? [] };
+    snapRef.current = next;
+    setSnap(next);
   }, []);
 
   const post = useCallback(async (action: GameAction): Promise<ActionResponse> => {
@@ -79,6 +81,7 @@ export function useGame() {
         const r = await post(action);
         if (r.snapshot) receive(r.snapshot);
         if (!r.ok && action.type !== "sync") showToast(r.error);
+        if (r.ok && r.message) showToast(r.message);
         return r.ok;
       };
       const p = queue.current.then(task, task);
@@ -158,18 +161,43 @@ export function useGame() {
     };
   }, [seasonId]);
 
+  // Chronique en direct : un raid ou un don déclenche une synchronisation,
+  // et on prévient le joueur s'il vient d'être pillé.
+  useEffect(() => {
+    if (seasonId === undefined) return;
+    const supabase = getBrowserClient();
+    const channel = supabase
+      .channel(`chronicle-${seasonId}`)
+      .on(
+        "postgres_changes",
+        { event: "INSERT", schema: "public", table: "chronicle", filter: `season_id=eq.${seasonId}` },
+        (payload: { new: Record<string, unknown> }) => {
+          const s = snapRef.current;
+          if (s && payload.new.kind === "raid" && payload.new.target_id === s.userId) {
+            const attacker = s.rivals.find((r) => r.id === payload.new.actor_id)?.name ?? "Un rival";
+            showToast(`⚔️ ${attacker} vient de piller tes greniers !`);
+          }
+          void run({ type: "sync" });
+        },
+      )
+      .subscribe();
+    return () => {
+      void supabase.removeChannel(channel);
+    };
+  }, [seasonId, run, showToast]);
+
   return { snap, toast, run, click, predictedStone, serverNow, pendingClicks: () => pending.current + inflight.current };
 }
 
 /** Classement des contributeurs, rafraîchi quand le chantier avance. */
 export function useLeaderboard(active: boolean, worksiteTotal: number | undefined) {
-  const [rows, setRows] = useState<LeaderboardRow[] | null>(null);
+  const [rows, setRows] = useState<Leaderboards | null>(null);
   useEffect(() => {
     if (!active) return;
     const t = setTimeout(async () => {
       try {
         const res = await fetch("/api/leaderboard", { cache: "no-store" });
-        if (res.ok) setRows(((await res.json()) as { rows: LeaderboardRow[] }).rows);
+        if (res.ok) setRows((await res.json()) as Leaderboards);
       } catch {
         // on garde l'ancien classement
       }

@@ -16,12 +16,47 @@ export interface SeasonView {
   endsAt: number;
 }
 
+/** Un autre joueur ou un seigneur voisin, vu depuis l'onglet Raids. */
+export interface RivalView {
+  id: string;
+  name: string;
+  isLord: boolean;
+  blazon?: string;
+  temper?: string;
+  stone: number;
+  rate: number;
+  /** Pierre qu'un raid rapporterait maintenant (estimation). */
+  loot: number;
+  cost: number;
+  shieldUntil: number;
+  burnedUntil: number;
+  totalPlundered: number;
+  revenge: boolean;
+  /** Raison pour laquelle on ne peut pas le raider maintenant, ou null. */
+  blocker: string | null;
+}
+
+export interface ChronicleEntry {
+  id: number;
+  at: number;
+  kind: "raid" | "gift";
+  actorId: string | null;
+  actorName: string;
+  targetId: string | null;
+  targetName: string;
+  details: { stolen?: number; destroyed?: Record<string, number>; revenge?: boolean; amount?: number };
+}
+
 export interface GameSnapshot {
   serverNow: number;
+  userId: string;
   username: string;
   state: PlayerState;
   worksite: WorksiteView;
   season: SeasonView;
+  rivals: RivalView[];
+  /** Fournie lors des synchronisations et des raids ; sinon le client garde la précédente. */
+  chronicle?: ChronicleEntry[];
 }
 
 export interface LeaderboardRow {
@@ -30,12 +65,19 @@ export interface LeaderboardRow {
   total: number;
 }
 
+export interface Leaderboards {
+  contributors: LeaderboardRow[];
+  plunderers: LeaderboardRow[];
+}
+
 export type GameAction =
   | { type: "sync" }
   | { type: "click"; count: number }
   | { type: "buy"; generator: string; qty: number }
   | { type: "upgrade"; upgrade: string }
-  | { type: "contribute"; amount: number };
+  | { type: "contribute"; amount: number }
+  | { type: "raid"; target: string }
+  | { type: "rebuild"; generator: string };
 
 export type ActionResponse =
   | { ok: true; snapshot: GameSnapshot; message?: string }

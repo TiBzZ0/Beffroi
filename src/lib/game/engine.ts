@@ -2,11 +2,25 @@
 // Le serveur s'en sert pour calculer l'état qui fait foi ; le navigateur pour animer le compteur.
 
 import {
+  BURN_CLICK_REDUCTION_MS,
+  BURN_MS,
+  BURN_PRODUCTION_FACTOR,
   CLICK_WINDOW_MAX_MS,
   COST_GROWTH,
   GENERATORS,
   MAX_CLICKS_PER_SECOND,
   OFFLINE_CAP_MS,
+  PROTECTED_PER_TYPE,
+  RAID_COOLDOWN_MS,
+  RAID_COST_SECONDS,
+  RAID_DESTROY_RATE,
+  RAID_LOOT_RATE,
+  RAID_MIN_COST,
+  REVENGE_LOOT_RATE,
+  REVENGE_MS,
+  RUIN_REBUILD_FACTOR,
+  SECURED_SECONDS,
+  SHIELD_MS,
   STAGES,
   UPGRADE_BY_ID,
   type GeneratorId,
@@ -24,6 +38,18 @@ export interface PlayerState {
   lastUpdate: number;
   /** Horodatage (ms) du dernier lot de clics accepté. */
   lastClickAt: number;
+  /** Bâtiments détruits par un raid, en attente de reconstruction. */
+  ruins: Partial<Record<GeneratorId, number>>;
+  /** Ateliers incendiés (production réduite) jusqu'à cet horodatage. */
+  burnedUntil: number;
+  /** Protégé des raids jusqu'à cet horodatage. */
+  shieldUntil: number;
+  lastRaidAt: number;
+  lastRaidTarget: string | null;
+  /** Seigneur ou joueur contre qui une revanche est possible, et jusqu'à quand. */
+  revengeTarget: string | null;
+  revengeUntil: number;
+  totalPlundered: number;
 }
 
 /** Ce que le joueur doit savoir du monde pour calculer sa production. */
@@ -46,7 +72,19 @@ export function newPlayerState(now: number): PlayerState {
     totalClicks: 0,
     lastUpdate: now,
     lastClickAt: now,
+    ruins: {},
+    burnedUntil: 0,
+    shieldUntil: 0,
+    lastRaidAt: 0,
+    lastRaidTarget: null,
+    revengeTarget: null,
+    revengeUntil: 0,
+    totalPlundered: 0,
   };
+}
+
+export function ruinsOf(state: PlayerState, id: GeneratorId): number {
+  return state.ruins[id] ?? 0;
 }
 
 export function owned(state: PlayerState, id: GeneratorId): number {
@@ -109,19 +147,31 @@ export function clickValue(state: PlayerState, world: WorldState, stagesDone: nu
   return value + fromProduction * productionPerSecond(state, world, stagesDone);
 }
 
+export interface AdvanceOptions {
+  /** Production de base fixe (seigneurs voisins), à la place des bâtiments. */
+  flatRate?: number;
+}
+
+/** Production réelle à l'instant t (incendie compris). */
+export function rateAt(state: PlayerState, world: WorldState, t: number, opts: AdvanceOptions = {}): number {
+  const base = opts.flatRate ?? productionPerSecond(state, world, stagesDoneAt(world, t));
+  return t < state.burnedUntil ? base * BURN_PRODUCTION_FACTOR : base;
+}
+
 /**
  * Calcul paresseux : fait avancer l'état jusqu'à `now`.
- * Le temps hors ligne est plafonné, et le calcul est découpé en segments
- * à chaque étape du chantier terminée pendant l'absence.
+ * Le temps hors ligne est plafonné, et le calcul est découpé en segments à chaque
+ * événement survenu pendant l'absence (étape du chantier terminée, fin d'incendie).
  */
-export function advance(state: PlayerState, now: number, world: WorldState): PlayerState {
+export function advance(state: PlayerState, now: number, world: WorldState, opts: AdvanceOptions = {}): PlayerState {
   if (now <= state.lastUpdate) return state;
   const start = Math.max(state.lastUpdate, now - OFFLINE_CAP_MS);
-  const breakpoints = world.stageCompletedAt.filter((t) => t > start && t < now).sort((a, b) => a - b);
+  const events = [...world.stageCompletedAt, state.burnedUntil];
+  const breakpoints = events.filter((t) => t > start && t < now).sort((a, b) => a - b);
   let gain = 0;
   let cursor = start;
   for (const t of [...breakpoints, now]) {
-    gain += (productionPerSecond(state, world, stagesDoneAt(world, cursor)) * (t - cursor)) / 1000;
+    gain += (rateAt(state, world, cursor, opts) * (t - cursor)) / 1000;
     cursor = t;
   }
   return { ...state, stone: state.stone + gain, totalProduced: state.totalProduced + gain, lastUpdate: now };
@@ -130,14 +180,15 @@ export function advance(state: PlayerState, now: number, world: WorldState): Pla
 /** Prix de `qty` bâtiments supplémentaires (série géométrique). */
 export function generatorCost(state: PlayerState, id: GeneratorId, qty = 1): number {
   const def = GENERATORS.find((g) => g.id === id)!;
-  const n = owned(state, id);
+  // Les ruines comptent : se faire détruire un bâtiment ne rend pas le suivant moins cher.
+  const n = owned(state, id) + ruinsOf(state, id);
   return Math.ceil((def.baseCost * Math.pow(COST_GROWTH, n) * (Math.pow(COST_GROWTH, qty) - 1)) / (COST_GROWTH - 1));
 }
 
 /** Nombre maximal de bâtiments achetables avec la pierre disponible. */
 export function maxAffordable(state: PlayerState, id: GeneratorId): number {
   const def = GENERATORS.find((g) => g.id === id)!;
-  const n = owned(state, id);
+  const n = owned(state, id) + ruinsOf(state, id);
   const first = def.baseCost * Math.pow(COST_GROWTH, n);
   if (state.stone < first) return 0;
   let qty = Math.floor(Math.log((state.stone * (COST_GROWTH - 1)) / first + 1) / Math.log(COST_GROWTH));
@@ -192,6 +243,8 @@ export function applyClicks(
       totalProduced: state.totalProduced + gain,
       totalClicks: state.totalClicks + accepted,
       lastClickAt: now,
+      // Frapper la pierre aide à éteindre l'incendie des ateliers.
+      burnedUntil: state.burnedUntil > now ? Math.max(now, state.burnedUntil - accepted * BURN_CLICK_REDUCTION_MS) : state.burnedUntil,
     },
     accepted,
   };
@@ -212,4 +265,134 @@ export function contribute(state: PlayerState, amount: number): Result<PlayerSta
 export function stageTarget(stage: number, activePlayers: number): number {
   const def = STAGES[Math.min(stage, STAGES.length - 1)];
   return def.basePerPlayer * Math.max(1, activePlayers);
+}
+
+// ---------------------------------------------------------------------------
+// Ruines et raids
+// ---------------------------------------------------------------------------
+
+/** Prix de reconstruction d'une ruine : moitié du prix d'un bâtiment au niveau actuel. */
+export function ruinCost(state: PlayerState, id: GeneratorId): number {
+  const def = GENERATORS.find((g) => g.id === id)!;
+  return Math.ceil(def.baseCost * Math.pow(COST_GROWTH, owned(state, id)) * RUIN_REBUILD_FACTOR);
+}
+
+export function rebuildRuin(state: PlayerState, id: GeneratorId): Result<PlayerState> {
+  if (!GENERATORS.some((g) => g.id === id)) return { ok: false, error: "Bâtiment inconnu." };
+  if (ruinsOf(state, id) < 1) return { ok: false, error: "Aucune ruine à rebâtir." };
+  const cost = ruinCost(state, id);
+  if (cost > state.stone) return { ok: false, error: "Pas assez de pierre." };
+  return {
+    ok: true,
+    value: {
+      ...state,
+      stone: state.stone - cost,
+      generators: { ...state.generators, [id]: owned(state, id) + 1 },
+      ruins: { ...state.ruins, [id]: ruinsOf(state, id) - 1 },
+    },
+  };
+}
+
+/** Coût d'un raid pour l'attaquant (en pierre). */
+export function raidCost(attackerRate: number, guard = 1): number {
+  return Math.ceil(Math.max(RAID_MIN_COST, attackerRate * RAID_COST_SECONDS) * guard);
+}
+
+export function hasRevenge(attacker: PlayerState, victimId: string, now: number): boolean {
+  return attacker.revengeTarget === victimId && attacker.revengeUntil > now;
+}
+
+export interface RaidContext {
+  now: number;
+  attackerId: string;
+  victimId: string;
+  /** Production actuelle de l'attaquant (pour le coût) et de la victime (pour le stock sécurisé). */
+  attackerRate: number;
+  victimRate: number;
+  /** Les seigneurs ne paient pas leurs raids. */
+  attackerIsLord?: boolean;
+  /** Multiplicateur de coût (seigneur bien gardé). */
+  guard?: number;
+}
+
+export interface RaidReport {
+  stolen: number;
+  cost: number;
+  destroyed: Partial<Record<GeneratorId, number>>;
+  revenge: boolean;
+}
+
+/** Vérifie qu'un raid est permis. Renvoie un message d'erreur, ou null. */
+export function raidBlocker(attacker: PlayerState, victim: PlayerState, ctx: RaidContext): string | null {
+  const revenge = hasRevenge(attacker, ctx.victimId, ctx.now);
+  if (ctx.attackerId === ctx.victimId) return "On ne se pille pas soi-même.";
+  if (victim.shieldUntil > ctx.now) return "Cette cible est sous bouclier.";
+  if (!revenge && attacker.lastRaidTarget === ctx.victimId) return "Pas deux raids de suite contre la même cible.";
+  if (!revenge && !ctx.attackerIsLord && ctx.now - attacker.lastRaidAt < RAID_COOLDOWN_MS) return "Tes troupes se reposent encore.";
+  const cost = revenge || ctx.attackerIsLord ? 0 : raidCost(ctx.attackerRate, ctx.guard);
+  if (cost > attacker.stone) return "Pas assez de pierre pour payer les mercenaires.";
+  return null;
+}
+
+/**
+ * Résout un raid. Les deux états doivent déjà être avancés jusqu'à `ctx.now`.
+ * La victime perd une part de son stock non sécurisé, voit ses ateliers incendiés et
+ * quelques bâtiments détruits, puis reçoit un bouclier et un droit de revanche.
+ */
+export function resolveRaid(
+  attacker: PlayerState,
+  victim: PlayerState,
+  ctx: RaidContext,
+): Result<{ attacker: PlayerState; victim: PlayerState; report: RaidReport }> {
+  const blocked = raidBlocker(attacker, victim, ctx);
+  if (blocked) return { ok: false, error: blocked };
+  const { now } = ctx;
+  const revenge = hasRevenge(attacker, ctx.victimId, now);
+  const cost = revenge || ctx.attackerIsLord ? 0 : raidCost(ctx.attackerRate, ctx.guard);
+
+  const secured = ctx.victimRate * SECURED_SECONDS;
+  const stolen = Math.floor(Math.max(0, victim.stone - secured) * (revenge ? REVENGE_LOOT_RATE : RAID_LOOT_RATE));
+
+  // Destruction : 5 % des bâtiments (arrondi à l'inférieur), au plus un par type,
+  // en commençant par les plus précieux, jamais en dessous des premiers protégés.
+  const total = GENERATORS.reduce((sum, g) => sum + owned(victim, g.id), 0);
+  let toDestroy = Math.floor(total * RAID_DESTROY_RATE);
+  const generators = { ...victim.generators };
+  const ruins = { ...victim.ruins };
+  const destroyed: RaidReport["destroyed"] = {};
+  for (const g of [...GENERATORS].reverse()) {
+    if (toDestroy <= 0) break;
+    if (owned(victim, g.id) > PROTECTED_PER_TYPE) {
+      generators[g.id] = owned(victim, g.id) - 1;
+      ruins[g.id] = ruinsOf(victim, g.id) + 1;
+      destroyed[g.id] = 1;
+      toDestroy--;
+    }
+  }
+
+  return {
+    ok: true,
+    value: {
+      attacker: {
+        ...attacker,
+        stone: attacker.stone - cost + stolen,
+        totalPlundered: attacker.totalPlundered + stolen,
+        lastRaidAt: now,
+        lastRaidTarget: ctx.victimId,
+        shieldUntil: 0, // attaquer fait tomber son propre bouclier
+        ...(revenge ? { revengeTarget: null, revengeUntil: 0 } : {}),
+      },
+      victim: {
+        ...victim,
+        stone: victim.stone - stolen,
+        generators,
+        ruins,
+        burnedUntil: Math.max(victim.burnedUntil, now + BURN_MS),
+        shieldUntil: now + SHIELD_MS,
+        revengeTarget: ctx.attackerId,
+        revengeUntil: now + REVENGE_MS,
+      },
+      report: { stolen, cost, destroyed, revenge },
+    },
+  };
 }
