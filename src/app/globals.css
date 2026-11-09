@@ -458,6 +458,13 @@ a {
   font-size: 0.88rem;
   color: var(--ink-soft);
 }
+.strong-vs {
+  color: var(--accent);
+  font-style: italic;
+}
+.army-line {
+  word-spacing: 0.15em;
+}
 .row .btn {
   min-width: 92px;
   text-align: center;

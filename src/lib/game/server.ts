@@ -7,7 +7,9 @@ import {
   LORD_MIN_RATE,
   LORDS,
   LORD_ARMY,
-  BASE_DEFENSE,
+  LORD_MIN_BUDGET,
+  GUARDS_PER_DOMAIN,
+  COMBATANTS,
   SEASON_DAYS,
   SECURED_SECONDS,
   RAID_LOOT_RATE,
@@ -27,12 +29,10 @@ import {
   hasRevenge,
 
   productionPerSecond,
+  raidArmies,
   raidBlocker,
-  attackPower,
+  armyWorth,
   buyArmy,
-  defensePower,
-  effectiveAttack,
-  raidChance,
   rateAt,
   rebuildRuin,
   resolveRaid,
@@ -54,6 +54,7 @@ import {
   type SeasonView,
   type WorksiteView,
 } from "./types";
+import { armyFromBudget, estimateChance, type Army } from "./battle";
 import { recordContribution, topContributors } from "@/lib/redis";
 
 // Toute la logique qui fait foi : charger l'état, le recalculer, appliquer l'intention
@@ -250,12 +251,16 @@ function median(values: number[]): number {
 }
 
 /** Armée des seigneurs : elle suit la médiane des vrais joueurs, selon leur caractère. */
-function lordArmies(entities: Map<string, Entity>): Map<string, { attack: number; defense: number }> {
+function lordArmies(entities: Map<string, Entity>): Map<string, { attack: Army; defense: Army }> {
   const humans = [...entities.values()].filter((e) => !e.isLord);
-  const medAttack = Math.max(BASE_DEFENSE, median(humans.map((e) => attackPower(e.state))));
-  const medDefense = Math.max(BASE_DEFENSE, median(humans.map((e) => defensePower(e.state))));
-  const out = new Map<string, { attack: number; defense: number }>();
-  for (const l of LORDS) out.set(l.id, { attack: Math.round(medDefense * LORD_ARMY[l.key].attack), defense: Math.round(medAttack * LORD_ARMY[l.key].defense) });
+  const budget = Math.max(LORD_MIN_BUDGET, median(humans.map((e) => armyWorth(e.state))));
+  const out = new Map<string, { attack: Army; defense: Army }>();
+  for (const l of LORDS) {
+    const taste = LORD_ARMY[l.key];
+    const attack = armyFromBudget(budget * taste.attack, taste.troops);
+    const forts = armyFromBudget(budget * taste.defense, taste.forts);
+    out.set(l.id, { attack, defense: { ...attack, ...forts, garde: GUARDS_PER_DOMAIN } });
+  }
   return out;
 }
 
@@ -331,19 +336,22 @@ async function tickLords(admin: SupabaseClient, season: SeasonView, entities: Ma
           const rate = currentRate(e, s, now, world, flat);
           return { e, s, rate, loot: Math.max(0, s.stone - rate * SECURED_SECONDS) };
         })
-        .filter((c) => !raidBlocker(state, c.s, { now, attackerId: lord.id, victimId: c.e.id, victimRate: c.rate, attackerIsLord: true, attackOverride: army.attack }))
+        .filter((c) => !raidBlocker(state, c.s, { now, attackerId: lord.id, victimId: c.e.id, victimRate: c.rate, attackerIsLord: true, attackerArmy: army.attack }))
         .sort((a, b) => b.loot - a.loot);
       // Le plus riche le plus souvent, mais pas toujours.
       const pick = candidates.length > 0 ? candidates[Math.random() < 0.6 ? 0 : Math.floor(Math.random() * candidates.length)] : null;
       if (pick) {
-        const r = resolveRaid(state, pick.s, { now, attackerId: lord.id, victimId: pick.e.id, victimRate: pick.rate, attackerIsLord: true, attackOverride: army.attack, roll: Math.random() });
+        const ctx = { now, attackerId: lord.id, victimId: pick.e.id, victimRate: pick.rate, attackerIsLord: true, attackerArmy: army.attack };
+        const armiesNow = raidArmies(state, pick.s, ctx);
+        const chance = estimateChance(armiesNow.attack, armiesNow.defense, { attackBonus: armiesNow.attackBonus });
+        const r = resolveRaid(state, pick.s, { ...ctx, rng: Math.random });
         if (r.ok) {
           await admin.rpc("apply_raid", {
             p_season: season.id,
             p_attacker: toJson(me, r.value.attacker, nextRaid),
             p_victim: toJson(pick.e, r.value.victim),
             p_attacker_touch: false,
-            p_chronicle: chronicleDetails(r.value.report),
+            p_chronicle: chronicleDetails(r.value.report, chance),
           });
           changed = true;
           continue;
@@ -384,9 +392,8 @@ function rivalsFor(me: Entity, myState: PlayerState, entities: Map<string, Entit
       const s = advanceEntity(e, now, world, flat);
       const rate = currentRate(e, s, now, world, flat);
       const revenge = hasRevenge(myState, e.id, now);
-      const defense = e.isLord ? (armies.get(e.id)?.defense ?? BASE_DEFENSE) : defensePower(s);
-      const attack = effectiveAttack(myState, { victimId: e.id, now });
-      const ctx = { now, attackerId: me.id, victimId: e.id, victimRate: rate };
+      const ctx = { now, attackerId: me.id, victimId: e.id, victimRate: rate, defenderArmy: e.isLord ? armies.get(e.id)?.defense : undefined };
+      const fight = raidArmies(myState, s, ctx);
       const loot = Math.floor(Math.max(0, s.stone - rate * SECURED_SECONDS) * (revenge ? REVENGE_LOOT_RATE : RAID_LOOT_RATE));
       return {
         id: e.id,
@@ -397,9 +404,8 @@ function rivalsFor(me: Entity, myState: PlayerState, entities: Map<string, Entit
         stone: s.stone,
         rate,
         loot,
-        defense,
-        attack: e.isLord ? (armies.get(e.id)?.attack ?? 0) : attackPower(s),
-        chance: raidChance(attack, defense),
+        army: fight.defense as Record<string, number>,
+        chance: estimateChance(fight.attack, fight.defense, { attackBonus: fight.attackBonus }),
         shieldUntil: s.shieldUntil,
         burnedUntil: s.burnedUntil,
         totalPlundered: s.totalPlundered,
@@ -410,8 +416,19 @@ function rivalsFor(me: Entity, myState: PlayerState, entities: Map<string, Entit
     .sort((a, b) => Number(a.isLord) - Number(b.isLord) || b.loot - a.loot);
 }
 
-function chronicleDetails(r: RaidReport) {
-  return { success: r.success, chance: r.chance, stolen: r.stolen, destroyed: r.destroyed, troopsLost: r.troopsLost, defensesLost: r.defensesLost, revenge: r.revenge };
+function chronicleDetails(r: RaidReport, chance: number) {
+  return { success: r.success, chance, rounds: r.rounds, stolen: r.stolen, destroyed: r.destroyed, attackerLost: r.attackerLost, defenderLost: r.defenderLost, revenge: r.revenge };
+}
+
+/** « 3 miliciens, 1 chevalier » */
+function describeArmy(army: Army): string {
+  const parts = (Object.entries(army) as [string, number][])
+    .filter(([, n]) => n > 0)
+    .map(([id, n]) => {
+      const c = COMBATANTS.get(id);
+      return `${n} ${(n > 1 ? c?.plural : c?.name)?.toLowerCase() ?? id}`;
+    });
+  return parts.length ? parts.join(", ") : "aucune perte";
 }
 
 interface Outcome {
@@ -485,14 +502,16 @@ export async function runAction(admin: SupabaseClient, userId: string, action: G
         error = "Cible inconnue.";
       } else {
         const victimState = advanceEntity(victim, now, world, flat);
-        const r = resolveRaid(current, victimState, {
+        const ctx = {
           now,
           attackerId: me.id,
           victimId: victim.id,
           victimRate: currentRate(victim, victimState, now, world, flat),
-          defenseOverride: victim.isLord ? lordArmies(entities).get(victim.id)?.defense : undefined,
-          roll: Math.random(),
-        });
+          defenderArmy: victim.isLord ? lordArmies(entities).get(victim.id)?.defense : undefined,
+        };
+        const armiesNow = raidArmies(current, victimState, ctx);
+        const chance = estimateChance(armiesNow.attack, armiesNow.defense, { attackBonus: armiesNow.attackBonus });
+        const r = resolveRaid(current, victimState, { ...ctx, rng: Math.random });
         if (!r.ok) {
           error = r.error;
         } else {
@@ -501,7 +520,7 @@ export async function runAction(admin: SupabaseClient, userId: string, action: G
             p_attacker: toJson(me, r.value.attacker),
             p_victim: toJson(victim, r.value.victim),
             p_attacker_touch: true,
-            p_chronicle: chronicleDetails(r.value.report),
+            p_chronicle: chronicleDetails(r.value.report, chance),
           });
           if (rpcError?.message.includes("beffroi_conflict") || (data as { conflict?: boolean } | null)?.conflict) continue;
           if (rpcError) throw new Error(`Raid impossible : ${rpcError.message}`);
@@ -509,10 +528,10 @@ export async function runAction(admin: SupabaseClient, userId: string, action: G
           finalState = r.value.attacker;
           const rep = r.value.report;
           const lost = Object.values(rep.destroyed).reduce((a, b) => a + (b ?? 0), 0);
-          const fallen = Object.values(rep.troopsLost).reduce((a, b) => a + (b ?? 0), 0);
+          const fallen = describeArmy(rep.attackerLost);
           message = rep.success
-            ? `Raid réussi contre ${victim.name} : ${Math.floor(rep.stolen).toLocaleString("fr-FR")} pierres pillées${lost ? `, ${lost} bâtiment${lost > 1 ? "s" : ""} en ruine` : ""}. ${fallen} soldat${fallen > 1 ? "s" : ""} tombé${fallen > 1 ? "s" : ""}.`
-            : `${victim.name} a repoussé ton raid ! ${fallen} soldat${fallen > 1 ? "s" : ""} perdu${fallen > 1 ? "s" : ""}.`;
+            ? `Raid réussi contre ${victim.name} : ${Math.floor(rep.stolen).toLocaleString("fr-FR")} pierres pillées${lost ? `, ${lost} bâtiment${lost > 1 ? "s" : ""} en ruine` : ""}. Tes pertes : ${fallen}.`
+            : `${victim.name} a repoussé ton raid en ${rep.rounds} round${rep.rounds > 1 ? "s" : ""}. Tes pertes : ${fallen}.`;
           entities = await loadEntities(admin, season.id, userId);
         }
       }

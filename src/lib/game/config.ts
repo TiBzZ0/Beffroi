@@ -126,7 +126,7 @@ export const ACTIVE_WINDOW_DAYS = 7;
 // ---------------------------------------------------------------------------
 
 /** Délai minimal entre deux raids lancés par un même joueur. */
-export const RAID_COOLDOWN_MS = 60 * 60 * 1000;
+export const RAID_COOLDOWN_MS = 5 * 60 * 1000;
 /** Part du stock non sécurisé volée (doublée en cas de revanche). */
 export const RAID_LOOT_RATE = 0.1;
 export const REVENGE_LOOT_RATE = 0.2;
@@ -182,50 +182,84 @@ export const LORD_BY_ID: ReadonlyMap<string, LordDef> = new Map(LORDS.map((l) =>
 export const LORD_MIN_RATE = 1;
 
 // ---------------------------------------------------------------------------
-// Troupes et défenses
+// Troupes et défenses : combats en rounds, chaque type a ses forces et faiblesses
 // ---------------------------------------------------------------------------
 
-export type UnitId = "milicien" | "arbaletrier" | "chevalier";
-export type DefenseId = "palissade" | "tour" | "muraille";
+export type UnitId = "milicien" | "piquier" | "arbaletrier" | "chevalier" | "belier";
+export type DefenseId = "palissade" | "tour" | "baliste" | "muraille";
+/** Garde du château : défenseurs gratuits présents dans chaque domaine. */
+export type GuardId = "garde";
+export type CombatantId = UnitId | DefenseId | GuardId;
+export type Category = "infanterie" | "tir" | "cavalerie" | "siege" | "fortification";
 
-export interface ArmyDef<Id extends string> {
+export const CATEGORY_LABELS: Record<Category, string> = {
+  infanterie: "l'infanterie",
+  tir: "les tireurs",
+  cavalerie: "la cavalerie",
+  siege: "les engins de siège",
+  fortification: "les fortifications",
+};
+
+export interface CombatantDef<Id extends string = CombatantId> {
   id: Id;
   name: string;
   plural: string;
   icon: string;
   description: string;
   cost: number;
-  /** Puissance d'attaque (troupes) ou de défense (fortifications) par exemplaire. */
-  power: number;
+  attack: number;
+  hp: number;
+  category: Category;
+  /** Multiplicateur de dégâts contre certaines catégories. */
+  bonus?: Partial<Record<Category, number>>;
 }
 
-export const UNITS: readonly ArmyDef<UnitId>[] = [
-  { id: "milicien", name: "Milicien", plural: "Miliciens", icon: "🗡️", description: "Une fourche, un peu de courage.", cost: 200, power: 1 },
-  { id: "arbaletrier", name: "Arbalétrier", plural: "Arbalétriers", icon: "🏹", description: "Frappe de loin, et fort.", cost: 2_500, power: 14 },
-  { id: "chevalier", name: "Chevalier", plural: "Chevaliers", icon: "🐎", description: "Armure, destrier et panache.", cost: 30_000, power: 190 },
+export const UNITS: readonly CombatantDef<UnitId>[] = [
+  { id: "milicien", name: "Milicien", plural: "Miliciens", icon: "🗡️", description: "Pas cher, pas bien solide.", cost: 200, attack: 2, hp: 10, category: "infanterie" },
+  { id: "piquier", name: "Piquier", plural: "Piquiers", icon: "🔱", description: "Sa pique arrête net les chevaux.", cost: 400, attack: 3, hp: 25, category: "infanterie", bonus: { cavalerie: 4 } },
+  { id: "arbaletrier", name: "Arbalétrier", plural: "Arbalétriers", icon: "🏹", description: "Fauche l'infanterie, fragile au contact.", cost: 500, attack: 8, hp: 15, category: "tir", bonus: { infanterie: 2.5 } },
+  { id: "chevalier", name: "Chevalier", plural: "Chevaliers", icon: "🐎", description: "Charge les tireurs, redoute les piques.", cost: 2_000, attack: 25, hp: 80, category: "cavalerie", bonus: { tir: 3 } },
+  { id: "belier", name: "Bélier", plural: "Béliers", icon: "🪓", description: "Inutile en rase campagne, terrible contre les murs.", cost: 3_000, attack: 5, hp: 150, category: "siege", bonus: { fortification: 20 } },
 ];
 
-export const DEFENSES: readonly ArmyDef<DefenseId>[] = [
-  { id: "palissade", name: "Palissade", plural: "Palissades", icon: "🪵", description: "Des pieux bien taillés.", cost: 150, power: 1 },
-  { id: "tour", name: "Tour de guet", plural: "Tours de guet", icon: "🗼", description: "On voit venir les pillards.", cost: 2_000, power: 14 },
-  { id: "muraille", name: "Muraille", plural: "Murailles", icon: "🧱", description: "Pierre sur pierre, rien ne passe.", cost: 24_000, power: 190 },
+export const DEFENSES: readonly CombatantDef<DefenseId>[] = [
+  { id: "palissade", name: "Palissade", plural: "Palissades", icon: "🪵", description: "Encaisse les coups, ne riposte pas.", cost: 150, attack: 0, hp: 40, category: "fortification" },
+  { id: "tour", name: "Tour d'archers", plural: "Tours d'archers", icon: "🗼", description: "Arrose l'infanterie qui approche.", cost: 1_000, attack: 8, hp: 60, category: "fortification", bonus: { infanterie: 2 } },
+  { id: "baliste", name: "Baliste", plural: "Balistes", icon: "🎯", description: "Transperce chevaliers et béliers.", cost: 3_000, attack: 30, hp: 120, category: "fortification", bonus: { cavalerie: 3, siege: 3 } },
+  { id: "muraille", name: "Muraille", plural: "Murailles", icon: "🧱", description: "Un mur immense qui absorbe l'assaut.", cost: 5_000, attack: 0, hp: 1_500, category: "fortification" },
 ];
 
+export const GUARD: CombatantDef<GuardId> = {
+  id: "garde",
+  name: "Garde du château",
+  plural: "Gardes du château",
+  icon: "💂",
+  description: "Toujours là, toujours remplacé.",
+  cost: 0,
+  attack: 2,
+  hp: 12,
+  category: "infanterie",
+};
+export const GUARDS_PER_DOMAIN = 3;
+
+export const COMBATANTS: ReadonlyMap<string, CombatantDef> = new Map<string, CombatantDef>([...UNITS, ...DEFENSES, GUARD].map((c) => [c.id, c]));
 export const UNIT_IDS = UNITS.map((u) => u.id);
 export const DEFENSE_IDS = DEFENSES.map((d) => d.id);
 
-/** Défense de base de chaque domaine (gardes du château), même sans fortification. */
-export const BASE_DEFENSE = 5;
-/** Bonus d'attaque lors d'une revanche. */
+/** Nombre maximal de rounds d'une bataille. */
+export const BATTLE_ROUNDS = 4;
+/** Part des fortifications détruites qui se relèvent après la bataille. */
+export const DEFENSE_REPAIR_RATE = 0.7;
+/** Bonus de dégâts lors d'une revanche. */
 export const REVENGE_ATTACK_BONUS = 1.5;
-/** Pertes de l'attaquant : en cas de victoire, puis de défaite. */
-export const ATTACKER_LOSS_ON_WIN = 0.1;
-export const ATTACKER_LOSS_ON_DEFEAT = 0.3;
-/** Fortifications endommagées quand la défense tombe. */
-export const DEFENSE_LOSS_ON_DEFEAT = 0.1;
-/** Seigneurs : attaque et défense = médiane des joueurs × facteur. */
-export const LORD_ARMY: Record<LordKey, { attack: number; defense: number }> = {
-  corbelune: { attack: 1.1, defense: 0.8 },
-  aubeval: { attack: 0, defense: 0.7 },
-  grisemolle: { attack: 0.9, defense: 2.5 },
+/** Nombre de batailles simulées pour estimer la chance de succès. */
+export const CHANCE_SIMULATIONS = 40;
+
+/** Armée des seigneurs : budget = valeur médiane des armées des joueurs × facteur, réparti selon leur goût. */
+export const LORD_ARMY: Record<LordKey, { attack: number; defense: number; troops: Partial<Record<UnitId, number>>; forts: Partial<Record<DefenseId, number>> }> = {
+  corbelune: { attack: 1.2, defense: 0.8, troops: { chevalier: 0.5, arbaletrier: 0.3, milicien: 0.2 }, forts: { palissade: 0.5, tour: 0.5 } },
+  aubeval: { attack: 0, defense: 0.8, troops: {}, forts: { palissade: 0.5, tour: 0.5 } },
+  grisemolle: { attack: 0.9, defense: 2.5, troops: { piquier: 0.5, arbaletrier: 0.5 }, forts: { muraille: 0.4, baliste: 0.4, tour: 0.2 } },
 };
+/** Budget minimal d'une armée de seigneur, pour qu'il ne soit jamais sans défense. */
+export const LORD_MIN_BUDGET = 1_500;

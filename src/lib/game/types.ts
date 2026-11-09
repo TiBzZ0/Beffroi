@@ -27,9 +27,8 @@ export interface RivalView {
   rate: number;
   /** Pierre qu'un raid rapporterait maintenant (estimation). */
   loot: number;
-  /** Défense estimée de la cible, son attaque, et ta chance de réussir un raid. */
-  defense: number;
-  attack: number;
+  /** Armée qui défendrait le domaine (troupes, fortifications, gardes), et ta chance estimée de l'emporter. */
+  army: Record<string, number>;
   chance: number;
   shieldUntil: number;
   burnedUntil: number;
@@ -52,8 +51,9 @@ export interface ChronicleEntry {
     chance?: number;
     stolen?: number;
     destroyed?: Record<string, number>;
-    troopsLost?: Record<string, number>;
-    defensesLost?: Record<string, number>;
+    rounds?: number;
+    attackerLost?: Record<string, number>;
+    defenderLost?: Record<string, number>;
     revenge?: boolean;
     amount?: number;
   };

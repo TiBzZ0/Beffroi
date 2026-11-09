@@ -2,12 +2,23 @@
 
 import { useEffect, useRef, useState } from "react";
 import { signOut } from "@/app/(auth)/actions";
-import { DEFENSES, GENERATORS, RAID_COOLDOWN_MS, STAGES, UNITS, UPGRADES, type ArmyDef, type GeneratorId } from "@/lib/game/config";
+import {
+  CATEGORY_LABELS,
+  COMBATANTS,
+  DEFENSES,
+  GENERATORS,
+  RAID_COOLDOWN_MS,
+  STAGES,
+  UNITS,
+  UPGRADES,
+  type Category,
+  type CombatantDef,
+  type GeneratorId,
+} from "@/lib/game/config";
 import {
   advance,
-  attackPower,
+  armyWorth,
   clickValue,
-  defensePower,
   generatorCost,
   generatorRate,
   maxAffordable,
@@ -438,9 +449,11 @@ function Raids({ snap, live, now, run }: { snap: GameSnapshot; live: PlayerState
   return (
     <>
       <p className="note raid-intro">
-        La chance de succès dépend de ton attaque face à la défense de la cible. Un raid réussi vole 10 % de la pierre non sécurisée (la dernière
-        demi-heure de production est à l&apos;abri), incendie les ateliers 2 h, ruine quelques bâtiments et abat 10 % des fortifications ; la victime
-        reçoit 4 h de bouclier et un droit de revanche (+50 % d&apos;attaque). Tu perds 10 % de tes troupes en cas de victoire, 30 % en cas d&apos;échec.
+        Un raid est une bataille de 4 rounds au plus : toutes tes troupes contre les troupes, fortifications et 3 gardes de la cible. Chaque unité a
+        ses forces et ses faiblesses, compose ton armée selon ce que tu vois en face. Tu gagnes si plus personne ne riposte en face. Les pertes sont
+        réelles des deux côtés (70 % des fortifications abattues se relèvent). Un raid réussi vole 10 % de la pierre non sécurisée (la dernière
+        demi-heure de production est à l&apos;abri), incendie les ateliers 2 h et ruine quelques bâtiments ; la victime reçoit 4 h de bouclier et un
+        droit de revanche (+50 % de dégâts).
       </p>
       <Garrison live={live} run={run} />
       <p className="raid-state">
@@ -482,9 +495,12 @@ function RivalRow({ r, now, busy, onRaid }: { r: RivalView; now: number; busy: s
         </div>
         <div className="row-desc num">
           {r.temper ? `${r.temper} · ` : ""}
-          {formatNumber(r.stone)} pierres · {formatRate(r.rate)}/s · 🛡️ déf. {formatNumber(r.defense)} · ⚔️ att. {formatNumber(r.attack)}
+          {formatNumber(r.stone)} pierres · {formatRate(r.rate)}/s
           {shielded ? ` · bouclier ${duration(r.shieldUntil - now)}` : ""}
           {r.burnedUntil > now ? " · 🔥" : ""}
+        </div>
+        <div className="row-desc army-line num" title="Ce qui défendrait le domaine">
+          {armyIcons(r.army)}
         </div>
         <div className="row-desc">
           {r.blocker ?? (r.loot > 0 ? `Butin estimé : ${formatNumber(r.loot)} pierres` : "Rien à piller pour l'instant.")}
@@ -496,6 +512,12 @@ function RivalRow({ r, now, busy, onRaid }: { r: RivalView; now: number; busy: s
       </button>
     </div>
   );
+}
+
+/** « 🗡️12 🔱3 💂3 » dans l'ordre des unités. */
+function armyIcons(army: Record<string, number>, empty = "personne"): string {
+  const parts = [...COMBATANTS.values()].filter((c) => (army[c.id] ?? 0) > 0).map((c) => `${c.icon}${formatNumber(army[c.id])}`);
+  return parts.length ? parts.join("  ") : empty;
 }
 
 function Chronicle({ entries, me, now }: { entries: ChronicleEntry[]; me: string; now: number }) {
@@ -521,10 +543,12 @@ function Chronicle({ entries, me, now }: { entries: ChronicleEntry[]; me: string
           if (e.details.success === false) {
             const repel = e.targetId === me ? "Tu as repoussé" : `${e.targetName} a repoussé`;
             text = `${repel} le raid de ${e.actorId === me ? "toi" : e.actorName}${e.details.revenge ? " (revanche)" : ""}.`;
+            if (e.details.attackerLost) text += ` Pertes de l'assaillant : ${armyIcons(e.details.attackerLost, "aucune")}.`;
           } else {
             const verb = e.actorId === me ? "as pillé" : "a pillé";
             const target = e.targetId === me ? "tes greniers" : targetName;
             text = `${actor} ${verb} ${target}${e.details.revenge ? " (revanche)" : ""} : ${formatNumber(e.details.stolen ?? 0)} pierres${ruined ? `, ${ruined} bâtiment${ruined > 1 ? "s" : ""} en ruine` : ""}.`;
+            if (e.details.defenderLost) text += ` Pertes du défenseur : ${armyIcons(e.details.defenderLost, "aucune")}.`;
           }
         }
         return (
@@ -547,7 +571,7 @@ function Garrison({ live, run }: { live: PlayerState; run: ReturnType<typeof use
     await run({ type: "army", kind, id, qty });
     setBusy(false);
   };
-  const rows = (kind: "unit" | "defense", defs: readonly ArmyDef<string>[]) =>
+  const rows = (kind: "unit" | "defense", defs: readonly CombatantDef<string>[]) =>
     defs.map((d) => {
       const n = ((kind === "unit" ? live.troops : live.defenses) as Record<string, number>)[d.id] ?? 0;
       return (
@@ -561,8 +585,9 @@ function Garrison({ live, run }: { live: PlayerState; run: ReturnType<typeof use
               {n > 0 && <span className="row-count num">{n}</span>}
             </div>
             <div className="row-desc num">
-              {d.description} {kind === "unit" ? "Attaque" : "Défense"} {d.power} chacun.
+              ⚔️ {d.attack} · ❤️ {d.hp} · {d.description}
             </div>
+            {d.bonus && <div className="row-desc strong-vs">{strengths(d.bonus)}</div>}
           </div>
           <button className="btn btn-primary" disabled={busy || d.cost * qty > live.stone} onClick={() => buy(kind, d.id)}>
             +{qty}
@@ -576,7 +601,7 @@ function Garrison({ live, run }: { live: PlayerState; run: ReturnType<typeof use
       <div className="garrison-head">
         <h3 className="section-title">Ta garnison</h3>
         <span className="num">
-          ⚔️ {formatNumber(attackPower(live))} · 🛡️ {formatNumber(defensePower(live))}
+          valeur {formatNumber(armyWorth(live))} 🪨
         </span>
       </div>
       <div className="qty" role="group" aria-label="Quantité">
@@ -591,5 +616,12 @@ function Garrison({ live, run }: { live: PlayerState; run: ReturnType<typeof use
         {rows("defense", DEFENSES)}
       </div>
     </>
+  );
+}
+
+function strengths(bonus: Partial<Record<Category, number>>): string {
+  return (
+    "Fort contre " +
+    (Object.entries(bonus) as [Category, number][]).map(([c, m]) => `${CATEGORY_LABELS[c]} (×${m})`).join(" et ")
   );
 }
