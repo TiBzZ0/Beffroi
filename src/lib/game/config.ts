@@ -10,6 +10,10 @@ export const OFFLINE_CAP_MS = 8 * 60 * 60 * 1000;
 export const MAX_CLICKS_PER_SECOND = 15;
 /** Fenêtre maximale de clics prise en compte par lot (évite d'accumuler un crédit de clics). */
 export const CLICK_WINDOW_MAX_MS = 10_000;
+/** Anti-triche : au-delà de 12 coups/s soutenus sur 3 envois de suite (≈ 9 s), le marteau est confisqué 2 min. */
+export const SUSPICIOUS_CLICK_RATE = 12;
+export const CLICK_STRIKES_FOR_PAUSE = 3;
+export const CLICK_PAUSE_MS = 2 * 60 * 1000;
 
 /** Croissance du prix de chaque bâtiment supplémentaire. */
 export const COST_GROWTH = 1.15;

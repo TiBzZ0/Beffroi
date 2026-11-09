@@ -90,6 +90,8 @@ interface PlayerRow {
   total_plundered: number | null;
   troops: Record<string, number> | null;
   defenses: Record<string, number> | null;
+  click_strikes?: number | null;
+  click_paused_until?: string | null;
   next_raid_at: string | null;
   next_contrib_at: string | null;
   version: number;
@@ -169,6 +171,8 @@ function toEntity(row: PlayerRow): Entity {
       totalPlundered: Number(row.total_plundered ?? 0),
       troops: armyCounts(row.troops, UNIT_IDS),
       defenses: armyCounts(row.defenses, DEFENSE_IDS),
+      clickStrikes: Number(row.click_strikes ?? 0),
+      clickPausedUntil: ms(row.click_paused_until),
     },
   };
 }
@@ -195,6 +199,8 @@ function toJson(e: Entity, state: PlayerState, extra: Record<string, unknown> = 
     total_plundered: state.totalPlundered,
     troops: state.troops,
     defenses: state.defenses,
+    click_strikes: state.clickStrikes,
+    click_paused_until: iso(state.clickPausedUntil),
     ...extra,
   };
 }
@@ -476,8 +482,13 @@ function applySimpleAction(state: PlayerState, action: GameAction, now: number, 
   switch (action.type) {
     case "sync":
       return { ok: true, value: { state } };
-    case "click":
-      return { ok: true, value: { state: applyClicks(state, Number(action.count), now, world).state } };
+    case "click": {
+      const r = applyClicks(state, Number(action.count), now, world);
+      if (r.paused && !(state.clickPausedUntil > now)) {
+        return { ok: true, value: { state: r.state, log: { action: "click_pause", details: { requested: Number(action.count) } } } };
+      }
+      return { ok: true, value: { state: r.state } };
+    }
     case "buy": {
       if (!GENERATOR_IDS.includes(action.generator as GeneratorId)) return { ok: false, error: "Bâtiment inconnu." };
       const r = buyGenerator(state, action.generator as GeneratorId, Number(action.qty));

@@ -272,6 +272,11 @@ a {
   -webkit-user-select: none;
   transition: transform 0.05s ease;
 }
+.hammer:disabled {
+  filter: grayscale(1);
+  opacity: 0.5;
+  cursor: not-allowed;
+}
 .hammer:active {
   transform: scale(0.96);
 }

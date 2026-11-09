@@ -164,6 +164,7 @@ function Hero({ snap, rate, clickGain, game }: { snap: GameSnapshot; rate: numbe
     setTimeout(() => setFloaters((list) => list.filter((x) => x.id !== id)), 900);
   };
 
+  const paused = snap.state.clickPausedUntil > game.serverNow();
   const w = snap.worksite;
   const finished = w.stage >= STAGES.length;
   const pct = finished ? 100 : Math.min(100, (w.progress / Math.max(1, w.target)) * 100);
@@ -177,10 +178,12 @@ function Hero({ snap, rate, clickGain, game }: { snap: GameSnapshot; rate: numbe
           </div>
           <div className="stone-label">pierres taillées</div>
           <div className="rate num">{formatRate(rate)} / seconde</div>
-          <div className="hammer-hint">Frappe la pierre : +{formatRate(clickGain)} par coup</div>
+          <div className="hammer-hint">
+            {paused ? `🔨 Marteau confisqué encore ${Math.ceil((snap.state.clickPausedUntil - game.serverNow()) / 1000)} s` : `Frappe la pierre : +${formatRate(clickGain)} par coup`}
+          </div>
         </div>
         <div className="hammer-zone">
-          <button className="hammer" onPointerDown={onHit} aria-label={`Tailler la pierre (+${formatRate(clickGain)})`}>
+          <button className="hammer" disabled={paused} onPointerDown={onHit} aria-label={`Tailler la pierre (+${formatRate(clickGain)})`}>
             🪨
           </button>
           {floaters.map((f) => (

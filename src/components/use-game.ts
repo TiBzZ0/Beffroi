@@ -74,13 +74,17 @@ export function useGame() {
     pending.current = 0;
     inflight.current = n;
     try {
+      const before = snapRef.current?.state.clickPausedUntil ?? 0;
       const r = await post({ type: "click", count: n });
       if (r.snapshot) receive(r.snapshot);
+      if (r.snapshot && r.snapshot.state.clickPausedUntil > before && r.snapshot.state.clickPausedUntil > r.snapshot.serverNow) {
+        showToast("🔨 Trop rapide pour un humain ! Ton marteau est confisqué 2 minutes.");
+      }
       else pending.current += n; // réseau coupé : on réessaiera
     } finally {
       inflight.current = 0;
     }
-  }, [post, receive]);
+  }, [post, receive, showToast]);
 
   /** Met une action en file : une seule requête à la fois, clics en attente envoyés d'abord. */
   const run = useCallback(
@@ -119,7 +123,7 @@ export function useGame() {
   /** Un coup de marteau. Renvoie le gain affiché, ou 0 si la cadence max est dépassée. */
   const click = useCallback((): number => {
     const s = snapRef.current;
-    if (!s) return 0;
+    if (!s || s.state.clickPausedUntil > serverNow()) return 0;
     const t = performance.now();
     clickTimes.current = clickTimes.current.filter((x) => t - x < 1000);
     if (clickTimes.current.length >= MAX_CLICKS_PER_SECOND) return 0;

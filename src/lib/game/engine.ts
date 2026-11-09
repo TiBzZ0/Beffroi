@@ -5,7 +5,10 @@ import {
   BURN_CLICK_REDUCTION_MS,
   BURN_MS,
   BURN_PRODUCTION_FACTOR,
+  CLICK_PAUSE_MS,
+  CLICK_STRIKES_FOR_PAUSE,
   CLICK_WINDOW_MAX_MS,
+  SUSPICIOUS_CLICK_RATE,
   COST_GROWTH,
   GENERATORS,
   MAX_CLICKS_PER_SECOND,
@@ -66,6 +69,9 @@ export interface PlayerState {
   totalPlundered: number;
   troops: Partial<Record<UnitId, number>>;
   defenses: Partial<Record<DefenseId, number>>;
+  /** Anti-triche : envois trop rapides d'affilée, et fin de la pause forcée du marteau. */
+  clickStrikes: number;
+  clickPausedUntil: number;
 }
 
 /** Ce que le joueur doit savoir du monde pour calculer sa production. */
@@ -98,6 +104,8 @@ export function newPlayerState(now: number): PlayerState {
     totalPlundered: 0,
     troops: {},
     defenses: {},
+    clickStrikes: 0,
+    clickPausedUntil: 0,
   };
 }
 
@@ -247,16 +255,29 @@ export function applyClicks(
   count: number,
   now: number,
   world: WorldState,
-): { state: PlayerState; accepted: number } {
+): { state: PlayerState; accepted: number; paused: boolean } {
   const requested = Number.isFinite(count) ? Math.max(0, Math.floor(count)) : 0;
+  if (now < state.clickPausedUntil) return { state: { ...state, lastClickAt: now }, accepted: 0, paused: true };
   const windowMs = Math.min(Math.max(0, now - state.lastClickAt), CLICK_WINDOW_MAX_MS);
+
+  // Cadence surhumaine soutenue : avertissements, puis marteau confisqué.
+  let strikes = state.clickStrikes;
+  if (requested > 0 && windowMs >= 1000) {
+    strikes = requested / (windowMs / 1000) > SUSPICIOUS_CLICK_RATE ? strikes + 1 : Math.max(0, strikes - 1);
+  }
+  if (strikes >= CLICK_STRIKES_FOR_PAUSE) {
+    return { state: { ...state, clickStrikes: 0, clickPausedUntil: now + CLICK_PAUSE_MS, lastClickAt: now }, accepted: 0, paused: true };
+  }
+
   const allowed = Math.floor((MAX_CLICKS_PER_SECOND * windowMs) / 1000);
   const accepted = Math.min(requested, allowed);
-  if (accepted === 0) return { state, accepted };
+  if (accepted === 0) return { state: { ...state, clickStrikes: strikes }, accepted, paused: false };
   const gain = accepted * clickValue(state, world, stagesDoneAt(world, now));
   return {
+    paused: false,
     state: {
       ...state,
+      clickStrikes: strikes,
       stone: state.stone + gain,
       totalProduced: state.totalProduced + gain,
       totalClicks: state.totalClicks + accepted,

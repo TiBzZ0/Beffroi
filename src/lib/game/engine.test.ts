@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { OFFLINE_CAP_MS, STAGES } from "./config";
+import { CLICK_PAUSE_MS, OFFLINE_CAP_MS, STAGES } from "./config";
 import {
   advance,
   applyClicks,
@@ -119,6 +119,30 @@ describe("clics", () => {
   it("plafonne la fenêtre à 10 s pour éviter le crédit de clics", () => {
     const { accepted } = applyClicks(newPlayerState(T0), 10_000, T0 + 3_600_000, noWorld);
     expect(accepted).toBe(150);
+  });
+
+  it("confisque le marteau après 3 envois de suite à une cadence surhumaine", () => {
+    let s = newPlayerState(T0);
+    let t = T0;
+    for (let i = 0; i < 2; i++) {
+      t += 3_000;
+      const r = applyClicks(s, 42, t, noWorld); // 14 coups/s
+      expect(r.paused).toBe(false);
+      s = r.state;
+    }
+    t += 3_000;
+    const r = applyClicks(s, 42, t, noWorld);
+    expect(r).toMatchObject({ paused: true, accepted: 0 });
+    expect(r.state.clickPausedUntil).toBe(t + CLICK_PAUSE_MS);
+    // Pendant la pause, plus rien n'est compté ; ensuite tout repart.
+    expect(applyClicks(r.state, 10, t + 60_000, noWorld).accepted).toBe(0);
+    expect(applyClicks({ ...r.state, lastClickAt: t + CLICK_PAUSE_MS }, 10, t + CLICK_PAUSE_MS + 3_000, noWorld).accepted).toBe(10);
+  });
+
+  it("une cadence humaine efface peu à peu les avertissements", () => {
+    let s = { ...newPlayerState(T0), clickStrikes: 2 };
+    s = applyClicks(s, 24, T0 + 3_000, noWorld).state; // 8 coups/s
+    expect(s.clickStrikes).toBe(1);
   });
 
   it("ignore les valeurs absurdes", () => {
