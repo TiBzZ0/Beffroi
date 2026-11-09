@@ -416,6 +416,7 @@ function rivalsFor(me: Entity, myState: PlayerState, entities: Map<string, Entit
         difficulty: e.lord?.difficulty,
         retaliateOnly: e.lord?.retaliateOnly,
         stone: s.stone,
+        stoneAt: now,
         rate,
         loot,
         army: fight.defense as Record<string, number>,

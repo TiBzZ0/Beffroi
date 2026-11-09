@@ -27,6 +27,8 @@ export interface RivalView {
   difficulty?: 1 | 2 | 3 | 4;
   retaliateOnly?: boolean;
   stone: number;
+  /** Instant (heure serveur) où `stone` était exact ; la pierre progresse ensuite au rythme `rate`. */
+  stoneAt: number;
   rate: number;
   /** Pierre qu'un raid rapporterait maintenant (estimation). */
   loot: number;

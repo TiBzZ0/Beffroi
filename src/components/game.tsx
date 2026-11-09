@@ -22,6 +22,7 @@ import {
   clickValue,
   generatorCost,
   generatorRate,
+  lootOf,
   maxAffordable,
   owned,
   productionMultiplier,
@@ -47,6 +48,10 @@ export function Game({ userId }: { userId: string }) {
 
   const snap = game.snap;
   const leaderboard = useLeaderboard(tab === "classement" && !!snap, snap?.worksite.total);
+  const { watchRivals } = game;
+  useEffect(() => {
+    watchRivals(tab === "raids");
+  }, [tab, watchRivals]);
 
   if (!snap) return <div className="loading">On allume les torches…</div>;
 
@@ -480,6 +485,9 @@ function Raids({ snap, live, now, run }: { snap: GameSnapshot; live: PlayerState
 }
 
 function RivalRow({ r, now, busy, onRaid }: { r: RivalView; now: number; busy: string | null; onRaid: (id: string) => void }) {
+  // La pierre du rival progresse en direct entre deux nouvelles du serveur.
+  const stone = r.stone + (r.rate * Math.max(0, now - r.stoneAt)) / 1000;
+  const loot = lootOf(stone, r.rate, r.revenge);
   const shielded = r.shieldUntil > now;
   const blocked = r.blocker !== null;
   const pct = Math.round(r.chance * 100);
@@ -497,7 +505,7 @@ function RivalRow({ r, now, busy, onRaid }: { r: RivalView; now: number; busy: s
         <div className="row-desc num">
           {r.temper ? `${r.temper} · ` : ""}
           {r.retaliateOnly ? "ne frappe qu'en représailles · " : ""}
-          {formatNumber(r.stone)} pierres · {formatRate(r.rate)}/s
+          {formatNumber(stone)} pierres · {formatRate(r.rate)}/s
           {shielded ? ` · bouclier ${duration(r.shieldUntil - now)}` : ""}
           {r.burnedUntil > now ? " · 🔥" : ""}
         </div>
@@ -505,7 +513,7 @@ function RivalRow({ r, now, busy, onRaid }: { r: RivalView; now: number; busy: s
           {armyIcons(r.army)}
         </div>
         <div className="row-desc">
-          {r.blocker ?? (r.loot > 0 ? `Butin estimé : ${formatNumber(r.loot)} pierres` : "Rien à piller pour l'instant.")}
+          {r.blocker ?? (loot > 0 ? `Butin estimé : ${formatNumber(loot)} pierres` : "Rien à piller pour l'instant.")}
         </div>
       </div>
       <button className="btn btn-primary" disabled={blocked || busy !== null} onClick={() => onRaid(r.id)}>
