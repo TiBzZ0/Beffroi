@@ -435,6 +435,7 @@ a {
 
 .qty {
   display: flex;
+  flex-wrap: wrap;
   gap: 6px;
   justify-content: flex-end;
   margin-bottom: 10px;
