@@ -9,6 +9,7 @@ import {
   LORD_ARMY,
   LORD_MIN_BUDGET,
   REVENGE_MS,
+  SPY_INTEL_MS,
   GUARDS_PER_DOMAIN,
   COMBATANTS,
   SEASON_DAYS,
@@ -26,6 +27,9 @@ import {
   contribute,
   hasRevenge,
   lootOf,
+  fuzzyArmy,
+  spyCost,
+  spyDetectChance,
 
   productionPerSecond,
   raidArmies,
@@ -396,7 +400,20 @@ async function loadChronicle(admin: SupabaseClient, seasonId: number, entities: 
   }));
 }
 
-function rivalsFor(me: Entity, myState: PlayerState, entities: Map<string, Entity>, world: WorldState, flat: Map<string, number>, now: number): RivalView[] {
+/** Rapports d'espion encore valables : cible → fin de validité. */
+async function loadIntel(admin: SupabaseClient, seasonId: number, spyId: string, now: number): Promise<Map<string, number>> {
+  const { data } = await admin
+    .from("spy_reports")
+    .select("target_id, expires_at")
+    .eq("season_id", seasonId)
+    .eq("spy_id", spyId)
+    .gt("expires_at", iso(now));
+  const out = new Map<string, number>();
+  for (const r of data ?? []) out.set(r.target_id as string, Math.max(out.get(r.target_id as string) ?? 0, ms(r.expires_at as string)));
+  return out;
+}
+
+function rivalsFor(me: Entity, myState: PlayerState, entities: Map<string, Entity>, world: WorldState, flat: Map<string, number>, now: number, intel: Map<string, number>): RivalView[] {
   const armies = lordArmies(entities);
   return [...entities.values()]
     .filter((e) => e.id !== me.id)
@@ -406,6 +423,8 @@ function rivalsFor(me: Entity, myState: PlayerState, entities: Map<string, Entit
       const revenge = hasRevenge(myState, e.id, now);
       const ctx = { now, attackerId: me.id, victimId: e.id, victimRate: rate, defenderArmy: e.isLord ? armies.get(e.id)?.defense : undefined };
       const fight = raidArmies(myState, s, ctx);
+      const intelUntil = intel.get(e.id) ?? 0;
+      const seen = intelUntil > now ? fight.defense : fuzzyArmy(fight.defense);
       const loot = lootOf(s.stone, rate, revenge);
       return {
         id: e.id,
@@ -419,8 +438,9 @@ function rivalsFor(me: Entity, myState: PlayerState, entities: Map<string, Entit
         stoneAt: now,
         rate,
         loot,
-        army: fight.defense as Record<string, number>,
-        chance: estimateChance(fight.attack, fight.defense, { attackBonus: fight.attackBonus }),
+        intelUntil,
+        army: seen as Record<string, number>,
+        chance: estimateChance(fight.attack, seen, { attackBonus: fight.attackBonus }),
         shieldUntil: s.shieldUntil,
         burnedUntil: s.burnedUntil,
         totalPlundered: s.totalPlundered,
@@ -493,7 +513,7 @@ export type ActionResult = { ok: true; snapshot: GameSnapshot; message?: string 
 /** Exécute une intention du joueur et renvoie l'état qui fait foi. */
 export async function runAction(admin: SupabaseClient, userId: string, action: GameAction): Promise<ActionResult> {
   const season = await getActiveSeason(admin);
-  const wantsChronicle = action.type === "sync" || action.type === "raid";
+  const wantsChronicle = action.type === "sync" || action.type === "raid" || action.type === "spy";
 
   for (let attempt = 0; attempt < MAX_ATTEMPTS; attempt++) {
     let [worksite, entities] = await Promise.all([loadWorksite(admin, season.id), loadEntities(admin, season.id, userId)]);
@@ -511,7 +531,36 @@ export async function runAction(admin: SupabaseClient, userId: string, action: G
     let error: string | null = null;
     let message: string | undefined;
 
-    if (action.type === "raid") {
+    if (action.type === "spy") {
+      const target = entities.get(String(action.target));
+      const cost = spyCost(current, world, now);
+      if (!target || target.id === me.id) error = "Cible inconnue.";
+      else if (current.stone < cost) error = `Il faut ${Math.ceil(cost).toLocaleString("fr-FR")} pierres pour payer un espion.`;
+      const next = error ? current : { ...current, stone: current.stone - cost };
+      const { data, error: rpcError } = await admin.rpc("commit_state", {
+        p_season: season.id,
+        p_state: toJson(me, next, {}),
+        p_touch: true,
+        p_contribution: 0,
+        p_stage_bases: STAGE_BASES,
+        p_active_window_days: ACTIVE_WINDOW_DAYS,
+        p_action: error ? null : "spy",
+        p_details: error ? null : { target: target!.id, cost },
+      });
+      if (rpcError) throw new Error(`Enregistrement impossible : ${rpcError.message}`);
+      if ((data as { conflict?: boolean } | null)?.conflict) continue;
+      if (!error && target) {
+        finalState = next;
+        await admin.from("spy_reports").insert({ season_id: season.id, spy_id: me.id, target_id: target.id, expires_at: iso(now + SPY_INTEL_MS) });
+        const targetState = advanceEntity(target, now, world, flat);
+        const defense = target.isLord ? (lordArmies(entities).get(target.id)?.defense ?? {}) : raidArmies(current, targetState, { victimId: target.id, now }).defense;
+        const caught = Math.random() < spyDetectChance(defense);
+        if (caught) await addChronicle(admin, season.id, { kind: "spy", actor_id: me.id, target_id: target.id, details: {} });
+        message = caught
+          ? `🕵️ Ton espion a vu l'armée de ${target.name}, mais il a été repéré en repartant.`
+          : `🕵️ Ton espion est revenu sans être vu : l'armée de ${target.name} est révélée pendant 1 h.`;
+      }
+    } else if (action.type === "raid") {
       const victim = entities.get(String(action.target));
       if (!victim) {
         error = "Cible inconnue.";
@@ -584,7 +633,7 @@ export async function runAction(admin: SupabaseClient, userId: string, action: G
       state: finalState,
       worksite,
       season,
-      rivals: rivalsFor(me, finalState, entities, worldFrom(worksite), flat, now),
+      rivals: rivalsFor(me, finalState, entities, worldFrom(worksite), flat, now, await loadIntel(admin, season.id, userId, now)),
       chronicle: wantsChronicle ? await loadChronicle(admin, season.id, entities) : undefined,
     };
     return error ? { ok: false, error, snapshot } : { ok: true, snapshot, message };

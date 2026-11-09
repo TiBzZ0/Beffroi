@@ -23,6 +23,7 @@ import {
   generatorCost,
   generatorRate,
   lootOf,
+  spyCost,
   maxAffordable,
   owned,
   productionMultiplier,
@@ -444,6 +445,12 @@ function Status({ state, now }: { state: PlayerState; now: number }) {
 function Raids({ snap, live, now, run }: { snap: GameSnapshot; live: PlayerState; now: number; run: ReturnType<typeof useGame>["run"] }) {
   const [busy, setBusy] = useState<string | null>(null);
   const cooldown = live.lastRaidAt + RAID_COOLDOWN_MS - now;
+  const spyPrice = spyCost(live, worldFrom(snap.worksite), now);
+  const spy = async (target: string) => {
+    setBusy(target);
+    await run({ type: "spy", target });
+    setBusy(null);
+  };
   const raid = async (target: string) => {
     setBusy(target);
     await run({ type: "raid", target });
@@ -459,7 +466,7 @@ function Raids({ snap, live, now, run }: { snap: GameSnapshot; live: PlayerState
         ses forces et ses faiblesses, compose ton armée selon ce que tu vois en face. Tu gagnes si plus personne ne riposte en face. Les pertes sont
         réelles des deux côtés (70 % des fortifications abattues se relèvent). Un raid réussi vole 25 % (40 % en revanche) de la pierre non sécurisée (la dernière
         demi-heure de production est à l&apos;abri, mais jamais plus de la moitié du stock), incendie les ateliers 2 h et ruine quelques bâtiments ; la victime reçoit 4 h de bouclier et un
-        droit de revanche (+50 % de dégâts). Les seigneurs difficiles ne frappent que ceux qui les ont attaqués.
+        droit de revanche (+50 % de dégâts). Les seigneurs difficiles ne frappent que ceux qui les ont attaqués. De loin, tu ne vois qu&apos;une estimation (≈) des armées : un espion révèle l&apos;armée exacte pendant 1 h, mais il peut être repéré (surtout par les tours d&apos;archers).
       </p>
       <Garrison live={live} run={run} />
       <p className="raid-state">
@@ -468,14 +475,14 @@ function Raids({ snap, live, now, run }: { snap: GameSnapshot; live: PlayerState
       <h3 className="section-title">Seigneurs voisins</h3>
       <div className="list">
         {lords.map((r) => (
-          <RivalRow key={r.id} r={r} now={now} busy={busy} onRaid={raid} />
+          <RivalRow key={r.id} r={r} now={now} busy={busy} onRaid={raid} onSpy={spy} spyPrice={spyPrice} stone={live.stone} />
         ))}
       </div>
       <h3 className="section-title">Joueurs</h3>
       <div className="list">
         {players.length === 0 && <p className="empty">Personne d&apos;autre au royaume pour l&apos;instant. Invite tes amis !</p>}
         {players.map((r) => (
-          <RivalRow key={r.id} r={r} now={now} busy={busy} onRaid={raid} />
+          <RivalRow key={r.id} r={r} now={now} busy={busy} onRaid={raid} onSpy={spy} spyPrice={spyPrice} stone={live.stone} />
         ))}
       </div>
       <h3 className="section-title">Chronique</h3>
@@ -484,7 +491,24 @@ function Raids({ snap, live, now, run }: { snap: GameSnapshot; live: PlayerState
   );
 }
 
-function RivalRow({ r, now, busy, onRaid }: { r: RivalView; now: number; busy: string | null; onRaid: (id: string) => void }) {
+function RivalRow({
+  r,
+  now,
+  busy,
+  onRaid,
+  onSpy,
+  spyPrice,
+  stone: myStone,
+}: {
+  r: RivalView;
+  now: number;
+  busy: string | null;
+  onRaid: (id: string) => void;
+  onSpy: (id: string) => void;
+  spyPrice: number;
+  stone: number;
+}) {
+  const intel = r.intelUntil > now;
   // La pierre du rival progresse en direct entre deux nouvelles du serveur.
   const stone = r.stone + (r.rate * Math.max(0, now - r.stoneAt)) / 1000;
   const loot = lootOf(stone, r.rate, r.revenge);
@@ -509,17 +533,28 @@ function RivalRow({ r, now, busy, onRaid }: { r: RivalView; now: number; busy: s
           {shielded ? ` · bouclier ${duration(r.shieldUntil - now)}` : ""}
           {r.burnedUntil > now ? " · 🔥" : ""}
         </div>
-        <div className="row-desc army-line num" title="Ce qui défendrait le domaine">
-          {armyIcons(r.army)}
+        <div className="row-desc army-line num" title={intel ? "Armée exacte (rapport d'espion)" : "Estimation de loin : envoie un espion pour voir l'armée exacte"}>
+          {intel ? `🕵️ ${armyIcons(r.army)} (rapport encore ${duration(r.intelUntil - now)})` : `≈ ${armyIcons(r.army)}`}
         </div>
         <div className="row-desc">
           {r.blocker ?? (loot > 0 ? `Butin estimé : ${formatNumber(loot)} pierres` : "Rien à piller pour l'instant.")}
         </div>
       </div>
-      <button className="btn btn-primary" disabled={blocked || busy !== null} onClick={() => onRaid(r.id)}>
-        Raider
-        <span className="cost num">{pct} % de succès</span>
-      </button>
+      <div className="row-actions">
+        <button className="btn btn-primary" disabled={blocked || busy !== null} onClick={() => onRaid(r.id)}>
+          Raider
+          <span className="cost num">
+            {intel ? "" : "~"}
+            {pct} % de succès
+          </span>
+        </button>
+        {!intel && (
+          <button className="btn" disabled={busy !== null || myStone < spyPrice} onClick={() => onSpy(r.id)} title="Révèle l'armée exacte pendant 1 h. Il peut être repéré.">
+            🕵️ Espionner
+            <span className="cost num">{formatNumber(spyPrice)} 🪨</span>
+          </button>
+        )}
+      </div>
     </div>
   );
 }
@@ -544,7 +579,9 @@ function Chronicle({ entries, me, now }: { entries: ChronicleEntry[]; me: string
     <ul className="chronicle">
       {entries.map((e) => {
         let text: string;
-        if (e.kind === "gift") {
+        if (e.kind === "spy") {
+          text = `${who(e.actorId, e.actorName, true)} ${e.actorId === me ? "as été surpris" : "a été surpris"} à espionner ${e.targetId === me ? "ton domaine" : e.targetName}.`;
+        } else if (e.kind === "gift") {
           text = `${e.actorName} a offert ${formatNumber(e.details.amount ?? 0)} pierres au chantier.`;
         } else {
           const ruined = Object.values(e.details.destroyed ?? {}).reduce((a, b) => a + b, 0);

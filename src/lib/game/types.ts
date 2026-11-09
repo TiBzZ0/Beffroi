@@ -32,6 +32,8 @@ export interface RivalView {
   rate: number;
   /** Pierre qu'un raid rapporterait maintenant (estimation). */
   loot: number;
+  /** Rapport d'espion valable jusqu'à cet instant (0 = aucun : armée et chance sont alors floues). */
+  intelUntil: number;
   /** Armée qui défendrait le domaine (troupes, fortifications, gardes), et ta chance estimée de l'emporter. */
   army: Record<string, number>;
   chance: number;
@@ -46,7 +48,7 @@ export interface RivalView {
 export interface ChronicleEntry {
   id: number;
   at: number;
-  kind: "raid" | "gift";
+  kind: "raid" | "gift" | "spy";
   actorId: string | null;
   actorName: string;
   targetId: string | null;
@@ -95,7 +97,8 @@ export type GameAction =
   | { type: "contribute"; amount: number }
   | { type: "raid"; target: string }
   | { type: "rebuild"; generator: string }
-  | { type: "army"; kind: "unit" | "defense"; id: string; qty: number };
+  | { type: "army"; kind: "unit" | "defense"; id: string; qty: number }
+  | { type: "spy"; target: string };
 
 export type ActionResponse =
   | { ok: true; snapshot: GameSnapshot; message?: string }

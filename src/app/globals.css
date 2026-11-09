@@ -474,6 +474,11 @@ a {
   background: #4b1f5e;
   color: #fff;
 }
+.row-actions {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
 .strong-vs {
   color: var(--accent);
   font-style: italic;

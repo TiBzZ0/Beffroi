@@ -260,6 +260,10 @@ export function useGame() {
         { event: "INSERT", schema: "public", table: "chronicle", filter: `season_id=eq.${seasonId}` },
         (payload: { new: Record<string, unknown> }) => {
           const s = snapRef.current;
+          if (s && payload.new.kind === "spy" && payload.new.target_id === s.userId) {
+            const spy = s.rivals.find((r) => r.id === payload.new.actor_id)?.name ?? "Un rival";
+            showToast(`🕵️ Un espion de ${spy} a été surpris dans ton domaine !`);
+          }
           if (s && payload.new.kind === "raid" && payload.new.target_id === s.userId) {
             const attacker = s.rivals.find((r) => r.id === payload.new.actor_id)?.name ?? "Un rival";
             const repelled = (payload.new.details as { success?: boolean } | null)?.success === false;

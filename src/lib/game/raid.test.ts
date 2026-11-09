@@ -7,7 +7,11 @@ import {
   armyWorth,
   buyArmy,
   defenseArmy,
+  fuzzyArmy,
+  fuzzyCount,
   generatorCost,
+  spyCost,
+  spyDetectChance,
   newPlayerState,
   rebuildRuin,
   resolveRaid,
@@ -167,6 +171,24 @@ describe("batailles", () => {
     const a = { milicien: 12, arbaletrier: 3 };
     const d = { tour: 2, piquier: 4, garde: 3 };
     expect(estimateChance(a, d)).toBe(estimateChance(a, d));
+  });
+});
+
+describe("espions", () => {
+  it("de loin, les armées sont arrondies (sauf les gardes)", () => {
+    expect([1, 3, 7, 8, 12, 15, 37, 150, 0].map(fuzzyCount)).toEqual([5, 5, 5, 10, 10, 20, 40, 200, 0]);
+    expect(fuzzyArmy({ milicien: 37, garde: 3 })).toEqual({ milicien: 40, garde: 3 });
+  });
+
+  it("les tours d'archers repèrent les espions", () => {
+    expect(spyDetectChance({})).toBeCloseTo(0.3);
+    expect(spyDetectChance({ tour: 4 })).toBeCloseTo(0.5);
+    expect(spyDetectChance({ tour: 100 })).toBeCloseTo(0.9);
+  });
+
+  it("un espion coûte une minute de production, 200 pierres au moins", () => {
+    expect(spyCost(player(), world, NOW)).toBe(200);
+    expect(spyCost(player({ generators: { tailleur: 100 } }), world, NOW)).toBe(6_000);
   });
 });
 

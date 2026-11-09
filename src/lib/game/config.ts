@@ -267,6 +267,17 @@ export const REVENGE_ATTACK_BONUS = 1.5;
 /** Nombre de batailles simulées pour estimer la chance de succès. */
 export const CHANCE_SIMULATIONS = 40;
 
+// Espions : sans rapport, on ne voit qu'une estimation floue de l'armée adverse.
+/** Prix d'un espion : une minute de sa propre production, au moins 200 pierres. */
+export const SPY_MIN_COST = 200;
+export const SPY_COST_SECONDS = 60;
+/** Durée pendant laquelle un rapport montre l'armée exacte (et à jour) de la cible. */
+export const SPY_INTEL_MS = 60 * 60 * 1000;
+/** Risque que l'espion soit repéré : 30 %, +5 % par tour d'archers de la cible, 90 % au plus. */
+export const SPY_DETECT_BASE = 0.3;
+export const SPY_DETECT_PER_TOWER = 0.05;
+export const SPY_DETECT_MAX = 0.9;
+
 /** Armée des seigneurs : budget = valeur médiane des armées des joueurs × facteur, réparti selon leur goût. */
 export const LORD_ARMY: Record<LordKey, { attack: number; defense: number; troops: Partial<Record<UnitId, number>>; forts: Partial<Record<DefenseId, number>> }> = {
   bourbelin: { attack: 0, defense: 0.3, troops: {}, forts: { palissade: 1 } },

@@ -23,6 +23,11 @@ import {
   REVENGE_MS,
   RUIN_REBUILD_FACTOR,
   SECURED_SECONDS,
+  SPY_COST_SECONDS,
+  SPY_DETECT_BASE,
+  SPY_DETECT_MAX,
+  SPY_DETECT_PER_TOWER,
+  SPY_MIN_COST,
   MIN_EXPOSED_SHARE,
   SHIELD_MS,
   STAGES,
@@ -508,4 +513,32 @@ export function resolveRaid(
       report: { ...base, stolen, destroyed },
     },
   };
+}
+
+// ---------------------------------------------------------------------------
+// Espions
+// ---------------------------------------------------------------------------
+
+export function spyCost(state: PlayerState, world: WorldState, now: number): number {
+  return Math.max(SPY_MIN_COST, Math.ceil(rateAt(state, world, now) * SPY_COST_SECONDS));
+}
+
+/** Risque que l'espion soit repéré, selon les tours d'archers de la cible. */
+export function spyDetectChance(defense: Army): number {
+  return Math.min(SPY_DETECT_MAX, SPY_DETECT_BASE + SPY_DETECT_PER_TOWER * (defense.tour ?? 0));
+}
+
+/** Nombre vu de loin : 5 près pour les petites troupes, un seul chiffre significatif ensuite. */
+export function fuzzyCount(n: number): number {
+  if (n <= 0) return 0;
+  if (n < 15) return Math.max(5, Math.round(n / 5) * 5);
+  const mag = 10 ** Math.floor(Math.log10(n));
+  return Math.round(n / mag) * mag;
+}
+
+/** Armée vue sans espion : comptes arrondis (les gardes du château sont connus de tous). */
+export function fuzzyArmy(army: Army): Army {
+  const out: Army = {};
+  for (const [id, n] of Object.entries(army) as [CombatantId, number][]) out[id] = id === "garde" ? n : fuzzyCount(n);
+  return out;
 }
