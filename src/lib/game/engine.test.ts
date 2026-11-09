@@ -108,17 +108,17 @@ describe("achats", () => {
 });
 
 describe("clics", () => {
-  it("accepte au plus 25 clics par seconde", () => {
+  it("accepte au plus 40 clics par seconde", () => {
     const s = newPlayerState(T0);
     const { accepted, state } = applyClicks(s, 500, T0 + 2_000, noWorld);
-    expect(accepted).toBe(50);
-    expect(state.stone).toBe(50);
+    expect(accepted).toBe(80);
+    expect(state.stone).toBe(80);
     expect(state.lastClickAt).toBe(T0 + 2_000);
   });
 
   it("plafonne la fenêtre à 10 s pour éviter le crédit de clics", () => {
     const { accepted } = applyClicks(newPlayerState(T0), 10_000, T0 + 3_600_000, noWorld);
-    expect(accepted).toBe(250);
+    expect(accepted).toBe(400);
   });
 
   it("un humain rapide, même avec un envoi en retard, n'est jamais confisqué", () => {
@@ -137,12 +137,12 @@ describe("clics", () => {
     let t = T0;
     for (let i = 0; i < 4; i++) {
       t += 6_000;
-      const r = applyClicks(s, 150, t, noWorld); // 25 coups/s
+      const r = applyClicks(s, 240, t, noWorld); // 40 coups/s
       expect(r.paused).toBe(false);
       s = r.state;
     }
     t += 6_000;
-    const r = applyClicks(s, 150, t, noWorld);
+    const r = applyClicks(s, 240, t, noWorld);
     expect(r).toMatchObject({ paused: true, accepted: 0 });
     expect(r.state.clickPausedUntil).toBe(t + CLICK_PAUSE_MS);
     // Pendant la pause, plus rien n'est compté ; ensuite tout repart.
