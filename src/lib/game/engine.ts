@@ -404,6 +404,24 @@ export function splitTroopLosses(state: PlayerState, lost: Army): { troops: Play
   return { troops, stationed, byOwner };
 }
 
+/**
+ * Partage du butin d'un raid groupé : chaque allié reçoit une part proportionnelle à la valeur
+ * des troupes qu'il a engagées (avant la bataille). Renvoie les parts des alliés uniquement.
+ */
+export function lootShares(attacker: PlayerState, stolen: number): Record<string, number> {
+  const worth = (troops: Partial<Record<UnitId, number>>) => armyValue(cleanArmy({ ...troops }));
+  const own = worth(attacker.troops);
+  const groups = Object.entries(attacker.stationed ?? {}).map(([owner, troops]) => [owner, worth(troops)] as const);
+  const total = own + groups.reduce((s, [, v]) => s + v, 0);
+  const shares: Record<string, number> = {};
+  if (total <= 0 || stolen <= 0) return shares;
+  for (const [owner, v] of groups) {
+    const part = Math.floor((stolen * v) / total);
+    if (part > 0) shares[owner] = part;
+  }
+  return shares;
+}
+
 /** Envoie des troupes chez un allié. */
 export function sendReinforcements(sender: PlayerState, host: PlayerState, senderId: string, unit: string, qty: number): Result<{ sender: PlayerState; host: PlayerState }> {
   if (!(UNIT_IDS as string[]).includes(unit)) return { ok: false, error: "Troupe inconnue." };
@@ -485,6 +503,8 @@ export interface RaidReport {
   success: boolean;
   rounds: number;
   stolen: number;
+  /** Part du butin versée à chaque allié dont les renforts ont participé (le reste revient à l'attaquant). */
+  allyShares: Record<string, number>;
   destroyed: Partial<Record<GeneratorId, number>>;
   /** Pertes de l'attaquant. */
   attackerLost: Army;
@@ -571,6 +591,7 @@ export function resolveRaid(
     success: fight.success,
     rounds: fight.rounds,
     stolen: 0,
+    allyShares: {},
     destroyed: {},
     attackerLost: fight.attackerLost,
     defenderLost: ctx.defenderArmy ? fight.defenderLost : defenderLost,
@@ -579,6 +600,8 @@ export function resolveRaid(
   if (!fight.success) return { ok: true, value: { attacker: attackerAfter, victim: victimArmyAfter, report: base } };
 
   const stolen = lootOf(victim.stone, ctx.victimRate, revenge);
+  const allyShares = ctx.attackerArmy ? {} : lootShares(attacker, stolen);
+  const allyTotal = Object.values(allyShares).reduce((a, b) => a + b, 0);
 
   // Destruction : 5 % des bâtiments (arrondi à l'inférieur), au plus un par type,
   // en commençant par les plus précieux, jamais en dessous des premiers protégés.
@@ -600,7 +623,7 @@ export function resolveRaid(
   return {
     ok: true,
     value: {
-      attacker: { ...attackerAfter, stone: attacker.stone + stolen, totalPlundered: attacker.totalPlundered + stolen },
+      attacker: { ...attackerAfter, stone: attacker.stone + stolen - allyTotal, totalPlundered: attacker.totalPlundered + stolen - allyTotal },
       victim: {
         ...victimArmyAfter,
         stone: victim.stone - stolen,
@@ -611,7 +634,7 @@ export function resolveRaid(
         revengeTarget: ctx.attackerId,
         revengeUntil: now + REVENGE_MS,
       },
-      report: { ...base, stolen, destroyed },
+      report: { ...base, stolen, allyShares, destroyed },
     },
   };
 }

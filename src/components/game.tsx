@@ -520,7 +520,7 @@ function Raids({ snap, live, now, run }: { snap: GameSnapshot; live: PlayerState
           {players.map(row)}
         </div>
       )}
-      {view === "chronique" && <Chronicle entries={snap.chronicle ?? []} me={snap.userId} now={now} />}
+      {view === "chronique" && <Chronicle entries={snap.chronicle ?? []} me={snap.userId} now={now} rivals={snap.rivals} />}
     </>
   );
 }
@@ -658,8 +658,8 @@ function Alliance({ snap, run }: { snap: GameSnapshot; run: ReturnType<typeof us
             🤝 <strong>{a.name}</strong> · {a.members.map((m) => (m.id === snap.userId ? "toi" : m.name)).join(", ")} ({a.members.length}/{MAX_ALLIANCE_SIZE})
           </p>
           <p className="note">
-            Entre alliés, pas de pillage. Les troupes envoyées chez un allié défendent son domaine et partent en raid avec lui (le butin revient à
-            celui qui lance le raid, les pertes sont partagées au prorata).
+            Entre alliés, pas de pillage. Les troupes envoyées chez un allié défendent son domaine et partent en raid avec lui (butin et pertes sont
+            partagés au prorata de la valeur des troupes engagées par chacun).
           </p>
         </>
       ) : (
@@ -787,7 +787,8 @@ function armyIcons(army: Record<string, number>, empty = "personne"): string {
   return parts.length ? parts.join("  ") : empty;
 }
 
-function Chronicle({ entries, me, now }: { entries: ChronicleEntry[]; me: string; now: number }) {
+function Chronicle({ entries, me, now, rivals }: { entries: ChronicleEntry[]; me: string; now: number; rivals: RivalView[] }) {
+  const nameOf = (id: string) => (id === me ? "toi" : (rivals.find((r) => r.id === id)?.name ?? "un allié"));
   if (entries.length === 0) return <p className="empty">Le royaume est calme. Pour l&apos;instant…</p>;
   const ago = (t: number) => {
     const m = Math.floor((now - t) / 60_000);
@@ -817,6 +818,8 @@ function Chronicle({ entries, me, now }: { entries: ChronicleEntry[]; me: string
             const verb = e.actorId === me ? "as pillé" : "a pillé";
             const target = e.targetId === me ? "tes greniers" : targetName;
             text = `${actor} ${verb} ${target}${e.details.revenge ? " (revanche)" : ""} : ${formatNumber(e.details.stolen ?? 0)} pierres${ruined ? `, ${ruined} bâtiment${ruined > 1 ? "s" : ""} en ruine` : ""}.`;
+            const shares = Object.entries(e.details.allyShares ?? {});
+            if (shares.length) text += ` Butin partagé : ${shares.map(([id, n]) => `${formatNumber(n)} pour ${nameOf(id)}`).join(", ")}.`;
             if (e.details.defenderLost) text += ` Pertes du défenseur : ${armyIcons(e.details.defenderLost, "aucune")}.`;
           }
         }

@@ -633,7 +633,7 @@ function rivalsFor(
 }
 
 function chronicleDetails(r: RaidReport, chance: number) {
-  return { success: r.success, chance, rounds: r.rounds, stolen: r.stolen, destroyed: r.destroyed, attackerLost: r.attackerLost, defenderLost: r.defenderLost, revenge: r.revenge };
+  return { success: r.success, chance, rounds: r.rounds, stolen: r.stolen, allyShares: r.allyShares, destroyed: r.destroyed, attackerLost: r.attackerLost, defenderLost: r.defenderLost, revenge: r.revenge };
 }
 
 /** « 3 miliciens, 1 chevalier » */
@@ -773,10 +773,17 @@ export async function runAction(admin: SupabaseClient, userId: string, action: G
         if (!r.ok) {
           error = r.error;
         } else {
-          const { data, error: rpcError } = await admin.rpc("apply_raid", {
+          const allies = Object.entries(r.value.report.allyShares).flatMap(([id, share]) => {
+            const e = entities.get(id);
+            if (!e) return [];
+            const s = advanceEntity(e, now, world, flat);
+            return [toJson(e, { ...s, stone: s.stone + share, totalPlundered: s.totalPlundered + share })];
+          });
+          const { data, error: rpcError } = await admin.rpc("apply_raid_group", {
             p_season: season.id,
             p_attacker: toJson(me, r.value.attacker),
             p_victim: toJson(victim, r.value.victim),
+            p_allies: allies,
             p_attacker_touch: true,
             p_chronicle: chronicleDetails(r.value.report, chance),
           });
@@ -787,8 +794,11 @@ export async function runAction(admin: SupabaseClient, userId: string, action: G
           const rep = r.value.report;
           const lost = Object.values(rep.destroyed).reduce((a, b) => a + (b ?? 0), 0);
           const fallen = describeArmy(rep.attackerLost);
+          const shared = Object.entries(rep.allyShares)
+            .map(([id, n]) => `${Math.floor(n).toLocaleString("fr-FR")} pour ${entities.get(id)?.name ?? "un allié"}`)
+            .join(", ");
           message = rep.success
-            ? `Raid réussi contre ${victim.name} : ${Math.floor(rep.stolen).toLocaleString("fr-FR")} pierres pillées${lost ? `, ${lost} bâtiment${lost > 1 ? "s" : ""} en ruine` : ""}. Tes pertes : ${fallen}.`
+            ? `Raid réussi contre ${victim.name} : ${Math.floor(rep.stolen).toLocaleString("fr-FR")} pierres pillées${shared ? ` (dont ${shared})` : ""}${lost ? `, ${lost} bâtiment${lost > 1 ? "s" : ""} en ruine` : ""}. Tes pertes : ${fallen}.`
             : `${victim.name} a repoussé ton raid en ${rep.rounds} round${rep.rounds > 1 ? "s" : ""}. Tes pertes : ${fallen}.`;
           entities = await loadEntities(admin, season.id, userId);
         }

@@ -63,6 +63,7 @@ export interface ChronicleEntry {
     stolen?: number;
     destroyed?: Record<string, number>;
     rounds?: number;
+    allyShares?: Record<string, number>;
     attackerLost?: Record<string, number>;
     defenderLost?: Record<string, number>;
     revenge?: boolean;

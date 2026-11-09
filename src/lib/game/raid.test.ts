@@ -14,6 +14,7 @@ import {
   spyDetectChance,
   newPlayerState,
   rebuildRuin,
+  lootShares,
   recallReinforcements,
   sendReinforcements,
   splitTroopLosses,
@@ -203,6 +204,20 @@ describe("alliances et renforts", () => {
     expect(split.troops).toEqual({ milicien: 3 });
     expect(split.stationed).toEqual({ ally: { milicien: 2 } });
     expect(splitTroopLosses(host, { milicien: 10 }).stationed).toEqual({});
+  });
+});
+
+describe("butin partagé", () => {
+  it("les alliés reçoivent une part du butin au prorata de la valeur de leurs renforts", () => {
+    // 10 chevaliers à soi (20 000) et 10 chez soi d'un allié (20 000) : moitié-moitié.
+    const attacker = player({ stone: 0, troops: { chevalier: 10 }, stationed: { ally: { chevalier: 10 } } });
+    const r = resolveRaid(attacker, player({ troops: {}, stone: 10 * SECURED_SECONDS + 40_000 }), ctx());
+    if (!r.ok) throw new Error(r.error);
+    expect(r.value.report.stolen).toBe(10_000);
+    expect(r.value.report.allyShares).toEqual({ ally: 5_000 });
+    expect(r.value.attacker.stone).toBe(5_000);
+    expect(r.value.attacker.totalPlundered).toBe(5_000);
+    expect(lootShares(player({ troops: { milicien: 3 } }), 1_000)).toEqual({});
   });
 });
 
