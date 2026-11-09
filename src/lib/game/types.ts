@@ -70,6 +70,8 @@ export interface ChronicleEntry {
     defenderLost?: Record<string, number>;
     revenge?: boolean;
     amount?: number;
+    /** Espion surpris à la forteresse. */
+    fortress?: boolean;
     phase?: "start" | "end";
     a?: number;
     b?: number;
@@ -158,6 +160,8 @@ export interface FortressView {
   /** Défenseurs (exacts si c'est la mienne, sinon estimation). */
   army: Record<string, number>;
   exact: boolean;
+  /** Fin du rapport d'espion sur la forteresse, s'il y en a un. */
+  intelUntil: number | null;
   /** Ma chance de la prendre, et ce qui m'en empêche. */
   chance: number;
   blocker: string | null;

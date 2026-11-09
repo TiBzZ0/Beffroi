@@ -444,6 +444,9 @@ async function loadChronicle(admin: SupabaseClient, seasonId: number, entities: 
   }));
 }
 
+/** Clé des rapports d'espion portant sur la forteresse. */
+const FORTRESS_INTEL = "fortress";
+
 /** Rapports d'espion encore valables : cible → fin de validité. */
 async function loadIntel(admin: SupabaseClient, seasonId: number, spyId: string, now: number): Promise<Map<string, number>> {
   const { data } = await admin
@@ -453,7 +456,11 @@ async function loadIntel(admin: SupabaseClient, seasonId: number, spyId: string,
     .eq("spy_id", spyId)
     .gt("expires_at", iso(now));
   const out = new Map<string, number>();
-  for (const r of data ?? []) out.set(r.target_id as string, Math.max(out.get(r.target_id as string) ?? 0, ms(r.expires_at as string)));
+  for (const r of data ?? []) {
+    // Sans cible : rapport sur la forteresse.
+    const key = (r.target_id as string | null) ?? FORTRESS_INTEL;
+    out.set(key, Math.max(out.get(key) ?? 0, ms(r.expires_at as string)));
+  }
   return out;
 }
 
@@ -616,10 +623,11 @@ async function runConflictAction(
   }
 }
 
-function fortressView(me: Entity, state: PlayerState, f: FortressRow, entities: Map<string, Entity>, names: Map<number, string>, now: number): FortressView {
+function fortressView(me: Entity, state: PlayerState, f: FortressRow, entities: Map<string, Entity>, names: Map<number, string>, now: number, intelUntil: number | null): FortressView {
   const defense = fortressDefense(f, entities);
   const mine = f.holder !== null && f.holder === me.allianceId;
-  const seen = mine ? defense : fuzzyArmy(defense);
+  const known = mine || (intelUntil !== null && intelUntil > now);
+  const seen = known ? defense : fuzzyArmy(defense);
   const garrison = garrisonOf(f);
   return {
     name: FORTRESS_NAME,
@@ -627,8 +635,9 @@ function fortressView(me: Entity, state: PlayerState, f: FortressRow, entities: 
     holderName: f.holder !== null ? (names.get(f.holder) ?? null) : null,
     mine,
     army: seen as Record<string, number>,
-    exact: mine,
-    chance: vagueChance(estimateChance(attackArmy(state), defense), mine),
+    exact: known,
+    intelUntil: !mine && known ? intelUntil : null,
+    chance: vagueChance(estimateChance(attackArmy(state), defense), known),
     blocker: fortressBlocker(me, state, f, now),
     garrison: mine ? Object.entries(garrison).map(([id, troops]) => ({ id, name: entities.get(id)?.name ?? "Inconnu", troops: troops as Record<string, number> })) : [],
     myGarrison: (garrison[me.id] ?? {}) as Record<string, number>,
@@ -961,9 +970,11 @@ export async function runAction(admin: SupabaseClient, userId: string, action: G
       if (r.state) finalState = r.state;
       entities = await loadEntities(admin, season.id, userId);
     } else if (action.type === "spy") {
-      const target = entities.get(String(action.target));
+      const onFortress = String(action.target) === FORTRESS_INTEL;
+      const target = onFortress ? undefined : entities.get(String(action.target));
       const cost = spyCost(current, world, now);
-      if (!target || target.id === me.id) error = "Cible inconnue.";
+      if (onFortress && me.allianceId !== null && conflicts.fortress.holder === me.allianceId) error = "Ton alliance tient déjà la forteresse.";
+      else if (!onFortress && (!target || target.id === me.id)) error = "Cible inconnue.";
       else if (current.stone < cost) error = `Il faut ${Math.ceil(cost).toLocaleString("fr-FR")} pierres pour payer un espion.`;
       const next = error ? current : { ...current, stone: current.stone - cost };
       const { data, error: rpcError } = await admin.rpc("commit_state", {
@@ -974,11 +985,19 @@ export async function runAction(admin: SupabaseClient, userId: string, action: G
         p_stage_bases: STAGE_BASES,
         p_active_window_days: ACTIVE_WINDOW_DAYS,
         p_action: error ? null : "spy",
-        p_details: error ? null : { target: target!.id, cost },
+        p_details: error ? null : { target: onFortress ? FORTRESS_INTEL : target!.id, cost },
       });
       if (rpcError) throw new Error(`Enregistrement impossible : ${rpcError.message}`);
       if ((data as { conflict?: boolean } | null)?.conflict) continue;
-      if (!error && target) {
+      if (!error && onFortress) {
+        finalState = next;
+        await admin.from("spy_reports").insert({ season_id: season.id, spy_id: me.id, target_id: null, expires_at: iso(now + SPY_INTEL_MS) });
+        const caught = Math.random() < spyDetectChance(fortressDefense(conflicts.fortress, entities));
+        if (caught) await addChronicle(admin, season.id, { kind: "spy", actor_id: me.id, target_id: null, details: { fortress: true } });
+        message = caught
+          ? `🕵️ Ton espion a vu les défenses de la ${FORTRESS_NAME}, mais il a été repéré en repartant.`
+          : `🕵️ Ton espion est revenu sans être vu : les défenses de la ${FORTRESS_NAME} sont révélées pendant 1 h.`;
+      } else if (!error && target) {
         finalState = next;
         await admin.from("spy_reports").insert({ season_id: season.id, spy_id: me.id, target_id: target.id, expires_at: iso(now + SPY_INTEL_MS) });
         const targetState = advanceEntity(target, now, world, flat);
@@ -1086,7 +1105,7 @@ export async function runAction(admin: SupabaseClient, userId: string, action: G
       ...(await allianceInfo(admin, season.id, meNow, finalState, entities, allianceNames)),
       alliances: [...allianceNames].map(([id, name]) => ({ id, name, size: [...entities.values()].filter((e) => e.allianceId === id).length })),
       war: warView(meNow, conflicts.wars, allianceNames),
-      fortress: fortressView(meNow, finalState, conflicts.fortress, entities, allianceNames, now),
+      fortress: fortressView(meNow, finalState, conflicts.fortress, entities, allianceNames, now, intel.get(FORTRESS_INTEL) ?? null),
       chronicle: wantsChronicle ? await loadChronicle(admin, season.id, entities) : undefined,
     };
     return error ? { ok: false, error, snapshot } : { ok: true, snapshot, message };

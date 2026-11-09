@@ -538,7 +538,7 @@ function AllianceTab({ snap, live, now, run }: { snap: GameSnapshot; live: Playe
   return (
     <>
       <Alliance snap={snap} run={run} />
-      <Fortress snap={snap} live={live} run={run} />
+      <Fortress snap={snap} live={live} now={now} run={run} />
       {snap.alliance && <Wars snap={snap} run={run} now={now} />}
       {allies.length > 0 && (
         <>
@@ -788,8 +788,10 @@ function Wars({ snap, run, now }: { snap: GameSnapshot; run: ReturnType<typeof u
 }
 
 /** La forteresse : la prendre, la garder. */
-function Fortress({ snap, live, run }: { snap: GameSnapshot; live: PlayerState; run: ReturnType<typeof useGame>["run"] }) {
+function Fortress({ snap, live, now, run }: { snap: GameSnapshot; live: PlayerState; now: number; run: ReturnType<typeof useGame>["run"] }) {
   const f = snap.fortress;
+  const spyPrice = spyCost(live, worldFrom(snap.worksite), now);
+  const intel = f.intelUntil !== null && f.intelUntil > now;
   const [busy, setBusy] = useState(false);
   const [unit, setUnit] = useState("");
   const [qty, setQty] = useState(1);
@@ -816,14 +818,27 @@ function Fortress({ snap, live, run }: { snap: GameSnapshot; live: PlayerState; 
           <div className="row-desc">
             {f.holderName ? `Tenue par ${f.holderName}.` : "Tenue par personne."} L&apos;alliance qui la tient gagne +20 % de production.
           </div>
-          <div className="row-desc army-line num">{f.exact ? armyIcons(f.army) : `≈ ${armyIcons(f.army)}`}</div>
-          <div className="row-desc">{f.blocker ?? `~${Math.round(f.chance * 100)} % de chances de la prendre.`}</div>
+          <div className="row-desc army-line num">
+            {intel ? `🕵️ ${armyIcons(f.army)} (rapport encore ${duration(f.intelUntil! - now)})` : f.exact ? armyIcons(f.army) : `≈ ${armyIcons(f.army)}`}
+          </div>
+          <div className="row-desc">{f.blocker ?? `${f.exact ? "" : "~"}${Math.round(f.chance * 100)} % de chances de la prendre.`}</div>
         </div>
         {!f.mine && (
-          <button className="btn btn-primary" disabled={busy || f.blocker !== null} onClick={() => act({ type: "fortress_attack" })}>
-            Assiéger
-            <span className="cost num">~{Math.round(f.chance * 100)} %</span>
-          </button>
+          <div className="row-actions">
+            <button className="btn btn-primary" disabled={busy || f.blocker !== null} onClick={() => act({ type: "fortress_attack" })}>
+              Assiéger
+              <span className="cost num">
+                {f.exact ? "" : "~"}
+                {Math.round(f.chance * 100)} %
+              </span>
+            </button>
+            {!intel && (
+              <button className="btn" disabled={busy || live.stone < spyPrice} onClick={() => act({ type: "spy", target: "fortress" })} title="Révèle les défenses exactes pendant 1 h. Il peut être repéré.">
+                🕵️ Espionner
+                <span className="cost num">{formatNumber(spyPrice)} 🪨</span>
+              </button>
+            )}
+          </div>
         )}
       </div>
       {f.mine && (
@@ -958,7 +973,7 @@ function Chronicle({ entries, me, now, rivals, alliances = [] }: { entries: Chro
             ? `🏰 ${who(e.actorId, e.actorName, true)} ${e.actorId === me ? "as pris" : "a pris"} la forteresse pour ${allianceName(e.details.alliance)} !`
             : `🏰 ${who(e.actorId, e.actorName, true)} ${e.actorId === me ? "t'es brisé" : "s'est brisé"} sur les murs de la forteresse.`;
         } else if (e.kind === "spy") {
-          text = `${who(e.actorId, e.actorName, true)} ${e.actorId === me ? "as été surpris" : "a été surpris"} à espionner ${e.targetId === me ? "ton domaine" : e.targetName}.`;
+          text = `${who(e.actorId, e.actorName, true)} ${e.actorId === me ? "as été surpris" : "a été surpris"} à espionner ${e.details.fortress ? "la forteresse" : e.targetId === me ? "ton domaine" : e.targetName}.`;
         } else if (e.kind === "gift") {
           text = `${e.actorName} a offert ${formatNumber(e.details.amount ?? 0)} pierres au chantier.`;
         } else {
