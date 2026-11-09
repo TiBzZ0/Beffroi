@@ -517,6 +517,14 @@ a {
 .input-qty {
   width: 76px;
 }
+.qty .input-qty {
+  min-height: 34px;
+  width: 84px;
+}
+.qty .input-active {
+  border-color: var(--ink);
+  outline: 2px solid var(--ink);
+}
 .alliance-form,
 .reinforce {
   display: flex;

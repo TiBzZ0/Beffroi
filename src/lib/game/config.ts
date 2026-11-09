@@ -375,3 +375,6 @@ export const LORD_ARMY: Record<LordKey, { power: number; troopShare: number; tro
 };
 /** Budget minimal d'une armée de seigneur, pour qu'il ne soit jamais sans défense. */
 export const LORD_MIN_BUDGET = 1_500;
+
+/** Nombre maximal de troupes ou fortifications achetées d'un coup. */
+export const MAX_ARMY_BATCH = 100_000;

@@ -5,6 +5,7 @@ import { signOut } from "@/app/(auth)/actions";
 import {
   CATEGORY_LABELS,
   MAX_ALLIANCE_SIZE,
+  MAX_ARMY_BATCH,
   DIFFICULTY_LABELS,
   COMBATANTS,
   DEFENSES,
@@ -1006,8 +1007,15 @@ function Chronicle({ entries, me, now, rivals, alliances = [] }: { entries: Chro
 
 /** Caserne et fortifications du joueur. */
 function Garrison({ live, run }: { live: PlayerState; run: ReturnType<typeof useGame>["run"] }) {
-  const [qty, setQty] = useState<1 | 10 | 50 | 100 | 500>(1);
+  const [qty, setQty] = useState(1);
+  const [custom, setCustom] = useState("");
   const [busy, setBusy] = useState(false);
+  const presets = [1, 10, 50, 100, 500];
+  const pickCustom = (text: string) => {
+    setCustom(text);
+    const n = Math.floor(Number(text));
+    if (Number.isFinite(n) && n >= 1) setQty(Math.min(n, MAX_ARMY_BATCH));
+  };
   const buy = async (kind: "unit" | "defense", id: string) => {
     setBusy(true);
     await run({ type: "army", kind, id, qty });
@@ -1047,11 +1055,30 @@ function Garrison({ live, run }: { live: PlayerState; run: ReturnType<typeof use
         </span>
       </div>
       <div className="qty" role="group" aria-label="Quantité">
-        {([1, 10, 50, 100, 500] as const).map((q) => (
-          <button key={q} className="btn" aria-pressed={qty === q} onClick={() => setQty(q)}>
+        {presets.map((q) => (
+          <button
+            key={q}
+            className="btn"
+            aria-pressed={qty === q && custom === ""}
+            onClick={() => {
+              setQty(q);
+              setCustom("");
+            }}
+          >
             ×{q}
           </button>
         ))}
+        <input
+          className={`input input-qty${custom !== "" ? " input-active" : ""}`}
+          type="number"
+          inputMode="numeric"
+          min={1}
+          max={MAX_ARMY_BATCH}
+          placeholder="×…"
+          value={custom}
+          onChange={(e) => pickCustom(e.target.value)}
+          aria-label="Quantité au choix"
+        />
       </div>
       <div className="list">{rows("unit", UNITS)}</div>
       <div className="list" style={{ marginTop: 8 }}>
