@@ -127,9 +127,6 @@ export const ACTIVE_WINDOW_DAYS = 7;
 
 /** Délai minimal entre deux raids lancés par un même joueur. */
 export const RAID_COOLDOWN_MS = 60 * 60 * 1000;
-/** Coût d'un raid : N secondes de la production de l'attaquant (minimum RAID_MIN_COST). */
-export const RAID_COST_SECONDS = 10 * 60;
-export const RAID_MIN_COST = 100;
 /** Part du stock non sécurisé volée (doublée en cas de revanche). */
 export const RAID_LOOT_RATE = 0.1;
 export const REVENGE_LOOT_RATE = 0.2;
@@ -148,7 +145,7 @@ export const PROTECTED_PER_TYPE = 5;
 export const RUIN_REBUILD_FACTOR = 0.5;
 /** Bouclier de la victime après un raid. */
 export const SHIELD_MS = 4 * 60 * 60 * 1000;
-/** La victime peut se venger pendant ce délai (butin doublé, sans attendre ni payer). */
+/** La victime peut se venger pendant ce délai (attaque +50 %, butin doublé, sans attendre). */
 export const REVENGE_MS = 24 * 60 * 60 * 1000;
 
 // ---------------------------------------------------------------------------
@@ -171,17 +168,64 @@ export interface LordDef {
   raidEveryHours: number | null;
   /** Part de son stock versée au chantier, et intervalle moyen (null = jamais). */
   contribution: { share: number; everyHours: number } | null;
-  /** Multiplicateur du coût pour le raider (seigneur bien gardé). */
-  guard: number;
 }
 
 export const LORDS: readonly LordDef[] = [
-  { key: "corbelune", id: "00000000-0000-4000-8000-00000000c0b1", username: "Corbelune", name: "Baron de Corbelune", blazon: "🐦‍⬛", temper: "Pillard agressif", rateFactor: 1.0, raidEveryHours: 6, contribution: null, guard: 1 },
-  { key: "aubeval", id: "00000000-0000-4000-8000-00000000a0be", username: "Aubeval", name: "Prieure d'Aubeval", blazon: "⛪", temper: "Bâtisseuse pacifique", rateFactor: 0.8, raidEveryHours: null, contribution: { share: 0.2, everyHours: 12 }, guard: 1 },
-  { key: "grisemolle", id: "00000000-0000-4000-8000-0000000062e5", username: "Grisemolle", name: "Comte Grisemolle", blazon: "💰", temper: "Avare, bien gardé", rateFactor: 1.2, raidEveryHours: 24, contribution: null, guard: 3 },
+  { key: "corbelune", id: "00000000-0000-4000-8000-00000000c0b1", username: "Corbelune", name: "Baron de Corbelune", blazon: "🐦‍⬛", temper: "Pillard agressif", rateFactor: 1.0, raidEveryHours: 6, contribution: null },
+  { key: "aubeval", id: "00000000-0000-4000-8000-00000000a0be", username: "Aubeval", name: "Prieure d'Aubeval", blazon: "⛪", temper: "Bâtisseuse pacifique", rateFactor: 0.8, raidEveryHours: null, contribution: { share: 0.2, everyHours: 12 } },
+  { key: "grisemolle", id: "00000000-0000-4000-8000-0000000062e5", username: "Grisemolle", name: "Comte Grisemolle", blazon: "💰", temper: "Avare, bien gardé", rateFactor: 1.2, raidEveryHours: 24, contribution: null },
 ];
 
 export const LORD_BY_ID: ReadonlyMap<string, LordDef> = new Map(LORDS.map((l) => [l.id, l]));
 
 /** Production minimale d'un seigneur, pour qu'il existe même en début de saison. */
 export const LORD_MIN_RATE = 1;
+
+// ---------------------------------------------------------------------------
+// Troupes et défenses
+// ---------------------------------------------------------------------------
+
+export type UnitId = "milicien" | "arbaletrier" | "chevalier";
+export type DefenseId = "palissade" | "tour" | "muraille";
+
+export interface ArmyDef<Id extends string> {
+  id: Id;
+  name: string;
+  plural: string;
+  icon: string;
+  description: string;
+  cost: number;
+  /** Puissance d'attaque (troupes) ou de défense (fortifications) par exemplaire. */
+  power: number;
+}
+
+export const UNITS: readonly ArmyDef<UnitId>[] = [
+  { id: "milicien", name: "Milicien", plural: "Miliciens", icon: "🗡️", description: "Une fourche, un peu de courage.", cost: 200, power: 1 },
+  { id: "arbaletrier", name: "Arbalétrier", plural: "Arbalétriers", icon: "🏹", description: "Frappe de loin, et fort.", cost: 2_500, power: 14 },
+  { id: "chevalier", name: "Chevalier", plural: "Chevaliers", icon: "🐎", description: "Armure, destrier et panache.", cost: 30_000, power: 190 },
+];
+
+export const DEFENSES: readonly ArmyDef<DefenseId>[] = [
+  { id: "palissade", name: "Palissade", plural: "Palissades", icon: "🪵", description: "Des pieux bien taillés.", cost: 150, power: 1 },
+  { id: "tour", name: "Tour de guet", plural: "Tours de guet", icon: "🗼", description: "On voit venir les pillards.", cost: 2_000, power: 14 },
+  { id: "muraille", name: "Muraille", plural: "Murailles", icon: "🧱", description: "Pierre sur pierre, rien ne passe.", cost: 24_000, power: 190 },
+];
+
+export const UNIT_IDS = UNITS.map((u) => u.id);
+export const DEFENSE_IDS = DEFENSES.map((d) => d.id);
+
+/** Défense de base de chaque domaine (gardes du château), même sans fortification. */
+export const BASE_DEFENSE = 5;
+/** Bonus d'attaque lors d'une revanche. */
+export const REVENGE_ATTACK_BONUS = 1.5;
+/** Pertes de l'attaquant : en cas de victoire, puis de défaite. */
+export const ATTACKER_LOSS_ON_WIN = 0.1;
+export const ATTACKER_LOSS_ON_DEFEAT = 0.3;
+/** Fortifications endommagées quand la défense tombe. */
+export const DEFENSE_LOSS_ON_DEFEAT = 0.1;
+/** Seigneurs : attaque et défense = médiane des joueurs × facteur. */
+export const LORD_ARMY: Record<LordKey, { attack: number; defense: number }> = {
+  corbelune: { attack: 1.1, defense: 0.8 },
+  aubeval: { attack: 0, defense: 0.7 },
+  grisemolle: { attack: 0.9, defense: 2.5 },
+};

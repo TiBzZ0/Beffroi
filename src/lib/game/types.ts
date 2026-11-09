@@ -27,7 +27,10 @@ export interface RivalView {
   rate: number;
   /** Pierre qu'un raid rapporterait maintenant (estimation). */
   loot: number;
-  cost: number;
+  /** Défense estimée de la cible, son attaque, et ta chance de réussir un raid. */
+  defense: number;
+  attack: number;
+  chance: number;
   shieldUntil: number;
   burnedUntil: number;
   totalPlundered: number;
@@ -44,7 +47,16 @@ export interface ChronicleEntry {
   actorName: string;
   targetId: string | null;
   targetName: string;
-  details: { stolen?: number; destroyed?: Record<string, number>; revenge?: boolean; amount?: number };
+  details: {
+    success?: boolean;
+    chance?: number;
+    stolen?: number;
+    destroyed?: Record<string, number>;
+    troopsLost?: Record<string, number>;
+    defensesLost?: Record<string, number>;
+    revenge?: boolean;
+    amount?: number;
+  };
 }
 
 export interface GameSnapshot {
@@ -77,7 +89,8 @@ export type GameAction =
   | { type: "upgrade"; upgrade: string }
   | { type: "contribute"; amount: number }
   | { type: "raid"; target: string }
-  | { type: "rebuild"; generator: string };
+  | { type: "rebuild"; generator: string }
+  | { type: "army"; kind: "unit" | "defense"; id: string; qty: number };
 
 export type ActionResponse =
   | { ok: true; snapshot: GameSnapshot; message?: string }

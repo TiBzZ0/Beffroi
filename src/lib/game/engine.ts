@@ -11,19 +11,26 @@ import {
   MAX_CLICKS_PER_SECOND,
   OFFLINE_CAP_MS,
   PROTECTED_PER_TYPE,
+  ATTACKER_LOSS_ON_DEFEAT,
+  ATTACKER_LOSS_ON_WIN,
+  BASE_DEFENSE,
+  DEFENSE_LOSS_ON_DEFEAT,
+  DEFENSES,
   RAID_COOLDOWN_MS,
-  RAID_COST_SECONDS,
   RAID_DESTROY_RATE,
   RAID_LOOT_RATE,
-  RAID_MIN_COST,
+  REVENGE_ATTACK_BONUS,
   REVENGE_LOOT_RATE,
   REVENGE_MS,
   RUIN_REBUILD_FACTOR,
   SECURED_SECONDS,
   SHIELD_MS,
   STAGES,
+  UNITS,
   UPGRADE_BY_ID,
+  type DefenseId,
   type GeneratorId,
+  type UnitId,
   type UpgradeDef,
 } from "./config";
 
@@ -50,6 +57,8 @@ export interface PlayerState {
   revengeTarget: string | null;
   revengeUntil: number;
   totalPlundered: number;
+  troops: Partial<Record<UnitId, number>>;
+  defenses: Partial<Record<DefenseId, number>>;
 }
 
 /** Ce que le joueur doit savoir du monde pour calculer sa production. */
@@ -80,6 +89,8 @@ export function newPlayerState(now: number): PlayerState {
     revengeTarget: null,
     revengeUntil: 0,
     totalPlundered: 0,
+    troops: {},
+    defenses: {},
   };
 }
 
@@ -293,10 +304,60 @@ export function rebuildRuin(state: PlayerState, id: GeneratorId): Result<PlayerS
   };
 }
 
-/** Coût d'un raid pour l'attaquant (en pierre). */
-export function raidCost(attackerRate: number, guard = 1): number {
-  return Math.ceil(Math.max(RAID_MIN_COST, attackerRate * RAID_COST_SECONDS) * guard);
+// ---------------------------------------------------------------------------
+// Troupes et défenses
+// ---------------------------------------------------------------------------
+
+export function unitCount(state: PlayerState, id: UnitId): number {
+  return state.troops[id] ?? 0;
 }
+
+export function defenseCount(state: PlayerState, id: DefenseId): number {
+  return state.defenses[id] ?? 0;
+}
+
+/** Puissance d'attaque totale des troupes. */
+export function attackPower(state: PlayerState): number {
+  return UNITS.reduce((sum, u) => sum + unitCount(state, u.id) * u.power, 0);
+}
+
+/** Puissance de défense totale (gardes du château + fortifications). */
+export function defensePower(state: PlayerState): number {
+  return BASE_DEFENSE + DEFENSES.reduce((sum, d) => sum + defenseCount(state, d.id) * d.power, 0);
+}
+
+export function buyArmy(state: PlayerState, kind: "unit" | "defense", id: string, qty: number): Result<PlayerState> {
+  const def = kind === "unit" ? UNITS.find((u) => u.id === id) : DEFENSES.find((d) => d.id === id);
+  if (!def) return { ok: false, error: kind === "unit" ? "Troupe inconnue." : "Fortification inconnue." };
+  if (!Number.isInteger(qty) || qty < 1 || qty > 10_000) return { ok: false, error: "Quantité invalide." };
+  const cost = def.cost * qty;
+  if (cost > state.stone) return { ok: false, error: "Pas assez de pierre." };
+  const key = kind === "unit" ? "troops" : "defenses";
+  const current = (state[key] as Record<string, number>)[id] ?? 0;
+  return { ok: true, value: { ...state, stone: state.stone - cost, [key]: { ...state[key], [id]: current + qty } } };
+}
+
+/** Chance de succès d'un raid : attaque² / (attaque² + défense²). */
+export function raidChance(attack: number, defense: number): number {
+  if (attack <= 0) return 0;
+  return (attack * attack) / (attack * attack + defense * defense);
+}
+
+/** Retire une part des exemplaires (arrondi au supérieur pour qu'une défaite coûte toujours). */
+function losses<Id extends string>(counts: Partial<Record<Id, number>>, rate: number): { left: Partial<Record<Id, number>>; lost: Partial<Record<Id, number>> } {
+  const left: Partial<Record<Id, number>> = {};
+  const lost: Partial<Record<Id, number>> = {};
+  for (const [id, n] of Object.entries(counts) as [Id, number][]) {
+    const l = Math.min(n, Math.ceil(n * rate));
+    left[id] = n - l;
+    if (l > 0) lost[id] = l;
+  }
+  return { left, lost };
+}
+
+// ---------------------------------------------------------------------------
+// Raids
+// ---------------------------------------------------------------------------
 
 export function hasRevenge(attacker: PlayerState, victimId: string, now: number): boolean {
   return attacker.revengeTarget === victimId && attacker.revengeUntil > now;
@@ -306,38 +367,50 @@ export interface RaidContext {
   now: number;
   attackerId: string;
   victimId: string;
-  /** Production actuelle de l'attaquant (pour le coût) et de la victime (pour le stock sécurisé). */
-  attackerRate: number;
+  /** Production actuelle de la victime (pour son stock sécurisé). */
   victimRate: number;
-  /** Les seigneurs ne paient pas leurs raids. */
+  /** Les seigneurs n'ont pas de troupes à acheter : on fournit leur puissance. */
   attackerIsLord?: boolean;
-  /** Multiplicateur de coût (seigneur bien gardé). */
-  guard?: number;
+  attackOverride?: number;
+  defenseOverride?: number;
+  /** Tirage aléatoire entre 0 et 1 (fourni pour des tests reproductibles). */
+  roll: number;
 }
 
 export interface RaidReport {
+  success: boolean;
+  chance: number;
+  attack: number;
+  defense: number;
   stolen: number;
-  cost: number;
   destroyed: Partial<Record<GeneratorId, number>>;
+  troopsLost: Partial<Record<UnitId, number>>;
+  defensesLost: Partial<Record<DefenseId, number>>;
   revenge: boolean;
 }
 
+export function effectiveAttack(attacker: PlayerState, ctx: Pick<RaidContext, "attackOverride" | "victimId" | "now">): number {
+  const base = ctx.attackOverride ?? attackPower(attacker);
+  return hasRevenge(attacker, ctx.victimId, ctx.now) ? base * REVENGE_ATTACK_BONUS : base;
+}
+
 /** Vérifie qu'un raid est permis. Renvoie un message d'erreur, ou null. */
-export function raidBlocker(attacker: PlayerState, victim: PlayerState, ctx: RaidContext): string | null {
+export function raidBlocker(attacker: PlayerState, victim: PlayerState, ctx: Omit<RaidContext, "roll">): string | null {
   const revenge = hasRevenge(attacker, ctx.victimId, ctx.now);
   if (ctx.attackerId === ctx.victimId) return "On ne se pille pas soi-même.";
   if (victim.shieldUntil > ctx.now) return "Cette cible est sous bouclier.";
   if (!revenge && attacker.lastRaidTarget === ctx.victimId) return "Pas deux raids de suite contre la même cible.";
   if (!revenge && !ctx.attackerIsLord && ctx.now - attacker.lastRaidAt < RAID_COOLDOWN_MS) return "Tes troupes se reposent encore.";
-  const cost = revenge || ctx.attackerIsLord ? 0 : raidCost(ctx.attackerRate, ctx.guard);
-  if (cost > attacker.stone) return "Pas assez de pierre pour payer les mercenaires.";
+  if (effectiveAttack(attacker, ctx) <= 0) return "Il te faut des troupes pour lancer un raid.";
   return null;
 }
 
 /**
  * Résout un raid. Les deux états doivent déjà être avancés jusqu'à `ctx.now`.
- * La victime perd une part de son stock non sécurisé, voit ses ateliers incendiés et
- * quelques bâtiments détruits, puis reçoit un bouclier et un droit de revanche.
+ * Succès selon le rapport de forces. En cas de succès, la victime perd une part de son
+ * stock non sécurisé, voit ses ateliers incendiés, quelques bâtiments ruinés et ses
+ * fortifications endommagées, puis reçoit un bouclier et un droit de revanche.
+ * En cas d'échec, l'attaquant perd une bonne part de ses troupes.
  */
 export function resolveRaid(
   attacker: PlayerState,
@@ -348,7 +421,22 @@ export function resolveRaid(
   if (blocked) return { ok: false, error: blocked };
   const { now } = ctx;
   const revenge = hasRevenge(attacker, ctx.victimId, now);
-  const cost = revenge || ctx.attackerIsLord ? 0 : raidCost(ctx.attackerRate, ctx.guard);
+  const attack = effectiveAttack(attacker, ctx);
+  const defense = ctx.defenseOverride ?? defensePower(victim);
+  const chance = raidChance(attack, defense);
+  const success = ctx.roll < chance;
+
+  const troops = losses(attacker.troops, success ? ATTACKER_LOSS_ON_WIN : ATTACKER_LOSS_ON_DEFEAT);
+  const attackerAfter: PlayerState = {
+    ...attacker,
+    troops: troops.left,
+    lastRaidAt: now,
+    lastRaidTarget: ctx.victimId,
+    shieldUntil: 0, // attaquer fait tomber son propre bouclier
+    ...(revenge ? { revengeTarget: null, revengeUntil: 0 } : {}),
+  };
+  const base: RaidReport = { success, chance, attack, defense, stolen: 0, destroyed: {}, troopsLost: troops.lost, defensesLost: {}, revenge };
+  if (!success) return { ok: true, value: { attacker: attackerAfter, victim, report: base } };
 
   const secured = ctx.victimRate * SECURED_SECONDS;
   const stolen = Math.floor(Math.max(0, victim.stone - secured) * (revenge ? REVENGE_LOOT_RATE : RAID_LOOT_RATE));
@@ -369,30 +457,32 @@ export function resolveRaid(
       toDestroy--;
     }
   }
+  // Les fortifications tombées : 10 % (arrondi à l'inférieur, une muraille ne s'effondre pas pour rien).
+  const defensesLeft: PlayerState["defenses"] = {};
+  const defensesLost: RaidReport["defensesLost"] = {};
+  for (const d of DEFENSES) {
+    const n = defenseCount(victim, d.id);
+    const l = Math.floor(n * DEFENSE_LOSS_ON_DEFEAT);
+    if (n > 0) defensesLeft[d.id] = n - l;
+    if (l > 0) defensesLost[d.id] = l;
+  }
 
   return {
     ok: true,
     value: {
-      attacker: {
-        ...attacker,
-        stone: attacker.stone - cost + stolen,
-        totalPlundered: attacker.totalPlundered + stolen,
-        lastRaidAt: now,
-        lastRaidTarget: ctx.victimId,
-        shieldUntil: 0, // attaquer fait tomber son propre bouclier
-        ...(revenge ? { revengeTarget: null, revengeUntil: 0 } : {}),
-      },
+      attacker: { ...attackerAfter, stone: attacker.stone + stolen, totalPlundered: attacker.totalPlundered + stolen },
       victim: {
         ...victim,
         stone: victim.stone - stolen,
         generators,
         ruins,
+        defenses: defensesLeft,
         burnedUntil: Math.max(victim.burnedUntil, now + BURN_MS),
         shieldUntil: now + SHIELD_MS,
         revengeTarget: ctx.attackerId,
         revengeUntil: now + REVENGE_MS,
       },
-      report: { stolen, cost, destroyed, revenge },
+      report: { ...base, stolen, destroyed, defensesLost },
     },
   };
 }

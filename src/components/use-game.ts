@@ -175,7 +175,8 @@ export function useGame() {
           const s = snapRef.current;
           if (s && payload.new.kind === "raid" && payload.new.target_id === s.userId) {
             const attacker = s.rivals.find((r) => r.id === payload.new.actor_id)?.name ?? "Un rival";
-            showToast(`⚔️ ${attacker} vient de piller tes greniers !`);
+            const repelled = (payload.new.details as { success?: boolean } | null)?.success === false;
+            showToast(repelled ? `🛡️ Tu as repoussé le raid de ${attacker} !` : `⚔️ ${attacker} vient de piller tes greniers !`);
           }
           void run({ type: "sync" });
         },

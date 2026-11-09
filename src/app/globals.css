@@ -689,3 +689,13 @@ a {
   white-space: nowrap;
   font-size: 0.82rem;
 }
+.garrison-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 8px;
+  margin-top: 14px;
+}
+.garrison-head .section-title {
+  margin: 0 0 8px;
+}
