@@ -836,7 +836,7 @@ function Chronicle({ entries, me, now, rivals }: { entries: ChronicleEntry[]; me
 
 /** Caserne et fortifications du joueur. */
 function Garrison({ live, run }: { live: PlayerState; run: ReturnType<typeof useGame>["run"] }) {
-  const [qty, setQty] = useState<1 | 10>(1);
+  const [qty, setQty] = useState<1 | 10 | 50 | 100 | 500>(1);
   const [busy, setBusy] = useState(false);
   const buy = async (kind: "unit" | "defense", id: string) => {
     setBusy(true);
@@ -877,7 +877,7 @@ function Garrison({ live, run }: { live: PlayerState; run: ReturnType<typeof use
         </span>
       </div>
       <div className="qty" role="group" aria-label="Quantité">
-        {([1, 10] as const).map((q) => (
+        {([1, 10, 50, 100, 500] as const).map((q) => (
           <button key={q} className="btn" aria-pressed={qty === q} onClick={() => setQty(q)}>
             ×{q}
           </button>
