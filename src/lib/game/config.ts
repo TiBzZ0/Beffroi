@@ -185,6 +185,8 @@ export const PROTECTED_PER_TYPE = 5;
 export const RUIN_REBUILD_FACTOR = 0.5;
 /** Bouclier de la victime après un raid. */
 export const SHIELD_MS = 4 * 60 * 60 * 1000;
+/** Bouclier d'un seigneur après un pillage réussi : bien plus court que celui d'un joueur. */
+export const LORD_SHIELD_MS = 10 * 60 * 1000;
 /** La victime peut se venger pendant ce délai (attaque +50 %, butin doublé, sans attendre). */
 export const REVENGE_MS = 24 * 60 * 60 * 1000;
 

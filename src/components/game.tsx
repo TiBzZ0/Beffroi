@@ -492,7 +492,7 @@ function Raids({ snap, live, now, run }: { snap: GameSnapshot; live: PlayerState
             de la cible. Chaque unité a ses forces et ses faiblesses, compose ton armée selon ce que tu vois en face. Tu gagnes si plus personne ne
             riposte en face. Les pertes sont réelles des deux côtés (70 % des fortifications abattues se relèvent). Un raid réussi vole 25 % (40 % en
             revanche) de la pierre non sécurisée (la dernière demi-heure de production est à l&apos;abri, mais jamais plus de la moitié du stock),
-            incendie les ateliers 30 min et ruine quelques bâtiments ; la victime reçoit 4 h de bouclier et un droit de revanche (+50 % de dégâts). Les
+            incendie les ateliers 30 min et ruine quelques bâtiments ; la victime reçoit 4 h de bouclier (10 min pour un seigneur) et un droit de revanche (+50 % de dégâts). Les
             seigneurs difficiles ne frappent que ceux qui les ont attaqués. De loin, tu ne vois qu&apos;une estimation (≈) des armées : un espion révèle
             l&apos;armée exacte pendant 1 h, mais il peut être repéré (surtout par les tours d&apos;archers).
           </p>

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { BURN_MS, GUARDS_PER_DOMAIN, RAID_COOLDOWN_MS, SECURED_SECONDS, SHIELD_MS } from "./config";
+import { BURN_MS, GUARDS_PER_DOMAIN, LORD_SHIELD_MS, RAID_COOLDOWN_MS, SECURED_SECONDS, SHIELD_MS } from "./config";
 import { armyFromBudget, battle, estimateChance, seededRng } from "./battle";
 import {
   advance,
@@ -127,6 +127,12 @@ describe("raids", () => {
     const base = { attackerIsLord: true, attackerArmy: { chevalier: 5 } };
     expect(resolveRaid(lord, player({ troops: {} }), ctx(base)).ok).toBe(false);
     expect(resolveRaid(lord, player({ troops: {} }), ctx({ ...base, allowRepeat: true })).ok).toBe(true);
+  });
+
+  it("un seigneur pillé n'a qu'un court bouclier", () => {
+    const r = resolveRaid(player(), player({ troops: {} }), ctx({ defenderArmy: { garde: 3 } }));
+    if (!r.ok) throw new Error(r.error);
+    expect(r.value.victim.shieldUntil).toBe(NOW + LORD_SHIELD_MS);
   });
 
   it("un seigneur attaque avec son armée sans jamais la perdre", () => {
