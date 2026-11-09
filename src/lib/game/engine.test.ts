@@ -108,30 +108,41 @@ describe("achats", () => {
 });
 
 describe("clics", () => {
-  it("accepte au plus 15 clics par seconde", () => {
+  it("accepte au plus 25 clics par seconde", () => {
     const s = newPlayerState(T0);
     const { accepted, state } = applyClicks(s, 500, T0 + 2_000, noWorld);
-    expect(accepted).toBe(30);
-    expect(state.stone).toBe(30);
+    expect(accepted).toBe(50);
+    expect(state.stone).toBe(50);
     expect(state.lastClickAt).toBe(T0 + 2_000);
   });
 
   it("plafonne la fenêtre à 10 s pour éviter le crédit de clics", () => {
     const { accepted } = applyClicks(newPlayerState(T0), 10_000, T0 + 3_600_000, noWorld);
-    expect(accepted).toBe(150);
+    expect(accepted).toBe(250);
   });
 
-  it("confisque le marteau après 3 envois de suite à une cadence surhumaine", () => {
+  it("un humain rapide, même avec un envoi en retard, n'est jamais confisqué", () => {
     let s = newPlayerState(T0);
     let t = T0;
-    for (let i = 0; i < 2; i++) {
-      t += 3_000;
-      const r = applyClicks(s, 42, t, noWorld); // 14 coups/s
+    for (let i = 0; i < 20; i++) {
+      t += i % 2 ? 1_000 : 5_000; // envois irréguliers, 15 coups/s en moyenne
+      const r = applyClicks(s, i % 2 ? 15 : 75, t, noWorld);
       expect(r.paused).toBe(false);
       s = r.state;
     }
-    t += 3_000;
-    const r = applyClicks(s, 42, t, noWorld);
+  });
+
+  it("confisque le marteau après 5 envois de suite à une cadence surhumaine", () => {
+    let s = newPlayerState(T0);
+    let t = T0;
+    for (let i = 0; i < 4; i++) {
+      t += 6_000;
+      const r = applyClicks(s, 150, t, noWorld); // 25 coups/s
+      expect(r.paused).toBe(false);
+      s = r.state;
+    }
+    t += 6_000;
+    const r = applyClicks(s, 150, t, noWorld);
     expect(r).toMatchObject({ paused: true, accepted: 0 });
     expect(r.state.clickPausedUntil).toBe(t + CLICK_PAUSE_MS);
     // Pendant la pause, plus rien n'est compté ; ensuite tout repart.
@@ -141,7 +152,7 @@ describe("clics", () => {
 
   it("une cadence humaine efface peu à peu les avertissements", () => {
     let s = { ...newPlayerState(T0), clickStrikes: 2 };
-    s = applyClicks(s, 24, T0 + 3_000, noWorld).state; // 8 coups/s
+    s = applyClicks(s, 60, T0 + 6_000, noWorld).state; // 10 coups/s
     expect(s.clickStrikes).toBe(1);
   });
 

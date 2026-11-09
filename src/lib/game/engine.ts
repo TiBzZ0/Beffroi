@@ -6,6 +6,7 @@ import {
   BURN_MS,
   BURN_PRODUCTION_FACTOR,
   CLICK_PAUSE_MS,
+  CLICK_RATE_MIN_WINDOW_MS,
   CLICK_STRIKES_FOR_PAUSE,
   CLICK_WINDOW_MAX_MS,
   SUSPICIOUS_CLICK_RATE,
@@ -267,7 +268,7 @@ export function applyClicks(
   // Cadence surhumaine soutenue : avertissements, puis marteau confisqué.
   let strikes = state.clickStrikes;
   if (requested > 0 && windowMs >= 1000) {
-    strikes = requested / (windowMs / 1000) > SUSPICIOUS_CLICK_RATE ? strikes + 1 : Math.max(0, strikes - 1);
+    strikes = requested / (Math.max(windowMs, CLICK_RATE_MIN_WINDOW_MS) / 1000) > SUSPICIOUS_CLICK_RATE ? strikes + 1 : Math.max(0, strikes - 1);
   }
   if (strikes >= CLICK_STRIKES_FOR_PAUSE) {
     return { state: { ...state, clickStrikes: 0, clickPausedUntil: now + CLICK_PAUSE_MS, lastClickAt: now }, accepted: 0, paused: true };

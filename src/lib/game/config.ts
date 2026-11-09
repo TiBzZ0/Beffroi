@@ -7,12 +7,16 @@ export const SEASON_DAYS = 14;
 export const OFFLINE_CAP_MS = 8 * 60 * 60 * 1000;
 
 /** Clics acceptés au plus par seconde. L'excédent est ignoré. */
-export const MAX_CLICKS_PER_SECOND = 15;
+export const MAX_CLICKS_PER_SECOND = 25;
 /** Fenêtre maximale de clics prise en compte par lot (évite d'accumuler un crédit de clics). */
 export const CLICK_WINDOW_MAX_MS = 10_000;
-/** Anti-triche : au-delà de 12 coups/s soutenus sur 3 envois de suite (≈ 9 s), le marteau est confisqué 2 min. */
-export const SUSPICIOUS_CLICK_RATE = 12;
-export const CLICK_STRIKES_FOR_PAUSE = 3;
+/**
+ * Anti-triche : au-delà de 22 coups/s soutenus sur 5 envois de suite (≈ 15 s), le marteau est confisqué 2 min.
+ * La cadence est mesurée sur au moins 6 s, pour qu'un envoi retardé par le réseau ne gonfle pas la mesure.
+ */
+export const SUSPICIOUS_CLICK_RATE = 22;
+export const CLICK_STRIKES_FOR_PAUSE = 5;
+export const CLICK_RATE_MIN_WINDOW_MS = 6_000;
 export const CLICK_PAUSE_MS = 2 * 60 * 1000;
 
 /** Croissance du prix de chaque bâtiment supplémentaire. */
