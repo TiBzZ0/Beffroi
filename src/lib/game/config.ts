@@ -301,28 +301,32 @@ export const SPY_DETECT_BASE = 0.3;
 export const SPY_DETECT_PER_TOWER = 0.05;
 export const SPY_DETECT_MAX = 0.9;
 
-/** Armée des seigneurs : budget = valeur médiane des armées des joueurs × facteur, réparti selon leur goût. */
-export const LORD_ARMY: Record<LordKey, { attack: number; defense: number; troops: Partial<Record<UnitId, number>>; forts: Partial<Record<DefenseId, number>> }> = {
-  bourbelin: { attack: 0, defense: 0.3, troops: {}, forts: { palissade: 1 } },
-  aubeval: { attack: 0, defense: 0.8, troops: {}, forts: { palissade: 0.5, tour: 0.5 } },
-  corbelune: { attack: 1.2, defense: 0.8, troops: { chevalier: 0.5, arbaletrier: 0.3, milicien: 0.2 }, forts: { palissade: 0.5, tour: 0.5 } },
-  ventebrise: { attack: 1, defense: 1.2, troops: { arbaletrier: 0.6, chevalier: 0.4 }, forts: { tour: 0.6, palissade: 0.4 } },
-  grisemolle: { attack: 1, defense: 2.5, troops: { piquier: 0.5, arbaletrier: 0.5 }, forts: { muraille: 0.4, baliste: 0.4, tour: 0.2 } },
-  noirval: { attack: 2.5, defense: 2.5, troops: { chevalier: 0.6, piquier: 0.2, arbaletrier: 0.2 }, forts: { baliste: 0.5, tour: 0.3, palissade: 0.2 } },
-  hautefaille: { attack: 4, defense: 5, troops: { chevalier: 0.4, arbaletrier: 0.3, piquier: 0.3 }, forts: { muraille: 0.4, baliste: 0.4, tour: 0.2 } },
-  moulinet: { attack: 0, defense: 0.25, troops: {}, forts: { palissade: 1 } },
-  bruyere: { attack: 0, defense: 0.4, troops: {}, forts: { palissade: 0.6, tour: 0.4 } },
-  pontcroix: { attack: 0.2, defense: 0.35, troops: { milicien: 1 }, forts: { palissade: 1 } },
-  sauleraie: { attack: 0.3, defense: 0.4, troops: { chevalier: 0.6, milicien: 0.4 }, forts: { palissade: 1 } },
-  roncebois: { attack: 1, defense: 0.6, troops: { milicien: 0.5, arbaletrier: 0.5 }, forts: { palissade: 1 } },
-  clairmarais: { attack: 0.5, defense: 1.4, troops: { arbaletrier: 1 }, forts: { tour: 0.7, palissade: 0.3 } },
-  pierrefendue: { attack: 0.8, defense: 1.0, troops: { piquier: 0.7, milicien: 0.3 }, forts: { palissade: 0.5, tour: 0.5 } },
-  brumeport: { attack: 1.2, defense: 0.7, troops: { chevalier: 0.5, arbaletrier: 0.5 }, forts: { tour: 1 } },
-  lysnoir: { attack: 2.2, defense: 2.0, troops: { chevalier: 0.7, piquier: 0.3 }, forts: { baliste: 0.5, tour: 0.5 } },
-  hautgivre: { attack: 1, defense: 3.0, troops: { piquier: 0.5, arbaletrier: 0.5 }, forts: { muraille: 0.6, tour: 0.4 } },
-  rougemarc: { attack: 1.8, defense: 2.2, troops: { arbaletrier: 0.5, chevalier: 0.5 }, forts: { baliste: 0.4, tour: 0.4, palissade: 0.2 } },
-  marches: { attack: 5, defense: 4.5, troops: { chevalier: 0.4, piquier: 0.3, arbaletrier: 0.3 }, forts: { baliste: 0.5, muraille: 0.3, tour: 0.2 } },
-  orgemont: { attack: 3.5, defense: 6, troops: { piquier: 0.4, arbaletrier: 0.4, chevalier: 0.2 }, forts: { muraille: 0.5, baliste: 0.4, tour: 0.1 } },
+/**
+ * Armée des seigneurs : valeur = valeur médiane des armées des joueurs × `power`
+ * (≈ 0,1 à 0,25 facile, 0,5 moyen, 1 à 1,4 difficile, 3 à 4 redoutable),
+ * dont `troopShare` en troupes (qui défendent et raident), le reste en fortifications.
+ */
+export const LORD_ARMY: Record<LordKey, { power: number; troopShare: number; troops: Partial<Record<UnitId, number>>; forts: Partial<Record<DefenseId, number>> }> = {
+  bourbelin: { power: 0.1, troopShare: 0.0, troops: {}, forts: { palissade: 1 } },
+  aubeval: { power: 0.25, troopShare: 0.0, troops: {}, forts: { palissade: 0.5, tour: 0.5 } },
+  corbelune: { power: 0.45, troopShare: 0.6, troops: { chevalier: 0.5, arbaletrier: 0.3, milicien: 0.2 }, forts: { palissade: 0.5, tour: 0.5 } },
+  ventebrise: { power: 0.55, troopShare: 0.45, troops: { arbaletrier: 0.6, chevalier: 0.4 }, forts: { tour: 0.6, palissade: 0.4 } },
+  grisemolle: { power: 1.0, troopShare: 0.29, troops: { piquier: 0.5, arbaletrier: 0.5 }, forts: { muraille: 0.4, baliste: 0.4, tour: 0.2 } },
+  noirval: { power: 1.4, troopShare: 0.5, troops: { chevalier: 0.6, piquier: 0.2, arbaletrier: 0.2 }, forts: { baliste: 0.5, tour: 0.3, palissade: 0.2 } },
+  hautefaille: { power: 3, troopShare: 0.44, troops: { chevalier: 0.4, arbaletrier: 0.3, piquier: 0.3 }, forts: { muraille: 0.4, baliste: 0.4, tour: 0.2 } },
+  moulinet: { power: 0.1, troopShare: 0.0, troops: {}, forts: { palissade: 1 } },
+  bruyere: { power: 0.15, troopShare: 0.0, troops: {}, forts: { palissade: 0.6, tour: 0.4 } },
+  pontcroix: { power: 0.2, troopShare: 0.36, troops: { milicien: 1 }, forts: { palissade: 1 } },
+  sauleraie: { power: 0.2, troopShare: 0.43, troops: { chevalier: 0.6, milicien: 0.4 }, forts: { palissade: 1 } },
+  roncebois: { power: 0.4, troopShare: 0.62, troops: { milicien: 0.5, arbaletrier: 0.5 }, forts: { palissade: 1 } },
+  clairmarais: { power: 0.5, troopShare: 0.26, troops: { arbaletrier: 1 }, forts: { tour: 0.7, palissade: 0.3 } },
+  pierrefendue: { power: 0.5, troopShare: 0.44, troops: { piquier: 0.7, milicien: 0.3 }, forts: { palissade: 0.5, tour: 0.5 } },
+  brumeport: { power: 0.5, troopShare: 0.63, troops: { chevalier: 0.5, arbaletrier: 0.5 }, forts: { tour: 1 } },
+  lysnoir: { power: 1.2, troopShare: 0.52, troops: { chevalier: 0.7, piquier: 0.3 }, forts: { baliste: 0.5, tour: 0.5 } },
+  hautgivre: { power: 1.1, troopShare: 0.25, troops: { piquier: 0.5, arbaletrier: 0.5 }, forts: { muraille: 0.6, tour: 0.4 } },
+  rougemarc: { power: 1.3, troopShare: 0.45, troops: { arbaletrier: 0.5, chevalier: 0.5 }, forts: { baliste: 0.4, tour: 0.4, palissade: 0.2 } },
+  marches: { power: 3.5, troopShare: 0.53, troops: { chevalier: 0.4, piquier: 0.3, arbaletrier: 0.3 }, forts: { baliste: 0.5, muraille: 0.3, tour: 0.2 } },
+  orgemont: { power: 4, troopShare: 0.37, troops: { piquier: 0.4, arbaletrier: 0.4, chevalier: 0.2 }, forts: { muraille: 0.5, baliste: 0.4, tour: 0.1 } },
 };
 /** Budget minimal d'une armée de seigneur, pour qu'il ne soit jamais sans défense. */
 export const LORD_MIN_BUDGET = 1_500;

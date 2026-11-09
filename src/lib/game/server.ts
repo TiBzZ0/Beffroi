@@ -37,7 +37,6 @@ import {
   productionPerSecond,
   raidArmies,
   raidBlocker,
-  armyWorth,
   buyArmy,
   rateAt,
   rebuildRuin,
@@ -63,7 +62,7 @@ import {
   type GarrisonAbroad,
   type InviteView,
 } from "./types";
-import { armyFromBudget, estimateChance, type Army } from "./battle";
+import { armyFromBudget, armyValue, cleanArmy, estimateChance, type Army } from "./battle";
 import { recordContribution, topContributors } from "@/lib/redis";
 
 // Toute la logique qui fait foi : charger l'état, le recalculer, appliquer l'intention
@@ -278,12 +277,13 @@ function median(values: number[]): number {
 /** Armée des seigneurs : elle suit la médiane des vrais joueurs, selon leur caractère. */
 function lordArmies(entities: Map<string, Entity>): Map<string, { attack: Army; defense: Army }> {
   const humans = [...entities.values()].filter((e) => !e.isLord);
-  const budget = Math.max(LORD_MIN_BUDGET, median(humans.map((e) => armyWorth(e.state))));
+  const budget = Math.max(LORD_MIN_BUDGET, median(humans.map((e) => armyValue(cleanArmy({ ...e.state.troops })))));
   const out = new Map<string, { attack: Army; defense: Army }>();
   for (const l of LORDS) {
     const taste = LORD_ARMY[l.key];
-    const attack = armyFromBudget(budget * taste.attack, taste.troops);
-    const forts = armyFromBudget(budget * taste.defense, taste.forts);
+    const total = budget * taste.power;
+    const attack = armyFromBudget(total * taste.troopShare, taste.troops);
+    const forts = armyFromBudget(total * (1 - taste.troopShare), taste.forts);
     out.set(l.id, { attack, defense: { ...attack, ...forts, garde: GUARDS_PER_DOMAIN } });
   }
   return out;
