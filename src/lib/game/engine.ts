@@ -35,6 +35,7 @@ import {
   SPY_MIN_COST,
   MIN_EXPOSED_SHARE,
   SHIELD_MS,
+  FORTRESS_PRODUCTION_BONUS,
   LORD_SHIELD_MS,
   STAGES,
   UNITS,
@@ -77,6 +78,8 @@ export interface PlayerState {
   clickPausedUntil: number;
   /** Troupes d'alliés postées ici : elles défendent et attaquent avec ce joueur. */
   stationed: Record<string, Partial<Record<UnitId, number>>>;
+  /** Son alliance tient la forteresse (bonus de production). Fixé par le serveur, jamais enregistré. */
+  fortress?: boolean;
 }
 
 /** Ce que le joueur doit savoir du monde pour calculer sa production. */
@@ -150,7 +153,7 @@ export function generatorRate(state: PlayerState, id: GeneratorId): number {
 
 /** Multiplicateur global de production (améliorations, chantier, héritage). */
 export function productionMultiplier(state: PlayerState, world: WorldState, stagesDone: number): number {
-  let m = 1 + (world.legacyBonus ?? 0);
+  let m = (1 + (world.legacyBonus ?? 0)) * (state.fortress ? FORTRESS_PRODUCTION_BONUS : 1);
   for (const u of ownedUpgrades(state)) {
     if (u.effect.kind === "production") m *= u.effect.multiplier;
   }
@@ -494,6 +497,8 @@ export interface RaidContext {
   allowRepeat?: boolean;
   /** Attaquant et cible sont dans la même alliance. */
   allied?: boolean;
+  /** Leurs alliances sont en guerre : ni bouclier, ni pause, ni limite de cible. */
+  atWar?: boolean;
   attackerArmy?: Army;
   defenderArmy?: Army;
   /** Tirages aléatoires entre 0 et 1 (fournis pour des tests reproductibles). */
@@ -527,9 +532,10 @@ export function raidBlocker(attacker: PlayerState, victim: PlayerState, ctx: Omi
   const revenge = hasRevenge(attacker, ctx.victimId, ctx.now);
   if (ctx.attackerId === ctx.victimId) return "On ne se pille pas soi-même.";
   if (ctx.allied) return "On ne pille pas un allié.";
-  if (victim.shieldUntil > ctx.now) return "Cette cible est sous bouclier.";
-  if (!revenge && !ctx.allowRepeat && attacker.lastRaidTarget === ctx.victimId) return "Pas deux raids de suite contre la même cible.";
-  if (!revenge && !ctx.attackerIsLord && ctx.now - attacker.lastRaidAt < RAID_COOLDOWN_MS) return "Tes troupes se reposent encore.";
+  const free = revenge || !!ctx.atWar;
+  if (!ctx.atWar && victim.shieldUntil > ctx.now) return "Cette cible est sous bouclier.";
+  if (!free && !ctx.allowRepeat && attacker.lastRaidTarget === ctx.victimId) return "Pas deux raids de suite contre la même cible.";
+  if (!free && !ctx.attackerIsLord && ctx.now - attacker.lastRaidAt < RAID_COOLDOWN_MS) return "Tes troupes se reposent encore.";
   if (armySize(ctx.attackerArmy ?? attackArmy(attacker)) === 0) return "Il te faut des troupes pour lancer un raid.";
   return null;
 }

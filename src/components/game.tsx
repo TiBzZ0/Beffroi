@@ -36,7 +36,7 @@ import {
   type PlayerState,
 } from "@/lib/game/engine";
 import { formatNumber, formatRate } from "@/lib/game/format";
-import { worldFrom, type ChronicleEntry, type GameSnapshot, type RivalView } from "@/lib/game/types";
+import { worldFrom, type AllianceSummary, type ChronicleEntry, type GameSnapshot, type RivalView } from "@/lib/game/types";
 import { useGame, useLeaderboard, useTick } from "./use-game";
 
 type Tab = "ateliers" | "ameliorations" | "chantier" | "raids" | "alliance" | "classement";
@@ -84,7 +84,7 @@ export function Game({ userId }: { userId: string }) {
             {tab === "ameliorations" && <Upgrades live={live} run={game.run} />}
             {tab === "chantier" && <Worksite snap={snap} live={live} run={game.run} />}
             {tab === "raids" && <Raids snap={snap} live={live} now={now} run={game.run} />}
-            {tab === "alliance" && <AllianceTab snap={snap} live={live} run={game.run} />}
+            {tab === "alliance" && <AllianceTab snap={snap} live={live} now={now} run={game.run} />}
             {tab === "classement" && <Ranking boards={leaderboard} userId={userId} />}
           </div>
         </section>
@@ -520,13 +520,13 @@ function Raids({ snap, live, now, run }: { snap: GameSnapshot; live: PlayerState
           {players.map(row)}
         </div>
       )}
-      {view === "chronique" && <Chronicle entries={snap.chronicle ?? []} me={snap.userId} now={now} rivals={snap.rivals} />}
+      {view === "chronique" && <Chronicle entries={snap.chronicle ?? []} me={snap.userId} now={now} rivals={snap.rivals} alliances={snap.alliances} />}
     </>
   );
 }
 
 /** Onglet Alliance : fondation, invitations, alliés et renforts. */
-function AllianceTab({ snap, live, run }: { snap: GameSnapshot; live: PlayerState; run: ReturnType<typeof useGame>["run"] }) {
+function AllianceTab({ snap, live, now, run }: { snap: GameSnapshot; live: PlayerState; now: number; run: ReturnType<typeof useGame>["run"] }) {
   const [busy, setBusy] = useState<string | null>(null);
   const allies = snap.rivals.filter((r) => r.allied);
   const invitable = snap.alliance && snap.alliance.members.length < MAX_ALLIANCE_SIZE ? snap.rivals.filter((r) => !r.isLord && !r.allianceName) : [];
@@ -538,6 +538,8 @@ function AllianceTab({ snap, live, run }: { snap: GameSnapshot; live: PlayerStat
   return (
     <>
       <Alliance snap={snap} run={run} />
+      <Fortress snap={snap} live={live} run={run} />
+      {snap.alliance && <Wars snap={snap} run={run} now={now} />}
       {allies.length > 0 && (
         <>
           <h3 className="section-title">Alliés</h3>
@@ -605,6 +607,7 @@ function RivalRow({
           {r.isLord && <span className={`badge badge-level-${r.difficulty ?? 1}`}>{DIFFICULTY_LABELS[r.difficulty ?? 1]}</span>}
           {r.revenge && <span className="badge badge-revenge">revanche !</span>}
           {r.allianceName && <span className="badge">🤝 {r.allianceName}</span>}
+          {r.atWar && <span className="badge badge-revenge">⚔️ en guerre</span>}
         </div>
         <div className="row-desc num">
           {r.temper ? `${r.temper} · ` : ""}
@@ -728,6 +731,145 @@ function Alliance({ snap, run }: { snap: GameSnapshot; run: ReturnType<typeof us
   );
 }
 
+/** Guerres : celle en cours, ou les alliances à qui la déclarer. */
+function Wars({ snap, run, now }: { snap: GameSnapshot; run: ReturnType<typeof useGame>["run"]; now: number }) {
+  const [busy, setBusy] = useState(false);
+  const w = snap.war;
+  const others = snap.alliances.filter((a) => a.id !== snap.alliance?.id);
+  const declare = async (id: number) => {
+    setBusy(true);
+    await run({ type: "war_declare", alliance: id });
+    setBusy(false);
+  };
+  return (
+    <>
+      <h3 className="section-title">Guerre</h3>
+      {w ? (
+        <div className="war-card">
+          <div className="row-title">⚔️ Contre {w.enemyName}</div>
+          <div className="war-score num">
+            <span>
+              Toi et tes alliés : <strong>{formatNumber(w.myScore)}</strong>
+            </span>
+            <span>
+              Eux : <strong>{formatNumber(w.enemyScore)}</strong>
+            </span>
+          </div>
+          <div className="row-desc">
+            Encore {duration(w.endsAt - now)}. Pendant la guerre, ni pause ni bouclier entre vous : chaque pierre pillée compte. Les vainqueurs se
+            partagent une prime égale à la moitié du butin total.
+          </div>
+        </div>
+      ) : others.length === 0 ? (
+        <p className="empty">Aucune autre alliance à qui déclarer la guerre pour l&apos;instant.</p>
+      ) : (
+        <div className="list">
+          {others.map((a) => (
+            <div key={a.id} className="row">
+              <div className="row-icon" aria-hidden>
+                🏳️
+              </div>
+              <div>
+                <div className="row-title">{a.name}</div>
+                <div className="row-desc">
+                  {a.size} membre{a.size > 1 ? "s" : ""}
+                </div>
+              </div>
+              <button className="btn btn-primary" disabled={busy} onClick={() => declare(a.id)}>
+                Déclarer
+                <span className="cost">la guerre (24 h)</span>
+              </button>
+            </div>
+          ))}
+        </div>
+      )}
+    </>
+  );
+}
+
+/** La forteresse : la prendre, la garder. */
+function Fortress({ snap, live, run }: { snap: GameSnapshot; live: PlayerState; run: ReturnType<typeof useGame>["run"] }) {
+  const f = snap.fortress;
+  const [busy, setBusy] = useState(false);
+  const [unit, setUnit] = useState("");
+  const [qty, setQty] = useState(1);
+  const act = async (action: Parameters<typeof run>[0]) => {
+    setBusy(true);
+    await run(action);
+    setBusy(false);
+  };
+  const available = UNITS.filter((u) => (live.troops[u.id] ?? 0) > 0);
+  const chosen = available.find((u) => u.id === unit) ?? available[0];
+  const hasGarrison = Object.keys(f.myGarrison).length > 0;
+  return (
+    <>
+      <h3 className="section-title">Forteresse</h3>
+      <div className="row">
+        <div className="row-icon" aria-hidden>
+          🏰
+        </div>
+        <div>
+          <div className="row-title">
+            {f.name}
+            {f.mine && <span className="badge badge-level-1">à vous</span>}
+          </div>
+          <div className="row-desc">
+            {f.holderName ? `Tenue par ${f.holderName}.` : "Tenue par personne."} L&apos;alliance qui la tient gagne +20 % de production.
+          </div>
+          <div className="row-desc army-line num">{f.exact ? armyIcons(f.army) : `≈ ${armyIcons(f.army)}`}</div>
+          <div className="row-desc">{f.blocker ?? `~${Math.round(f.chance * 100)} % de chances de la prendre.`}</div>
+        </div>
+        {!f.mine && (
+          <button className="btn btn-primary" disabled={busy || f.blocker !== null} onClick={() => act({ type: "fortress_attack" })}>
+            Assiéger
+            <span className="cost num">~{Math.round(f.chance * 100)} %</span>
+          </button>
+        )}
+      </div>
+      {f.mine && (
+        <>
+          {f.garrison.length > 0 && (
+            <p className="row-desc num">
+              Garnison :{" "}
+              {f.garrison.map((g) => (
+                <span key={g.id}>
+                  {g.id === snap.userId ? "toi" : g.name} {armyIcons(g.troops)}{" "}
+                </span>
+              ))}
+            </p>
+          )}
+          {chosen ? (
+            <div className="reinforce">
+              <select className="input" value={chosen.id} onChange={(e) => setUnit(e.target.value)} aria-label="Troupe à poster">
+                {available.map((u) => (
+                  <option key={u.id} value={u.id}>
+                    {u.icon} {u.plural} ({live.troops[u.id]})
+                  </option>
+                ))}
+              </select>
+              <input className="input input-qty" type="number" min={1} value={qty} onChange={(e) => setQty(Math.max(1, Math.floor(Number(e.target.value) || 1)))} aria-label="Nombre" />
+              <button
+                className="btn btn-primary"
+                disabled={busy}
+                onClick={() => act({ type: "fortress_station", unit: chosen.id, qty: Math.min(qty, live.troops[chosen.id] ?? 0) })}
+              >
+                Poster
+              </button>
+            </div>
+          ) : (
+            <p className="row-desc">Aucune troupe chez toi à poster dans la forteresse.</p>
+          )}
+        </>
+      )}
+      {hasGarrison && (
+        <button className="btn" disabled={busy} onClick={() => act({ type: "fortress_recall" })}>
+          Rappeler mes troupes de la forteresse ({armyIcons(f.myGarrison)})
+        </button>
+      )}
+    </>
+  );
+}
+
 /** Un allié : son armée exacte et l'envoi de renforts. */
 function AllyRow({ r, live, run }: { r: RivalView; live: PlayerState; run: ReturnType<typeof useGame>["run"] }) {
   const available = UNITS.filter((u) => (live.troops[u.id] ?? 0) > 0);
@@ -787,7 +929,8 @@ function armyIcons(army: Record<string, number>, empty = "personne"): string {
   return parts.length ? parts.join("  ") : empty;
 }
 
-function Chronicle({ entries, me, now, rivals }: { entries: ChronicleEntry[]; me: string; now: number; rivals: RivalView[] }) {
+function Chronicle({ entries, me, now, rivals, alliances = [] }: { entries: ChronicleEntry[]; me: string; now: number; rivals: RivalView[]; alliances?: AllianceSummary[] }) {
+  const allianceName = (id: number | null | undefined) => alliances.find((a) => a.id === id)?.name ?? "une alliance disparue";
   const nameOf = (id: string) => (id === me ? "toi" : (rivals.find((r) => r.id === id)?.name ?? "un allié"));
   if (entries.length === 0) return <p className="empty">Le royaume est calme. Pour l&apos;instant…</p>;
   const ago = (t: number) => {
@@ -802,7 +945,19 @@ function Chronicle({ entries, me, now, rivals }: { entries: ChronicleEntry[]; me
     <ul className="chronicle">
       {entries.map((e) => {
         let text: string;
-        if (e.kind === "spy") {
+        if (e.kind === "war") {
+          const d = e.details;
+          if (d.phase === "start") text = `⚔️ ${allianceName(d.a)} déclare la guerre à ${allianceName(d.b)} pour 24 h !`;
+          else
+            text =
+              d.winner != null
+                ? `🏆 ${allianceName(d.winner)} remporte la guerre ${allianceName(d.a)} – ${allianceName(d.b)} (${formatNumber(d.scoreA ?? 0)} contre ${formatNumber(d.scoreB ?? 0)}) et partage ${formatNumber(d.bounty ?? 0)} pierres de prime.`
+                : `🤝 La guerre ${allianceName(d.a)} – ${allianceName(d.b)} se termine sur une égalité.`;
+        } else if (e.kind === "fortress") {
+          text = e.details.success
+            ? `🏰 ${who(e.actorId, e.actorName, true)} ${e.actorId === me ? "as pris" : "a pris"} la forteresse pour ${allianceName(e.details.alliance)} !`
+            : `🏰 ${who(e.actorId, e.actorName, true)} ${e.actorId === me ? "t'es brisé" : "s'est brisé"} sur les murs de la forteresse.`;
+        } else if (e.kind === "spy") {
           text = `${who(e.actorId, e.actorName, true)} ${e.actorId === me ? "as été surpris" : "a été surpris"} à espionner ${e.targetId === me ? "ton domaine" : e.targetName}.`;
         } else if (e.kind === "gift") {
           text = `${e.actorName} a offert ${formatNumber(e.details.amount ?? 0)} pierres au chantier.`;

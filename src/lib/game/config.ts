@@ -325,6 +325,19 @@ export const CHANCE_SIMULATIONS = 40;
 export const SPY_MIN_COST = 200;
 /** Membres au plus par alliance. */
 export const MAX_ALLIANCE_SIZE = 4;
+
+// Guerres d'alliances : 24 h sans pause ni bouclier entre ennemis ; la moitié du butin total
+// revient en prime à l'alliance gagnante.
+export const WAR_MS = 24 * 60 * 60 * 1000;
+
+// Forteresse : une seule par saison, à prendre en alliance.
+/** Bonus de production pour tous les membres de l'alliance qui la tient. */
+export const FORTRESS_PRODUCTION_BONUS = 1.2;
+/** Murs de la forteresse : valeur = troupes médianes des joueurs × ce facteur (× 0,5 une fois tenue, la garnison fait le reste). */
+export const FORTRESS_WALLS_POWER = 2;
+export const FORTRESS_HELD_WALLS_FACTOR = 0.5;
+export const FORTRESS_WALLS: Partial<Record<CombatantId, number>> = { muraille: 0.35, baliste: 0.35, tour: 0.3 };
+export const FORTRESS_NAME = "Forteresse de Pierre-Haute";
 export const SPY_COST_SECONDS = 60;
 /** Durée pendant laquelle un rapport montre l'armée exacte (et à jour) de la cible. */
 export const SPY_INTEL_MS = 60 * 60 * 1000;

@@ -533,6 +533,19 @@ a {
 .alliance-leave {
   margin-top: 6px;
 }
+.war-card {
+  border: 2px solid var(--accent);
+  border-radius: 10px;
+  padding: 10px 12px;
+  display: grid;
+  gap: 6px;
+}
+.war-score {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+}
 .row-actions {
   display: flex;
   flex-direction: column;

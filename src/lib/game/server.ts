@@ -11,6 +11,13 @@ import {
   REVENGE_MS,
   SPY_INTEL_MS,
   MAX_ALLIANCE_SIZE,
+  FORTRESS_HELD_WALLS_FACTOR,
+  FORTRESS_NAME,
+  FORTRESS_WALLS,
+  FORTRESS_WALLS_POWER,
+  RAID_COOLDOWN_MS,
+  WAR_MS,
+  type UnitId,
   GUARDS_PER_DOMAIN,
   COMBATANTS,
   SEASON_DAYS,
@@ -30,6 +37,9 @@ import {
   lootOf,
   fuzzyArmy,
   spyCost,
+  attackArmy,
+  newPlayerState,
+  splitTroopLosses,
   recallReinforcements,
   sendReinforcements,
   spyDetectChance,
@@ -61,8 +71,10 @@ import {
   type AllianceView,
   type GarrisonAbroad,
   type InviteView,
+  type FortressView,
+  type WarView,
 } from "./types";
-import { armyFromBudget, armyValue, cleanArmy, estimateChance, type Army } from "./battle";
+import { armyFromBudget, armySize, armyValue, battle, cleanArmy, estimateChance, type Army } from "./battle";
 import { recordContribution, topContributors } from "@/lib/redis";
 
 // Toute la logique qui fait foi : charger l'état, le recalculer, appliquer l'intention
@@ -253,7 +265,12 @@ async function loadEntities(admin: SupabaseClient, seasonId: number, userId: str
     ({ data, error } = await select());
     if (error) throw new Error(`Joueurs introuvables : ${error.message}`);
   }
-  return new Map((data as PlayerRow[]).map((r) => [r.user_id, toEntity(r)]));
+  const entities = new Map((data as PlayerRow[]).map((r) => [r.user_id, toEntity(r)]));
+  // L'alliance qui tient la forteresse profite de son bonus de production.
+  const { data: fort } = await admin.from("fortresses").select("holder").eq("season_id", seasonId).maybeSingle();
+  const holder = (fort?.holder as number | null | undefined) ?? null;
+  if (holder !== null) for (const e of entities.values()) if (e.allianceId === holder) e.state = { ...e.state, fortress: true };
+  return entities;
 }
 
 /** Production de base d'un seigneur : médiane des vrais joueurs × son caractère. */
@@ -275,9 +292,14 @@ function median(values: number[]): number {
 }
 
 /** Armée des seigneurs : elle suit la médiane des vrais joueurs, selon leur caractère. */
-function lordArmies(entities: Map<string, Entity>): Map<string, { attack: Army; defense: Army }> {
+/** Valeur médiane des troupes des vrais joueurs : l'étalon des armées des seigneurs et de la forteresse. */
+function troopBudget(entities: Map<string, Entity>): number {
   const humans = [...entities.values()].filter((e) => !e.isLord);
-  const budget = Math.max(LORD_MIN_BUDGET, median(humans.map((e) => armyValue(cleanArmy({ ...e.state.troops })))));
+  return Math.max(LORD_MIN_BUDGET, median(humans.map((e) => armyValue(cleanArmy({ ...e.state.troops })))));
+}
+
+function lordArmies(entities: Map<string, Entity>): Map<string, { attack: Army; defense: Army }> {
+  const budget = troopBudget(entities);
   const out = new Map<string, { attack: Army; defense: Army }>();
   for (const l of LORDS) {
     const taste = LORD_ARMY[l.key];
@@ -435,6 +457,192 @@ async function loadIntel(admin: SupabaseClient, seasonId: number, spyId: string,
   return out;
 }
 
+// ---------------------------------------------------------------------------
+// Guerres d'alliances et forteresse
+// ---------------------------------------------------------------------------
+
+interface WarRow {
+  id: number;
+  alliance_a: number;
+  alliance_b: number;
+  ends_at: string;
+  score_a: number;
+  score_b: number;
+}
+
+interface FortressRow {
+  holder: number | null;
+  garrison: Record<string, Record<string, number>> | null;
+  version: number;
+}
+
+interface Conflicts {
+  wars: WarRow[];
+  fortress: FortressRow;
+}
+
+/** Clôt les guerres terminées, puis charge les guerres en cours et la forteresse. */
+async function loadConflicts(admin: SupabaseClient, seasonId: number, now: number): Promise<Conflicts> {
+  const { data: ended } = await admin.from("wars").select("id").eq("season_id", seasonId).eq("settled", false).lte("ends_at", iso(now));
+  for (const w of ended ?? []) await admin.rpc("settle_war", { p_war: w.id });
+  const { data: wars } = await admin.from("wars").select("*").eq("season_id", seasonId).eq("settled", false).gt("ends_at", iso(now));
+  let { data: fort } = await admin.from("fortresses").select("holder, garrison, version").eq("season_id", seasonId).maybeSingle();
+  if (!fort) {
+    await admin.from("fortresses").upsert({ season_id: seasonId }, { onConflict: "season_id", ignoreDuplicates: true });
+    ({ data: fort } = await admin.from("fortresses").select("holder, garrison, version").eq("season_id", seasonId).maybeSingle());
+  }
+  return {
+    wars: ((wars ?? []) as WarRow[]).map((w) => ({ ...w, id: Number(w.id), alliance_a: Number(w.alliance_a), alliance_b: Number(w.alliance_b) })),
+    fortress: { holder: fort?.holder != null ? Number(fort.holder) : null, garrison: (fort?.garrison as FortressRow["garrison"]) ?? {}, version: Number(fort?.version ?? 0) },
+  };
+}
+
+function warBetween(wars: WarRow[], a: number | null, b: number | null): WarRow | undefined {
+  if (a === null || b === null || a === b) return undefined;
+  return wars.find((w) => (w.alliance_a === a && w.alliance_b === b) || (w.alliance_a === b && w.alliance_b === a));
+}
+
+function warOf(wars: WarRow[], alliance: number | null): WarRow | undefined {
+  if (alliance === null) return undefined;
+  return wars.find((w) => w.alliance_a === alliance || w.alliance_b === alliance);
+}
+
+function garrisonOf(f: FortressRow): PlayerState["stationed"] {
+  return Object.fromEntries(
+    Object.entries(f.garrison ?? {})
+      .map(([owner, g]) => [owner, armyCounts(g, UNIT_IDS)] as const)
+      .filter(([, g]) => Object.keys(g).length > 0),
+  );
+}
+
+/** Défenseurs de la forteresse : ses murs, la garnison de l'alliance qui la tient, et ses gardes. */
+function fortressDefense(f: FortressRow, entities: Map<string, Entity>): Army {
+  const walls = armyFromBudget(troopBudget(entities) * FORTRESS_WALLS_POWER * (f.holder !== null ? FORTRESS_HELD_WALLS_FACTOR : 1), FORTRESS_WALLS);
+  const army: Army = { ...walls, garde: GUARDS_PER_DOMAIN };
+  for (const g of Object.values(garrisonOf(f))) {
+    for (const [id, n] of Object.entries(g) as [UnitId, number][]) army[id] = (army[id] ?? 0) + n;
+  }
+  return army;
+}
+
+function fortressBlocker(me: Entity, state: PlayerState, f: FortressRow, now: number): string | null {
+  if (me.allianceId === null) return "Rejoins une alliance pour assiéger la forteresse.";
+  if (f.holder === me.allianceId) return "Ton alliance tient déjà la forteresse.";
+  if (now - state.lastRaidAt < RAID_COOLDOWN_MS) return "Tes troupes se reposent encore.";
+  if (armySize(attackArmy(state)) === 0) return "Il te faut des troupes pour l'assaut.";
+  return null;
+}
+
+/** Une garnison vue comme un domaine qui n'aurait que des renforts (pour réutiliser les règles des renforts). */
+function garrisonHost(f: FortressRow, now: number): PlayerState {
+  return { ...newPlayerState(now), stationed: garrisonOf(f) };
+}
+
+async function runConflictAction(
+  admin: SupabaseClient,
+  seasonId: number,
+  me: Entity,
+  current: PlayerState,
+  entities: Map<string, Entity>,
+  conflicts: Conflicts,
+  allianceNames: Map<number, string>,
+  action: Extract<GameAction, { type: "war_declare" | "fortress_attack" | "fortress_station" | "fortress_recall" }>,
+  now: number,
+): Promise<"conflict" | { error?: string; message?: string; state?: PlayerState }> {
+  const f = conflicts.fortress;
+  const writeFortress = async (state: PlayerState, holder: number | null, garrison: PlayerState["stationed"], captured: boolean, act: string, details: Record<string, unknown>) => {
+    const { data, error } = await admin.rpc("apply_fortress", {
+      p_season: seasonId,
+      p_state: toJson(me, state),
+      p_version: f.version,
+      p_holder: holder,
+      p_garrison: garrison,
+      p_captured: captured,
+      p_action: act,
+      p_details: details,
+    });
+    if (error?.message.includes("beffroi_conflict") || (data as { conflict?: boolean } | null)?.conflict) return "conflict" as const;
+    if (error) throw new Error(`Forteresse : ${error.message}`);
+    return "ok" as const;
+  };
+  switch (action.type) {
+    case "war_declare": {
+      const target = Number(action.alliance);
+      if (me.allianceId === null) return { error: "Il faut une alliance pour déclarer la guerre." };
+      if (target === me.allianceId || !allianceNames.has(target)) return { error: "Alliance inconnue." };
+      if (warOf(conflicts.wars, me.allianceId)) return { error: "Ton alliance est déjà en guerre." };
+      if (warOf(conflicts.wars, target)) return { error: `${allianceNames.get(target)} est déjà en guerre.` };
+      const { data, error } = await admin
+        .from("wars")
+        .insert({ season_id: seasonId, alliance_a: me.allianceId, alliance_b: target, ends_at: iso(now + WAR_MS) })
+        .select("id")
+        .single();
+      if (error || !data) throw new Error(`Guerre impossible : ${error?.message}`);
+      await addChronicle(admin, seasonId, { kind: "war", actor_id: me.id, details: { phase: "start", war: data.id, a: me.allianceId, b: target } });
+      return { message: `⚔️ Guerre déclarée à ${allianceNames.get(target)} pour 24 h ! Ni pause ni bouclier entre vous.` };
+    }
+    case "fortress_attack": {
+      const blocked = fortressBlocker(me, current, f, now);
+      if (blocked) return { error: blocked };
+      const defense = fortressDefense(f, entities);
+      const chance = estimateChance(attackArmy(current), defense);
+      const fight = battle(attackArmy(current), defense, Math.random);
+      const mine = splitTroopLosses(current, fight.attackerLost);
+      const theirs = splitTroopLosses(garrisonHost(f, now), fight.defenderLost);
+      const after: PlayerState = { ...current, troops: mine.troops, stationed: mine.stationed, lastRaidAt: now, shieldUntil: 0 };
+      const details = { success: fight.success, chance, rounds: fight.rounds, alliance: me.allianceId, attackerLost: fight.attackerLost, defenderLost: fight.defenderLost };
+      const r = await writeFortress(after, fight.success ? me.allianceId : f.holder, fight.success ? {} : theirs.stationed, fight.success, "fortress_attack", details);
+      if (r === "conflict") return "conflict";
+      return {
+        state: after,
+        message: fight.success
+          ? `🏰 La ${FORTRESS_NAME} est à ${allianceNames.get(me.allianceId!) ?? "ton alliance"} ! +20 % de production pour toute l'alliance. Envoie vite une garnison.`
+          : `La ${FORTRESS_NAME} a tenu bon. Tes pertes : ${describeArmy(fight.attackerLost)}.`,
+      };
+    }
+    case "fortress_station": {
+      if (me.allianceId === null || f.holder !== me.allianceId) return { error: "Seule l'alliance qui tient la forteresse peut y poster des troupes." };
+      const r = sendReinforcements(current, garrisonHost(f, now), me.id, String(action.unit), Number(action.qty));
+      if (!r.ok) return { error: r.error };
+      if ((await writeFortress(r.value.sender, f.holder, r.value.host.stationed, false, "fortress_station", { unit: action.unit, qty: action.qty })) === "conflict") return "conflict";
+      return { state: r.value.sender, message: "🏰 Troupes postées dans la forteresse." };
+    }
+    case "fortress_recall": {
+      const r = recallReinforcements(current, garrisonHost(f, now), me.id);
+      if (!r.ok) return { error: r.error };
+      if ((await writeFortress(r.value.owner, f.holder, r.value.host.stationed, false, "fortress_recall", {})) === "conflict") return "conflict";
+      return { state: r.value.owner, message: "Tes troupes quittent la forteresse." };
+    }
+  }
+}
+
+function fortressView(me: Entity, state: PlayerState, f: FortressRow, entities: Map<string, Entity>, names: Map<number, string>, now: number): FortressView {
+  const defense = fortressDefense(f, entities);
+  const mine = f.holder !== null && f.holder === me.allianceId;
+  const seen = mine ? defense : fuzzyArmy(defense);
+  const garrison = garrisonOf(f);
+  return {
+    name: FORTRESS_NAME,
+    holderId: f.holder,
+    holderName: f.holder !== null ? (names.get(f.holder) ?? null) : null,
+    mine,
+    army: seen as Record<string, number>,
+    exact: mine,
+    chance: estimateChance(attackArmy(state), seen),
+    blocker: fortressBlocker(me, state, f, now),
+    garrison: mine ? Object.entries(garrison).map(([id, troops]) => ({ id, name: entities.get(id)?.name ?? "Inconnu", troops: troops as Record<string, number> })) : [],
+    myGarrison: (garrison[me.id] ?? {}) as Record<string, number>,
+  };
+}
+
+function warView(me: Entity, wars: WarRow[], names: Map<number, string>): WarView | null {
+  const w = warOf(wars, me.allianceId);
+  if (!w) return null;
+  const meA = w.alliance_a === me.allianceId;
+  const enemyId = meA ? w.alliance_b : w.alliance_a;
+  return { id: w.id, enemyId, enemyName: names.get(enemyId) ?? "?", myScore: meA ? w.score_a : w.score_b, enemyScore: meA ? w.score_b : w.score_a, endsAt: ms(w.ends_at) };
+}
+
 function isAllied(a: Entity, b: Entity): boolean {
   return a.allianceId !== null && a.allianceId === b.allianceId && a.id !== b.id;
 }
@@ -470,6 +678,7 @@ async function allianceInfo(admin: SupabaseClient, seasonId: number, me: Entity,
 }
 
 type AllianceAction = Extract<GameAction, { type: `alliance_${string}` | "reinforce" | "recall" }>;
+const CONFLICT_ACTIONS = new Set(["war_declare", "fortress_attack", "fortress_station", "fortress_recall"]);
 const ALLIANCE_ACTIONS = new Set(["alliance_create", "alliance_invite", "alliance_accept", "alliance_decline", "alliance_leave", "reinforce", "recall"]);
 
 /** Écrit plusieurs états ensemble (le premier est celui du joueur). */
@@ -556,6 +765,8 @@ async function runAllianceAction(
     }
     case "alliance_leave": {
       if (me.allianceId === null) return { error: "Tu n'as pas d'alliance." };
+      const { data: fort } = await admin.from("fortresses").select("garrison").eq("season_id", seasonId).maybeSingle();
+      if ((fort?.garrison as Record<string, unknown> | null)?.[me.id]) return { error: "Rappelle d'abord tes troupes de la forteresse." };
       const { mine, others } = unwindGarrisons(me, current, entities, advanceOf);
       if (others.length > 0 && (await writeStates(admin, seasonId, [{ e: me, state: mine }, ...others], "alliance_leave", {})) === "conflict") return "conflict";
       const left = me.allianceId;
@@ -591,6 +802,7 @@ function rivalsFor(
   now: number,
   intel: Map<string, number>,
   allianceNames: Map<number, string>,
+  wars: WarRow[],
 ): RivalView[] {
   const armies = lordArmies(entities);
   return [...entities.values()]
@@ -600,7 +812,8 @@ function rivalsFor(
       const rate = currentRate(e, s, now, world, flat);
       const revenge = hasRevenge(myState, e.id, now);
       const allied = isAllied(me, e);
-      const ctx = { now, attackerId: me.id, victimId: e.id, victimRate: rate, allied, defenderArmy: e.isLord ? armies.get(e.id)?.defense : undefined };
+      const atWar = !!warBetween(wars, me.allianceId, e.allianceId);
+      const ctx = { now, attackerId: me.id, victimId: e.id, victimRate: rate, allied, atWar, defenderArmy: e.isLord ? armies.get(e.id)?.defense : undefined };
       const fight = raidArmies(myState, s, ctx);
       const intelUntil = intel.get(e.id) ?? 0;
       const seen = intelUntil > now || allied ? fight.defense : fuzzyArmy(fight.defense);
@@ -619,6 +832,7 @@ function rivalsFor(
         loot,
         intelUntil,
         allied,
+        atWar,
         allianceName: e.allianceId !== null ? (allianceNames.get(e.allianceId) ?? null) : null,
         army: seen as Record<string, number>,
         chance: estimateChance(fight.attack, seen, { attackBonus: fight.attackBonus }),
@@ -712,12 +926,24 @@ export async function runAction(admin: SupabaseClient, userId: string, action: G
     const now = Date.now();
     const world = worldFrom(worksite);
     const flat = lordRates(entities, world, now);
+    let conflicts = await loadConflicts(admin, season.id, now);
+    let allianceNames = await loadAllianceNames(admin, season.id);
     const current = advance(me.state, now, world);
     let finalState = current;
     let error: string | null = null;
     let message: string | undefined;
 
-    if (ALLIANCE_ACTIONS.has(action.type)) {
+    if (CONFLICT_ACTIONS.has(action.type)) {
+      const r = await runConflictAction(admin, season.id, me, current, entities, conflicts, allianceNames, action as Parameters<typeof runConflictAction>[7], now);
+      if (r === "conflict") continue;
+      if (r.error) error = r.error;
+      message = r.message;
+      if (r.state) finalState = r.state;
+      entities = await loadEntities(admin, season.id, userId);
+      conflicts = await loadConflicts(admin, season.id, now);
+      // Prendre la forteresse donne tout de suite le bonus.
+      finalState = { ...finalState, fortress: entities.get(userId)?.state.fortress };
+    } else if (ALLIANCE_ACTIONS.has(action.type)) {
       const r = await runAllianceAction(admin, season.id, me, current, entities, action as AllianceAction, (e) => advanceEntity(e, now, world, flat));
       if (r === "conflict") continue;
       if (r.error) error = r.error;
@@ -766,6 +992,7 @@ export async function runAction(admin: SupabaseClient, userId: string, action: G
           victimRate: currentRate(victim, victimState, now, world, flat),
           defenderArmy: victim.isLord ? lordArmies(entities).get(victim.id)?.defense : undefined,
           allied: isAllied(me, victim),
+          atWar: !!warBetween(conflicts.wars, me.allianceId, victim.allianceId),
         };
         const armiesNow = raidArmies(current, victimState, ctx);
         const chance = estimateChance(armiesNow.attack, armiesNow.defense, { attackBonus: armiesNow.attackBonus });
@@ -789,6 +1016,11 @@ export async function runAction(admin: SupabaseClient, userId: string, action: G
           });
           if (rpcError?.message.includes("beffroi_conflict") || (data as { conflict?: boolean } | null)?.conflict) continue;
           if (rpcError) throw new Error(`Raid impossible : ${rpcError.message}`);
+          const war = warBetween(conflicts.wars, me.allianceId, victim.allianceId);
+          if (war && r.value.report.stolen > 0) {
+            await admin.rpc("add_war_score", { p_war: war.id, p_alliance: me.allianceId, p_amount: r.value.report.stolen });
+            conflicts = await loadConflicts(admin, season.id, now);
+          }
           me.version = (data as { version: number }).version;
           finalState = r.value.attacker;
           const rep = r.value.report;
@@ -830,7 +1062,9 @@ export async function runAction(admin: SupabaseClient, userId: string, action: G
       if (contribution > 0) await recordContribution(season.id, userId, finalState.totalContributed);
     }
 
-    const [intel, allianceNames] = await Promise.all([loadIntel(admin, season.id, userId, now), loadAllianceNames(admin, season.id)]);
+    const intel = await loadIntel(admin, season.id, userId, now);
+    allianceNames = await loadAllianceNames(admin, season.id);
+    const meNow = entities.get(userId) ?? me;
     const snapshot: GameSnapshot = {
       serverNow: now,
       userId,
@@ -838,8 +1072,11 @@ export async function runAction(admin: SupabaseClient, userId: string, action: G
       state: finalState,
       worksite,
       season,
-      rivals: rivalsFor(entities.get(userId) ?? me, finalState, entities, worldFrom(worksite), flat, now, intel, allianceNames),
-      ...(await allianceInfo(admin, season.id, entities.get(userId) ?? me, finalState, entities, allianceNames)),
+      rivals: rivalsFor(meNow, finalState, entities, worldFrom(worksite), flat, now, intel, allianceNames, conflicts.wars),
+      ...(await allianceInfo(admin, season.id, meNow, finalState, entities, allianceNames)),
+      alliances: [...allianceNames].map(([id, name]) => ({ id, name, size: [...entities.values()].filter((e) => e.allianceId === id).length })),
+      war: warView(meNow, conflicts.wars, allianceNames),
+      fortress: fortressView(meNow, finalState, conflicts.fortress, entities, allianceNames, now),
       chronicle: wantsChronicle ? await loadChronicle(admin, season.id, entities) : undefined,
     };
     return error ? { ok: false, error, snapshot } : { ok: true, snapshot, message };

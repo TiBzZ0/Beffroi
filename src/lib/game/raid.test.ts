@@ -14,6 +14,7 @@ import {
   spyDetectChance,
   newPlayerState,
   rebuildRuin,
+  productionPerSecond,
   lootShares,
   recallReinforcements,
   sendReinforcements,
@@ -224,6 +225,20 @@ describe("butin partagé", () => {
     expect(r.value.attacker.stone).toBe(5_000);
     expect(r.value.attacker.totalPlundered).toBe(5_000);
     expect(lootShares(player({ troops: { milicien: 3 } }), 1_000)).toEqual({});
+  });
+});
+
+describe("guerres et forteresse", () => {
+  it("en guerre, ni bouclier, ni pause, ni limite de cible", () => {
+    const attacker = player({ lastRaidAt: NOW - 1000, lastRaidTarget: "v" });
+    const victim = player({ troops: {}, shieldUntil: NOW + 3_600_000 });
+    expect(resolveRaid(attacker, victim, ctx()).ok).toBe(false);
+    expect(resolveRaid(attacker, victim, ctx({ atWar: true })).ok).toBe(true);
+  });
+
+  it("tenir la forteresse donne +20 % de production", () => {
+    const s = player({ generators: { tailleur: 10 } });
+    expect(productionPerSecond({ ...s, fortress: true }, world, 0)).toBeCloseTo(productionPerSecond(s, world, 0) * 1.2);
   });
 });
 

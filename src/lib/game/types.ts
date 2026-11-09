@@ -32,6 +32,8 @@ export interface RivalView {
   rate: number;
   /** Pierre qu'un raid rapporterait maintenant (estimation). */
   loot: number;
+  /** Son alliance est en guerre contre la mienne. */
+  atWar: boolean;
   /** Membre de mon alliance : on ne peut pas le piller, on peut lui envoyer des renforts. */
   allied: boolean;
   /** Nom de son alliance, s'il en a une. */
@@ -52,7 +54,7 @@ export interface RivalView {
 export interface ChronicleEntry {
   id: number;
   at: number;
-  kind: "raid" | "gift" | "spy";
+  kind: "raid" | "gift" | "spy" | "war" | "fortress";
   actorId: string | null;
   actorName: string;
   targetId: string | null;
@@ -68,6 +70,14 @@ export interface ChronicleEntry {
     defenderLost?: Record<string, number>;
     revenge?: boolean;
     amount?: number;
+    phase?: "start" | "end";
+    a?: number;
+    b?: number;
+    scoreA?: number;
+    scoreB?: number;
+    winner?: number | null;
+    bounty?: number;
+    alliance?: number;
   };
 }
 
@@ -84,6 +94,9 @@ export interface GameSnapshot {
   /** Mes troupes postées chez des alliés, et les renforts d'alliés postés chez moi. */
   abroad: GarrisonAbroad[];
   reinforcements: GarrisonAbroad[];
+  alliances: AllianceSummary[];
+  war: WarView | null;
+  fortress: FortressView;
   /** Fournie lors des synchronisations et des raids ; sinon le client garde la précédente. */
   chronicle?: ChronicleEntry[];
 }
@@ -115,7 +128,43 @@ export type GameAction =
   | { type: "alliance_decline"; alliance: number }
   | { type: "alliance_leave" }
   | { type: "reinforce"; target: string; unit: string; qty: number }
-  | { type: "recall"; host: string };
+  | { type: "recall"; host: string }
+  | { type: "war_declare"; alliance: number }
+  | { type: "fortress_attack" }
+  | { type: "fortress_station"; unit: string; qty: number }
+  | { type: "fortress_recall" };
+
+export interface AllianceSummary {
+  id: number;
+  name: string;
+  size: number;
+}
+
+export interface WarView {
+  id: number;
+  enemyId: number;
+  enemyName: string;
+  myScore: number;
+  enemyScore: number;
+  endsAt: number;
+}
+
+export interface FortressView {
+  name: string;
+  holderId: number | null;
+  holderName: string | null;
+  /** Mon alliance la tient. */
+  mine: boolean;
+  /** Défenseurs (exacts si c'est la mienne, sinon estimation). */
+  army: Record<string, number>;
+  exact: boolean;
+  /** Ma chance de la prendre, et ce qui m'en empêche. */
+  chance: number;
+  blocker: string | null;
+  /** Troupes de chaque membre postées dans la forteresse (visibles par l'alliance qui la tient). */
+  garrison: GarrisonAbroad[];
+  myGarrison: Record<string, number>;
+}
 
 export interface AllianceView {
   id: number;
