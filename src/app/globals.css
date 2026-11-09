@@ -381,8 +381,27 @@ a {
 
 .tabs {
   display: grid;
-  grid-template-columns: repeat(5, 1fr);
+  grid-template-columns: repeat(6, 1fr);
   border-bottom: 1px solid var(--line);
+}
+@media (max-width: 480px) {
+  .tabs {
+    grid-template-columns: repeat(3, 1fr);
+  }
+}
+.subtabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-bottom: 8px;
+}
+.subtabs .btn,
+.level-filter .btn {
+  flex: 1 1 auto;
+}
+.level-filter {
+  flex-wrap: wrap;
+  margin-bottom: 8px;
 }
 .tab {
   appearance: none;
@@ -424,7 +443,8 @@ a {
   min-height: 34px;
   padding: 4px 12px;
 }
-.qty .btn[aria-pressed="true"] {
+.qty .btn[aria-pressed="true"],
+.subtabs .btn[aria-pressed="true"] {
   background: var(--ink);
   color: var(--panel);
   border-color: var(--ink);

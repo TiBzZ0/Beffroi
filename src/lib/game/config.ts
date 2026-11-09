@@ -142,8 +142,8 @@ export const REVENGE_LOOT_RATE = 0.4;
 export const SECURED_SECONDS = 30 * 60;
 /** Part du stock qui reste toujours exposée au pillage, même si la production est forte. */
 export const MIN_EXPOSED_SHARE = 0.5;
-/** Ateliers incendiés : production réduite de moitié pendant 2 h. */
-export const BURN_MS = 2 * 60 * 60 * 1000;
+/** Ateliers incendiés : production réduite de moitié pendant 30 min. */
+export const BURN_MS = 30 * 60 * 1000;
 export const BURN_PRODUCTION_FACTOR = 0.5;
 /** Chaque coup de marteau accepté écourte l'incendie d'une seconde. */
 export const BURN_CLICK_REDUCTION_MS = 1000;
@@ -162,7 +162,7 @@ export const REVENGE_MS = 24 * 60 * 60 * 1000;
 // Seigneurs voisins (bots assumés)
 // ---------------------------------------------------------------------------
 
-export type LordKey = "bourbelin" | "aubeval" | "corbelune" | "ventebrise" | "grisemolle" | "noirval" | "hautefaille";
+export type LordKey = string;
 
 export type Difficulty = 1 | 2 | 3 | 4;
 export const DIFFICULTY_LABELS: Record<Difficulty, string> = { 1: "Facile", 2: "Moyen", 3: "Difficile", 4: "Redoutable" };
@@ -194,6 +194,19 @@ export const LORDS: readonly LordDef[] = [
   { key: "grisemolle", id: "00000000-0000-4000-8000-0000000062e5", username: "Grisemolle", name: "Comte Grisemolle", blazon: "💰", temper: "Avare, bien gardé", rateFactor: 1.4, raidEveryHours: 2, contribution: null, difficulty: 3, retaliateOnly: true },
   { key: "noirval", id: "00000000-0000-4000-8000-00000000d0a1", username: "Noirval", name: "Margrave de Noirval", blazon: "🐺", temper: "Cavalier implacable", rateFactor: 1.8, raidEveryHours: 2, contribution: null, difficulty: 3, retaliateOnly: true },
   { key: "hautefaille", id: "00000000-0000-4000-8000-00000000ffaa", username: "Hautefaille", name: "Duc de Hautefaille", blazon: "👑", temper: "Le plus riche du royaume", rateFactor: 3, raidEveryHours: 2, contribution: null, difficulty: 4, retaliateOnly: true },
+  { key: "moulinet", id: "00000000-0000-4000-8000-000000000101", username: "Moulinet", name: "Meunier de Moulinet", blazon: "🌾", temper: "Paisible, quelques gardes", rateFactor: 0.5, raidEveryHours: null, contribution: null, difficulty: 1, retaliateOnly: false },
+  { key: "bruyere", id: "00000000-0000-4000-8000-000000000102", username: "Bruyere", name: "Abbaye de la Bruyère", blazon: "🕯️", temper: "Moines bâtisseurs", rateFactor: 0.6, raidEveryHours: null, contribution: { share: 0.1, everyHours: 24 }, difficulty: 1, retaliateOnly: false },
+  { key: "pontcroix", id: "00000000-0000-4000-8000-000000000103", username: "Pontcroix", name: "Péage de Pontcroix", blazon: "🌉", temper: "Riche et mal défendu", rateFactor: 0.9, raidEveryHours: null, contribution: null, difficulty: 1, retaliateOnly: false },
+  { key: "sauleraie", id: "00000000-0000-4000-8000-000000000104", username: "Sauleraie", name: "Chevalier de Sauleraie", blazon: "🍂", temper: "Vieux et fatigué", rateFactor: 0.7, raidEveryHours: null, contribution: null, difficulty: 1, retaliateOnly: false },
+  { key: "roncebois", id: "00000000-0000-4000-8000-000000000105", username: "Roncebois", name: "Brigands de Roncebois", blazon: "🗡️", temper: "Pillards des forêts", rateFactor: 0.8, raidEveryHours: 10, contribution: null, difficulty: 2, retaliateOnly: false },
+  { key: "clairmarais", id: "00000000-0000-4000-8000-000000000106", username: "Clairmarais", name: "Baronne de Clairmarais", blazon: "🦢", temper: "Archers et tours", rateFactor: 1.0, raidEveryHours: null, contribution: null, difficulty: 2, retaliateOnly: false },
+  { key: "pierrefendue", id: "00000000-0000-4000-8000-000000000107", username: "Pierrefendue", name: "Sire de Pierrefendue", blazon: "⛏️", temper: "Mineur têtu", rateFactor: 1.0, raidEveryHours: 16, contribution: null, difficulty: 2, retaliateOnly: false },
+  { key: "brumeport", id: "00000000-0000-4000-8000-000000000108", username: "Brumeport", name: "Corsaires de Brumeport", blazon: "⚓", temper: "Pillards des côtes", rateFactor: 1.1, raidEveryHours: 12, contribution: null, difficulty: 2, retaliateOnly: false },
+  { key: "lysnoir", id: "00000000-0000-4000-8000-000000000109", username: "LysNoir", name: "Ordre du Lys Noir", blazon: "⚜️", temper: "Chevaliers fanatiques", rateFactor: 1.6, raidEveryHours: 2, contribution: null, difficulty: 3, retaliateOnly: true },
+  { key: "hautgivre", id: "00000000-0000-4000-8000-00000000010a", username: "Hautgivre", name: "Seigneur de Hautgivre", blazon: "❄️", temper: "Forteresse des glaces", rateFactor: 1.5, raidEveryHours: 2, contribution: null, difficulty: 3, retaliateOnly: true },
+  { key: "rougemarc", id: "00000000-0000-4000-8000-00000000010b", username: "Rougemarc", name: "Comtesse de Rougemarc", blazon: "🍷", temper: "Riche et rancunière", rateFactor: 2.0, raidEveryHours: 2, contribution: null, difficulty: 3, retaliateOnly: true },
+  { key: "marches", id: "00000000-0000-4000-8000-00000000010c", username: "Marches", name: "Roi des Marches", blazon: "🐉", temper: "Armée immense", rateFactor: 3.5, raidEveryHours: 2, contribution: null, difficulty: 4, retaliateOnly: true },
+  { key: "orgemont", id: "00000000-0000-4000-8000-00000000010d", username: "Orgemont", name: "Haut-Roi d'Orgemont", blazon: "🏰", temper: "Murailles légendaires", rateFactor: 4.0, raidEveryHours: 2, contribution: null, difficulty: 4, retaliateOnly: true },
 ];
 
 export const LORD_BY_ID: ReadonlyMap<string, LordDef> = new Map(LORDS.map((l) => [l.id, l]));
@@ -297,6 +310,19 @@ export const LORD_ARMY: Record<LordKey, { attack: number; defense: number; troop
   grisemolle: { attack: 1, defense: 2.5, troops: { piquier: 0.5, arbaletrier: 0.5 }, forts: { muraille: 0.4, baliste: 0.4, tour: 0.2 } },
   noirval: { attack: 2.5, defense: 2.5, troops: { chevalier: 0.6, piquier: 0.2, arbaletrier: 0.2 }, forts: { baliste: 0.5, tour: 0.3, palissade: 0.2 } },
   hautefaille: { attack: 4, defense: 5, troops: { chevalier: 0.4, arbaletrier: 0.3, piquier: 0.3 }, forts: { muraille: 0.4, baliste: 0.4, tour: 0.2 } },
+  moulinet: { attack: 0, defense: 0.25, troops: {}, forts: { palissade: 1 } },
+  bruyere: { attack: 0, defense: 0.4, troops: {}, forts: { palissade: 0.6, tour: 0.4 } },
+  pontcroix: { attack: 0.2, defense: 0.35, troops: { milicien: 1 }, forts: { palissade: 1 } },
+  sauleraie: { attack: 0.3, defense: 0.4, troops: { chevalier: 0.6, milicien: 0.4 }, forts: { palissade: 1 } },
+  roncebois: { attack: 1, defense: 0.6, troops: { milicien: 0.5, arbaletrier: 0.5 }, forts: { palissade: 1 } },
+  clairmarais: { attack: 0.5, defense: 1.4, troops: { arbaletrier: 1 }, forts: { tour: 0.7, palissade: 0.3 } },
+  pierrefendue: { attack: 0.8, defense: 1.0, troops: { piquier: 0.7, milicien: 0.3 }, forts: { palissade: 0.5, tour: 0.5 } },
+  brumeport: { attack: 1.2, defense: 0.7, troops: { chevalier: 0.5, arbaletrier: 0.5 }, forts: { tour: 1 } },
+  lysnoir: { attack: 2.2, defense: 2.0, troops: { chevalier: 0.7, piquier: 0.3 }, forts: { baliste: 0.5, tour: 0.5 } },
+  hautgivre: { attack: 1, defense: 3.0, troops: { piquier: 0.5, arbaletrier: 0.5 }, forts: { muraille: 0.6, tour: 0.4 } },
+  rougemarc: { attack: 1.8, defense: 2.2, troops: { arbaletrier: 0.5, chevalier: 0.5 }, forts: { baliste: 0.4, tour: 0.4, palissade: 0.2 } },
+  marches: { attack: 5, defense: 4.5, troops: { chevalier: 0.4, piquier: 0.3, arbaletrier: 0.3 }, forts: { baliste: 0.5, muraille: 0.3, tour: 0.2 } },
+  orgemont: { attack: 3.5, defense: 6, troops: { piquier: 0.4, arbaletrier: 0.4, chevalier: 0.2 }, forts: { muraille: 0.5, baliste: 0.4, tour: 0.1 } },
 };
 /** Budget minimal d'une armée de seigneur, pour qu'il ne soit jamais sans défense. */
 export const LORD_MIN_BUDGET = 1_500;

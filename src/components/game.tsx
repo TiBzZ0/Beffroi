@@ -39,7 +39,7 @@ import { formatNumber, formatRate } from "@/lib/game/format";
 import { worldFrom, type ChronicleEntry, type GameSnapshot, type RivalView } from "@/lib/game/types";
 import { useGame, useLeaderboard, useTick } from "./use-game";
 
-type Tab = "ateliers" | "ameliorations" | "chantier" | "raids" | "classement";
+type Tab = "ateliers" | "ameliorations" | "chantier" | "raids" | "alliance" | "classement";
 type Qty = 1 | 10 | "max";
 const DAY_MS = 86_400_000;
 
@@ -52,7 +52,7 @@ export function Game({ userId }: { userId: string }) {
   const leaderboard = useLeaderboard(tab === "classement" && !!snap, snap?.worksite.total);
   const { watchRivals } = game;
   useEffect(() => {
-    watchRivals(tab === "raids");
+    watchRivals(tab === "raids" || tab === "alliance");
   }, [tab, watchRivals]);
 
   if (!snap) return <div className="loading">On allume les torches…</div>;
@@ -76,6 +76,7 @@ export function Game({ userId }: { userId: string }) {
             <TabButton id="ameliorations" tab={tab} setTab={setTab} label="Savoirs" dot={affordableUpgrades > 0} />
             <TabButton id="chantier" tab={tab} setTab={setTab} label="Chantier" />
             <TabButton id="raids" tab={tab} setTab={setTab} label="Raids" dot={snap.rivals.some((r) => r.revenge && !r.blocker)} />
+            <TabButton id="alliance" tab={tab} setTab={setTab} label="Alliance" dot={snap.invites.length > 0} />
             <TabButton id="classement" tab={tab} setTab={setTab} label="Rangs" />
           </div>
           <div className="tab-body" role="tabpanel">
@@ -83,6 +84,7 @@ export function Game({ userId }: { userId: string }) {
             {tab === "ameliorations" && <Upgrades live={live} run={game.run} />}
             {tab === "chantier" && <Worksite snap={snap} live={live} run={game.run} />}
             {tab === "raids" && <Raids snap={snap} live={live} now={now} run={game.run} />}
+            {tab === "alliance" && <AllianceTab snap={snap} live={live} run={game.run} />}
             {tab === "classement" && <Ranking boards={leaderboard} userId={userId} />}
           </div>
         </section>
@@ -446,42 +448,95 @@ function Status({ state, now }: { state: PlayerState; now: number }) {
   );
 }
 
+type RaidView = "armee" | "seigneurs" | "joueurs" | "chronique";
+
 function Raids({ snap, live, now, run }: { snap: GameSnapshot; live: PlayerState; now: number; run: ReturnType<typeof useGame>["run"] }) {
+  const [view, setView] = useState<RaidView>("seigneurs");
+  const [level, setLevel] = useState<number | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
   const cooldown = live.lastRaidAt + RAID_COOLDOWN_MS - now;
   const spyPrice = spyCost(live, worldFrom(snap.worksite), now);
-  const spy = async (target: string) => {
+  const act = async (target: string, action: Parameters<typeof run>[0]) => {
     setBusy(target);
-    await run({ type: "spy", target });
+    await run(action);
     setBusy(null);
   };
-  const raid = async (target: string) => {
-    setBusy(target);
-    await run({ type: "raid", target });
-    setBusy(null);
-  };
+  const spy = (target: string) => act(target, { type: "spy", target });
+  const raid = (target: string) => act(target, { type: "raid", target });
   const players = snap.rivals.filter((r) => !r.isLord && !r.allied);
+  const lords = snap.rivals.filter((r) => r.isLord && (level === null || r.difficulty === level));
+  const row = (r: RivalView) => <RivalRow key={r.id} r={r} now={now} busy={busy} onRaid={raid} onSpy={spy} spyPrice={spyPrice} stone={live.stone} />;
+  const views: [RaidView, string][] = [
+    ["armee", "Armée"],
+    ["seigneurs", `Seigneurs (${snap.rivals.filter((r) => r.isLord).length})`],
+    ["joueurs", `Joueurs (${players.length})`],
+    ["chronique", "Chronique"],
+  ];
+
+  return (
+    <>
+      <div className="subtabs" role="group" aria-label="Sections des raids">
+        {views.map(([id, label]) => (
+          <button key={id} className="btn" aria-pressed={view === id} onClick={() => setView(id)}>
+            {label}
+          </button>
+        ))}
+      </div>
+      <p className="raid-state">
+        {cooldown > 0 ? `⏳ Tes troupes se reposent encore ${duration(cooldown)}.` : "⚔️ Tes troupes sont prêtes."}
+      </p>
+      {view === "armee" && (
+        <>
+          <p className="note raid-intro">
+            Un raid est une bataille de 4 rounds au plus : toutes tes troupes (et les renforts de tes alliés) contre les troupes, fortifications et 3 gardes
+            de la cible. Chaque unité a ses forces et ses faiblesses, compose ton armée selon ce que tu vois en face. Tu gagnes si plus personne ne
+            riposte en face. Les pertes sont réelles des deux côtés (70 % des fortifications abattues se relèvent). Un raid réussi vole 25 % (40 % en
+            revanche) de la pierre non sécurisée (la dernière demi-heure de production est à l&apos;abri, mais jamais plus de la moitié du stock),
+            incendie les ateliers 30 min et ruine quelques bâtiments ; la victime reçoit 4 h de bouclier et un droit de revanche (+50 % de dégâts). Les
+            seigneurs difficiles ne frappent que ceux qui les ont attaqués. De loin, tu ne vois qu&apos;une estimation (≈) des armées : un espion révèle
+            l&apos;armée exacte pendant 1 h, mais il peut être repéré (surtout par les tours d&apos;archers).
+          </p>
+          <Garrison live={live} run={run} />
+        </>
+      )}
+      {view === "seigneurs" && (
+        <>
+          <div className="qty level-filter" role="group" aria-label="Difficulté">
+            <button className="btn" aria-pressed={level === null} onClick={() => setLevel(null)}>
+              Tous
+            </button>
+            {([1, 2, 3, 4] as const).map((d) => (
+              <button key={d} className="btn" aria-pressed={level === d} onClick={() => setLevel(d)}>
+                {DIFFICULTY_LABELS[d]}
+              </button>
+            ))}
+          </div>
+          <div className="list">{lords.map(row)}</div>
+        </>
+      )}
+      {view === "joueurs" && (
+        <div className="list">
+          {players.length === 0 && <p className="empty">Aucun joueur à piller (tes alliés sont dans l&apos;onglet Alliance).</p>}
+          {players.map(row)}
+        </div>
+      )}
+      {view === "chronique" && <Chronicle entries={snap.chronicle ?? []} me={snap.userId} now={now} />}
+    </>
+  );
+}
+
+/** Onglet Alliance : fondation, invitations, alliés et renforts. */
+function AllianceTab({ snap, live, run }: { snap: GameSnapshot; live: PlayerState; run: ReturnType<typeof useGame>["run"] }) {
+  const [busy, setBusy] = useState<string | null>(null);
   const allies = snap.rivals.filter((r) => r.allied);
-  const lords = snap.rivals.filter((r) => r.isLord);
+  const invitable = snap.alliance && snap.alliance.members.length < MAX_ALLIANCE_SIZE ? snap.rivals.filter((r) => !r.isLord && !r.allianceName) : [];
   const invite = async (target: string) => {
     setBusy(target);
     await run({ type: "alliance_invite", target });
     setBusy(null);
   };
-
   return (
     <>
-      <p className="note raid-intro">
-        Un raid est une bataille de 4 rounds au plus : toutes tes troupes contre les troupes, fortifications et 3 gardes de la cible. Chaque unité a
-        ses forces et ses faiblesses, compose ton armée selon ce que tu vois en face. Tu gagnes si plus personne ne riposte en face. Les pertes sont
-        réelles des deux côtés (70 % des fortifications abattues se relèvent). Un raid réussi vole 25 % (40 % en revanche) de la pierre non sécurisée (la dernière
-        demi-heure de production est à l&apos;abri, mais jamais plus de la moitié du stock), incendie les ateliers 2 h et ruine quelques bâtiments ; la victime reçoit 4 h de bouclier et un
-        droit de revanche (+50 % de dégâts). Les seigneurs difficiles ne frappent que ceux qui les ont attaqués. De loin, tu ne vois qu&apos;une estimation (≈) des armées : un espion révèle l&apos;armée exacte pendant 1 h, mais il peut être repéré (surtout par les tours d&apos;archers).
-      </p>
-      <Garrison live={live} run={run} />
-      <p className="raid-state">
-        {cooldown > 0 ? `⏳ Tes troupes se reposent encore ${duration(cooldown)}.` : "⚔️ Tes troupes sont prêtes."}
-      </p>
       <Alliance snap={snap} run={run} />
       {allies.length > 0 && (
         <>
@@ -493,31 +548,24 @@ function Raids({ snap, live, now, run }: { snap: GameSnapshot; live: PlayerState
           </div>
         </>
       )}
-      <h3 className="section-title">Seigneurs voisins</h3>
-      <div className="list">
-        {lords.map((r) => (
-          <RivalRow key={r.id} r={r} now={now} busy={busy} onRaid={raid} onSpy={spy} spyPrice={spyPrice} stone={live.stone} />
-        ))}
-      </div>
-      <h3 className="section-title">Joueurs</h3>
-      <div className="list">
-        {players.length === 0 && <p className="empty">Personne d&apos;autre au royaume pour l&apos;instant. Invite tes amis !</p>}
-        {players.map((r) => (
-          <RivalRow
-            key={r.id}
-            r={r}
-            now={now}
-            busy={busy}
-            onRaid={raid}
-            onSpy={spy}
-            spyPrice={spyPrice}
-            stone={live.stone}
-            onInvite={snap.alliance && !r.allianceName && snap.alliance.members.length < MAX_ALLIANCE_SIZE ? invite : undefined}
-          />
-        ))}
-      </div>
-      <h3 className="section-title">Chronique</h3>
-      <Chronicle entries={snap.chronicle ?? []} me={snap.userId} now={now} />
+      {invitable.length > 0 && (
+        <>
+          <h3 className="section-title">Inviter</h3>
+          <div className="list">
+            {invitable.map((r) => (
+              <div key={r.id} className="row">
+                <div className="row-icon" aria-hidden>
+                  🛡️
+                </div>
+                <div className="row-title">{r.name}</div>
+                <button className="btn" disabled={busy !== null} onClick={() => invite(r.id)}>
+                  ✉️ Inviter
+                </button>
+              </div>
+            ))}
+          </div>
+        </>
+      )}
     </>
   );
 }
@@ -530,7 +578,6 @@ function RivalRow({
   onSpy,
   spyPrice,
   stone: myStone,
-  onInvite,
 }: {
   r: RivalView;
   now: number;
@@ -539,7 +586,6 @@ function RivalRow({
   onSpy: (id: string) => void;
   spyPrice: number;
   stone: number;
-  onInvite?: (id: string) => void;
 }) {
   const intel = r.intelUntil > now;
   // La pierre du rival progresse en direct entre deux nouvelles du serveur.
@@ -582,11 +628,6 @@ function RivalRow({
             {pct} % de succès
           </span>
         </button>
-        {onInvite && (
-          <button className="btn" disabled={busy !== null} onClick={() => onInvite(r.id)}>
-            ✉️ Inviter
-          </button>
-        )}
         {!intel && (
           <button className="btn" disabled={busy !== null || myStone < spyPrice} onClick={() => onSpy(r.id)} title="Révèle l'armée exacte pendant 1 h. Il peut être repéré.">
             🕵️ Espionner
@@ -610,7 +651,7 @@ function Alliance({ snap, run }: { snap: GameSnapshot; run: ReturnType<typeof us
   const a = snap.alliance;
   return (
     <div className="alliance">
-      <h3 className="section-title">Alliance</h3>
+      <h3 className="section-title">Ton alliance</h3>
       {a ? (
         <>
           <p className="row-desc">
