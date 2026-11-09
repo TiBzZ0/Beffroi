@@ -8,6 +8,7 @@ import {
   LORDS,
   LORD_ARMY,
   LORD_MIN_BUDGET,
+  REVENGE_MS,
   GUARDS_PER_DOMAIN,
   COMBATANTS,
   SEASON_DAYS,
@@ -323,23 +324,24 @@ async function tickLords(admin: SupabaseClient, season: SeasonView, entities: Ma
       continue; // une action par visite
     }
 
-    // Raid (Baron de Corbelune, Comte Grisemolle).
+    // Raid. Les seigneurs les plus forts ne frappent que ceux qui les ont attaqués.
     if (lord.raidEveryHours && me.nextRaidAt !== null && me.nextRaidAt <= now) {
       const nextRaid = { next_raid_at: iso(now + jitter(lord.raidEveryHours)) };
       const army = armies.get(lord.id)!;
+      const attackers = lord.retaliateOnly ? await recentAttackers(admin, season.id, lord.id, Math.max(now - REVENGE_MS, state.lastRaidAt)) : null;
       const candidates = [...entities.values()]
-        .filter((e) => !e.isLord && now - e.lastSeen < LORD_TARGET_RECENT_MS)
+        .filter((e) => !e.isLord && (attackers ? attackers.has(e.id) : now - e.lastSeen < LORD_TARGET_RECENT_MS))
         .map((e) => {
           const s = advanceEntity(e, now, world, flat);
           const rate = currentRate(e, s, now, world, flat);
           return { e, s, rate, loot: lootOf(s.stone, rate, false) };
         })
-        .filter((c) => !raidBlocker(state, c.s, { now, attackerId: lord.id, victimId: c.e.id, victimRate: c.rate, attackerIsLord: true, attackerArmy: army.attack }))
+        .filter((c) => !raidBlocker(state, c.s, { now, attackerId: lord.id, victimId: c.e.id, victimRate: c.rate, attackerIsLord: true, allowRepeat: lord.retaliateOnly, attackerArmy: army.attack }))
         .sort((a, b) => b.loot - a.loot);
       // Le plus riche le plus souvent, mais pas toujours.
       const pick = candidates.length > 0 ? candidates[Math.random() < 0.6 ? 0 : Math.floor(Math.random() * candidates.length)] : null;
       if (pick) {
-        const ctx = { now, attackerId: lord.id, victimId: pick.e.id, victimRate: pick.rate, attackerIsLord: true, attackerArmy: army.attack };
+        const ctx = { now, attackerId: lord.id, victimId: pick.e.id, victimRate: pick.rate, attackerIsLord: true, allowRepeat: lord.retaliateOnly, attackerArmy: army.attack };
         const armiesNow = raidArmies(state, pick.s, ctx);
         const chance = estimateChance(armiesNow.attack, armiesNow.defense, { attackBonus: armiesNow.attackBonus });
         const r = resolveRaid(state, pick.s, { ...ctx, rng: Math.random });
@@ -360,6 +362,18 @@ async function tickLords(admin: SupabaseClient, season: SeasonView, entities: Ma
     }
   }
   return changed;
+}
+
+/** Joueurs qui ont attaqué ce seigneur depuis `since` (réussite ou non). */
+async function recentAttackers(admin: SupabaseClient, seasonId: number, lordId: string, since: number): Promise<Set<string>> {
+  const { data } = await admin
+    .from("chronicle")
+    .select("actor_id")
+    .eq("season_id", seasonId)
+    .eq("kind", "raid")
+    .eq("target_id", lordId)
+    .gt("created_at", iso(since));
+  return new Set((data ?? []).map((r) => r.actor_id as string));
 }
 
 async function loadChronicle(admin: SupabaseClient, seasonId: number, entities: Map<string, Entity>): Promise<ChronicleEntry[]> {
@@ -399,6 +413,8 @@ function rivalsFor(me: Entity, myState: PlayerState, entities: Map<string, Entit
         isLord: e.isLord,
         blazon: e.lord?.blazon,
         temper: e.lord?.temper,
+        difficulty: e.lord?.difficulty,
+        retaliateOnly: e.lord?.retaliateOnly,
         stone: s.stone,
         rate,
         loot,
@@ -411,7 +427,7 @@ function rivalsFor(me: Entity, myState: PlayerState, entities: Map<string, Entit
         blocker: raidBlocker(myState, s, ctx),
       };
     })
-    .sort((a, b) => Number(a.isLord) - Number(b.isLord) || b.loot - a.loot);
+    .sort((a, b) => Number(a.isLord) - Number(b.isLord) || (a.difficulty ?? 0) - (b.difficulty ?? 0) || b.loot - a.loot);
 }
 
 function chronicleDetails(r: RaidReport, chance: number) {

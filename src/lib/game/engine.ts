@@ -369,6 +369,8 @@ export interface RaidContext {
   victimRate: number;
   /** Les seigneurs n'achètent pas de troupes : on fournit leur armée (jamais entamée). */
   attackerIsLord?: boolean;
+  /** Riposte d'un seigneur : il peut frapper deux fois de suite la même cible. */
+  allowRepeat?: boolean;
   attackerArmy?: Army;
   defenderArmy?: Army;
   /** Tirages aléatoires entre 0 et 1 (fournis pour des tests reproductibles). */
@@ -400,7 +402,7 @@ export function raidBlocker(attacker: PlayerState, victim: PlayerState, ctx: Omi
   const revenge = hasRevenge(attacker, ctx.victimId, ctx.now);
   if (ctx.attackerId === ctx.victimId) return "On ne se pille pas soi-même.";
   if (victim.shieldUntil > ctx.now) return "Cette cible est sous bouclier.";
-  if (!revenge && attacker.lastRaidTarget === ctx.victimId) return "Pas deux raids de suite contre la même cible.";
+  if (!revenge && !ctx.allowRepeat && attacker.lastRaidTarget === ctx.victimId) return "Pas deux raids de suite contre la même cible.";
   if (!revenge && !ctx.attackerIsLord && ctx.now - attacker.lastRaidAt < RAID_COOLDOWN_MS) return "Tes troupes se reposent encore.";
   if (armySize(ctx.attackerArmy ?? attackArmy(attacker)) === 0) return "Il te faut des troupes pour lancer un raid.";
   return null;

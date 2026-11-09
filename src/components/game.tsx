@@ -4,6 +4,7 @@ import { useEffect, useRef, useState } from "react";
 import { signOut } from "@/app/(auth)/actions";
 import {
   CATEGORY_LABELS,
+  DIFFICULTY_LABELS,
   COMBATANTS,
   DEFENSES,
   GENERATORS,
@@ -451,9 +452,9 @@ function Raids({ snap, live, now, run }: { snap: GameSnapshot; live: PlayerState
       <p className="note raid-intro">
         Un raid est une bataille de 4 rounds au plus : toutes tes troupes contre les troupes, fortifications et 3 gardes de la cible. Chaque unité a
         ses forces et ses faiblesses, compose ton armée selon ce que tu vois en face. Tu gagnes si plus personne ne riposte en face. Les pertes sont
-        réelles des deux côtés (70 % des fortifications abattues se relèvent). Un raid réussi vole 10 % de la pierre non sécurisée (la dernière
+        réelles des deux côtés (70 % des fortifications abattues se relèvent). Un raid réussi vole 25 % (40 % en revanche) de la pierre non sécurisée (la dernière
         demi-heure de production est à l&apos;abri, mais jamais plus de la moitié du stock), incendie les ateliers 2 h et ruine quelques bâtiments ; la victime reçoit 4 h de bouclier et un
-        droit de revanche (+50 % de dégâts).
+        droit de revanche (+50 % de dégâts). Les seigneurs difficiles ne frappent que ceux qui les ont attaqués.
       </p>
       <Garrison live={live} run={run} />
       <p className="raid-state">
@@ -490,11 +491,12 @@ function RivalRow({ r, now, busy, onRaid }: { r: RivalView; now: number; busy: s
       <div>
         <div className="row-title">
           {r.name}
-          {r.isLord && <span className="badge">seigneur</span>}
+          {r.isLord && <span className={`badge badge-level-${r.difficulty ?? 1}`}>{DIFFICULTY_LABELS[r.difficulty ?? 1]}</span>}
           {r.revenge && <span className="badge badge-revenge">revanche !</span>}
         </div>
         <div className="row-desc num">
           {r.temper ? `${r.temper} · ` : ""}
+          {r.retaliateOnly ? "ne frappe qu'en représailles · " : ""}
           {formatNumber(r.stone)} pierres · {formatRate(r.rate)}/s
           {shielded ? ` · bouclier ${duration(r.shieldUntil - now)}` : ""}
           {r.burnedUntil > now ? " · 🔥" : ""}

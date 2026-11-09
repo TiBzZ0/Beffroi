@@ -23,6 +23,9 @@ export interface RivalView {
   isLord: boolean;
   blazon?: string;
   temper?: string;
+  /** Seigneurs : difficulté de 1 à 4, et s'ils ne frappent qu'en représailles. */
+  difficulty?: 1 | 2 | 3 | 4;
+  retaliateOnly?: boolean;
   stone: number;
   rate: number;
   /** Pierre qu'un raid rapporterait maintenant (estimation). */

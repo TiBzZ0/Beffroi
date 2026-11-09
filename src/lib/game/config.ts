@@ -128,8 +128,8 @@ export const ACTIVE_WINDOW_DAYS = 7;
 /** Délai minimal entre deux raids lancés par un même joueur. */
 export const RAID_COOLDOWN_MS = 5 * 60 * 1000;
 /** Part du stock non sécurisé volée (doublée en cas de revanche). */
-export const RAID_LOOT_RATE = 0.1;
-export const REVENGE_LOOT_RATE = 0.2;
+export const RAID_LOOT_RATE = 0.25;
+export const REVENGE_LOOT_RATE = 0.4;
 /** Stock sécurisé : N secondes de la production de la victime ne peuvent pas être volées. */
 export const SECURED_SECONDS = 30 * 60;
 /** Part du stock qui reste toujours exposée au pillage, même si la production est forte. */
@@ -154,7 +154,10 @@ export const REVENGE_MS = 24 * 60 * 60 * 1000;
 // Seigneurs voisins (bots assumés)
 // ---------------------------------------------------------------------------
 
-export type LordKey = "corbelune" | "aubeval" | "grisemolle";
+export type LordKey = "bourbelin" | "aubeval" | "corbelune" | "ventebrise" | "grisemolle" | "noirval" | "hautefaille";
+
+export type Difficulty = 1 | 2 | 3 | 4;
+export const DIFFICULTY_LABELS: Record<Difficulty, string> = { 1: "Facile", 2: "Moyen", 3: "Difficile", 4: "Redoutable" };
 
 export interface LordDef {
   key: LordKey;
@@ -170,12 +173,19 @@ export interface LordDef {
   raidEveryHours: number | null;
   /** Part de son stock versée au chantier, et intervalle moyen (null = jamais). */
   contribution: { share: number; everyHours: number } | null;
+  difficulty: Difficulty;
+  /** Ne raide que ceux qui l'ont attaqué récemment (les seigneurs les plus forts). */
+  retaliateOnly: boolean;
 }
 
 export const LORDS: readonly LordDef[] = [
-  { key: "corbelune", id: "00000000-0000-4000-8000-00000000c0b1", username: "Corbelune", name: "Baron de Corbelune", blazon: "🐦‍⬛", temper: "Pillard agressif", rateFactor: 1.0, raidEveryHours: 6, contribution: null },
-  { key: "aubeval", id: "00000000-0000-4000-8000-00000000a0be", username: "Aubeval", name: "Prieure d'Aubeval", blazon: "⛪", temper: "Bâtisseuse pacifique", rateFactor: 0.8, raidEveryHours: null, contribution: { share: 0.2, everyHours: 12 } },
-  { key: "grisemolle", id: "00000000-0000-4000-8000-0000000062e5", username: "Grisemolle", name: "Comte Grisemolle", blazon: "💰", temper: "Avare, bien gardé", rateFactor: 1.2, raidEveryHours: 24, contribution: null },
+  { key: "bourbelin", id: "00000000-0000-4000-8000-00000000b0b0", username: "Bourbelin", name: "Hameau de Bourbelin", blazon: "🐑", temper: "Village mal gardé", rateFactor: 0.6, raidEveryHours: null, contribution: null, difficulty: 1, retaliateOnly: false },
+  { key: "aubeval", id: "00000000-0000-4000-8000-00000000a0be", username: "Aubeval", name: "Prieure d'Aubeval", blazon: "⛪", temper: "Bâtisseuse pacifique", rateFactor: 0.8, raidEveryHours: null, contribution: { share: 0.2, everyHours: 12 }, difficulty: 1, retaliateOnly: false },
+  { key: "corbelune", id: "00000000-0000-4000-8000-00000000c0b1", username: "Corbelune", name: "Baron de Corbelune", blazon: "🐦‍⬛", temper: "Pillard agressif", rateFactor: 1.0, raidEveryHours: 6, contribution: null, difficulty: 2, retaliateOnly: false },
+  { key: "ventebrise", id: "00000000-0000-4000-8000-00000000e7b5", username: "Ventebrise", name: "Dame de Ventebrise", blazon: "🏹", temper: "Archère rusée", rateFactor: 1.1, raidEveryHours: 8, contribution: null, difficulty: 2, retaliateOnly: false },
+  { key: "grisemolle", id: "00000000-0000-4000-8000-0000000062e5", username: "Grisemolle", name: "Comte Grisemolle", blazon: "💰", temper: "Avare, bien gardé", rateFactor: 1.4, raidEveryHours: 2, contribution: null, difficulty: 3, retaliateOnly: true },
+  { key: "noirval", id: "00000000-0000-4000-8000-00000000d0a1", username: "Noirval", name: "Margrave de Noirval", blazon: "🐺", temper: "Cavalier implacable", rateFactor: 1.8, raidEveryHours: 2, contribution: null, difficulty: 3, retaliateOnly: true },
+  { key: "hautefaille", id: "00000000-0000-4000-8000-00000000ffaa", username: "Hautefaille", name: "Duc de Hautefaille", blazon: "👑", temper: "Le plus riche du royaume", rateFactor: 3, raidEveryHours: 2, contribution: null, difficulty: 4, retaliateOnly: true },
 ];
 
 export const LORD_BY_ID: ReadonlyMap<string, LordDef> = new Map(LORDS.map((l) => [l.id, l]));
@@ -259,9 +269,13 @@ export const CHANCE_SIMULATIONS = 40;
 
 /** Armée des seigneurs : budget = valeur médiane des armées des joueurs × facteur, réparti selon leur goût. */
 export const LORD_ARMY: Record<LordKey, { attack: number; defense: number; troops: Partial<Record<UnitId, number>>; forts: Partial<Record<DefenseId, number>> }> = {
-  corbelune: { attack: 1.2, defense: 0.8, troops: { chevalier: 0.5, arbaletrier: 0.3, milicien: 0.2 }, forts: { palissade: 0.5, tour: 0.5 } },
+  bourbelin: { attack: 0, defense: 0.3, troops: {}, forts: { palissade: 1 } },
   aubeval: { attack: 0, defense: 0.8, troops: {}, forts: { palissade: 0.5, tour: 0.5 } },
-  grisemolle: { attack: 0.9, defense: 2.5, troops: { piquier: 0.5, arbaletrier: 0.5 }, forts: { muraille: 0.4, baliste: 0.4, tour: 0.2 } },
+  corbelune: { attack: 1.2, defense: 0.8, troops: { chevalier: 0.5, arbaletrier: 0.3, milicien: 0.2 }, forts: { palissade: 0.5, tour: 0.5 } },
+  ventebrise: { attack: 1, defense: 1.2, troops: { arbaletrier: 0.6, chevalier: 0.4 }, forts: { tour: 0.6, palissade: 0.4 } },
+  grisemolle: { attack: 1, defense: 2.5, troops: { piquier: 0.5, arbaletrier: 0.5 }, forts: { muraille: 0.4, baliste: 0.4, tour: 0.2 } },
+  noirval: { attack: 2.5, defense: 2.5, troops: { chevalier: 0.6, piquier: 0.2, arbaletrier: 0.2 }, forts: { baliste: 0.5, tour: 0.3, palissade: 0.2 } },
+  hautefaille: { attack: 4, defense: 5, troops: { chevalier: 0.4, arbaletrier: 0.3, piquier: 0.3 }, forts: { muraille: 0.4, baliste: 0.4, tour: 0.2 } },
 };
 /** Budget minimal d'une armée de seigneur, pour qu'il ne soit jamais sans défense. */
 export const LORD_MIN_BUDGET = 1_500;

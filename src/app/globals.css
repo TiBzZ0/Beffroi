@@ -458,6 +458,22 @@ a {
   font-size: 0.88rem;
   color: var(--ink-soft);
 }
+.badge.badge-level-1 {
+  background: #4f7a3a;
+  color: #fff;
+}
+.badge.badge-level-2 {
+  background: #b07d1a;
+  color: #fff;
+}
+.badge.badge-level-3 {
+  background: #a3471f;
+  color: #fff;
+}
+.badge.badge-level-4 {
+  background: #4b1f5e;
+  color: #fff;
+}
 .strong-vs {
   color: var(--accent);
   font-style: italic;

@@ -34,24 +34,24 @@ const ctx = (extra: Partial<RaidContext> = {}): RaidContext => ({
 });
 
 describe("raids", () => {
-  it("vole 10 % du stock non sécurisé quand l'attaquant écrase la garde", () => {
+  it("vole 25 % du stock non sécurisé quand l'attaquant écrase la garde", () => {
     const secured = 10 * SECURED_SECONDS;
     const r = resolveRaid(player({ stone: 50_000 }), player({ troops: {}, stone: secured + 100_000 }), ctx());
     expect(r.ok).toBe(true);
     if (!r.ok) return;
-    expect(r.value.report).toMatchObject({ success: true, rounds: 1, stolen: 10_000 });
+    expect(r.value.report).toMatchObject({ success: true, rounds: 1, stolen: 25_000 });
     expect(r.value.attacker.troops.chevalier).toBe(20);
-    expect(r.value.attacker.stone).toBe(50_000 + 10_000);
-    expect(r.value.victim.stone).toBe(secured + 90_000);
-    expect(r.value.attacker.totalPlundered).toBe(10_000);
+    expect(r.value.attacker.stone).toBe(50_000 + 25_000);
+    expect(r.value.victim.stone).toBe(secured + 75_000);
+    expect(r.value.attacker.totalPlundered).toBe(25_000);
   });
 
   it("la dernière demi-heure de production est à l'abri, mais jamais plus de la moitié du stock", () => {
     // Production 10/s : 18 000 pierres à l'abri, mais au plus la moitié d'un stock de 20 000.
     const r = resolveRaid(player(), player({ troops: {}, stone: 20_000 }), ctx());
-    expect(r.ok && r.value.report.stolen).toBe(1_000);
+    expect(r.ok && r.value.report.stolen).toBe(2_500);
     const big = resolveRaid(player(), player({ troops: {}, stone: 10 * SECURED_SECONDS + 50_000 }), ctx());
-    expect(big.ok && big.value.report.stolen).toBe(5_000);
+    expect(big.ok && big.value.report.stolen).toBe(12_500);
   });
 
   it("incendie, bouclier et droit de revanche pour la victime", () => {
@@ -88,7 +88,7 @@ describe("raids", () => {
     const attacker = player({ lastRaidAt: NOW - 1000, lastRaidTarget: "v", revengeTarget: "v", revengeUntil: NOW + 1000 });
     const r = resolveRaid(attacker, player({ troops: {}, stone: 10 * SECURED_SECONDS + 50_000 }), ctx());
     if (!r.ok) throw new Error(r.error);
-    expect(r.value.report).toMatchObject({ revenge: true, stolen: 10_000 });
+    expect(r.value.report).toMatchObject({ revenge: true, stolen: 20_000 });
     expect(r.value.attacker.revengeTarget).toBeNull();
   });
 
@@ -112,6 +112,13 @@ describe("raids", () => {
     expect(r.value.victim.defenses.palissade).toBe(8);
     expect(r.value.report.defenderLost).toEqual({ milicien: 1, palissade: 2 });
     expect(defenseArmy(r.value.victim).garde).toBe(GUARDS_PER_DOMAIN);
+  });
+
+  it("un seigneur qui riposte peut frapper deux fois de suite le même joueur", () => {
+    const lord = player({ troops: {}, lastRaidTarget: "v" });
+    const base = { attackerIsLord: true, attackerArmy: { chevalier: 5 } };
+    expect(resolveRaid(lord, player({ troops: {} }), ctx(base)).ok).toBe(false);
+    expect(resolveRaid(lord, player({ troops: {} }), ctx({ ...base, allowRepeat: true })).ok).toBe(true);
   });
 
   it("un seigneur attaque avec son armée sans jamais la perdre", () => {
