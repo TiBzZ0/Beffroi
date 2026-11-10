@@ -340,9 +340,8 @@ export const WAR_MS = 24 * 60 * 60 * 1000;
 // Forteresse : une seule par saison, à prendre en alliance.
 /** Bonus de production pour tous les membres de l'alliance qui la tient. */
 export const FORTRESS_PRODUCTION_BONUS = 1.2;
-/** Murs de la forteresse : valeur = troupes médianes des joueurs × ce facteur (× 0,5 une fois tenue, la garnison fait le reste). */
+/** Garnison neutre de la forteresse libre : valeur = troupes médianes des joueurs × ce facteur. Une fois prise, seules les troupes envoyées la défendent. */
 export const FORTRESS_WALLS_POWER = 2;
-export const FORTRESS_HELD_WALLS_FACTOR = 0.5;
 export const FORTRESS_WALLS: Partial<Record<CombatantId, number>> = { muraille: 0.35, baliste: 0.35, tour: 0.3 };
 export const FORTRESS_NAME = "Forteresse de Pierre-Haute";
 export const SPY_COST_SECONDS = 60;

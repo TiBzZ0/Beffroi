@@ -821,7 +821,10 @@ function Fortress({ snap, live, now, run }: { snap: GameSnapshot; live: PlayerSt
             {f.mine && <span className="badge badge-level-1">à vous</span>}
           </div>
           <div className="row-desc">
-            {f.holderName ? `Tenue par ${f.holderName}.` : "Tenue par personne."} L&apos;alliance qui la tient gagne +20 % de production.
+            {f.holderName
+              ? `Tenue par ${f.holderName}, défendue uniquement par les troupes que ses membres y envoient.`
+              : "Tenue par personne, gardée par une garnison neutre."}{" "}
+            L&apos;alliance qui la tient gagne +20 % de production.
           </div>
           <div className="row-desc army-line num">
             {intel ? `🕵️ ${armyIcons(f.army)} (rapport encore ${duration(f.intelUntil! - now)})` : f.exact ? armyIcons(f.army) : `≈ ${armyIcons(f.army)}`}
@@ -848,6 +851,7 @@ function Fortress({ snap, live, now, run }: { snap: GameSnapshot; live: PlayerSt
       </div>
       {f.mine && (
         <>
+          {f.garrison.length === 0 && <p className="status-burn">⚠️ Personne ne défend la forteresse : envoyez des troupes, sinon le premier assaut la prend.</p>}
           {f.garrison.length > 0 && (
             <p className="row-desc num">
               Garnison :{" "}

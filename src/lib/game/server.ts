@@ -13,7 +13,6 @@ import {
   REVENGE_MS,
   SPY_INTEL_MS,
   MAX_ALLIANCE_SIZE,
-  FORTRESS_HELD_WALLS_FACTOR,
   FORTRESS_NAME,
   FORTRESS_WALLS,
   FORTRESS_WALLS_POWER,
@@ -553,10 +552,13 @@ function garrisonOf(f: FortressRow): PlayerState["stationed"] {
   );
 }
 
-/** Défenseurs de la forteresse : ses murs, la garnison de l'alliance qui la tient, et ses gardes. */
+/**
+ * Défenseurs de la forteresse. Libre, elle est gardée par une garnison neutre (murs et gardes).
+ * Une fois prise, seules les troupes que les membres de l'alliance y envoient la défendent :
+ * sans garnison, le premier venu la prend.
+ */
 function fortressDefense(f: FortressRow, entities: Map<string, Entity>): Army {
-  const walls = armyFromBudget(troopBudget(entities) * FORTRESS_WALLS_POWER * (f.holder !== null ? FORTRESS_HELD_WALLS_FACTOR : 1), FORTRESS_WALLS);
-  const army: Army = { ...walls, garde: GUARDS_PER_DOMAIN };
+  const army: Army = f.holder === null ? { ...armyFromBudget(troopBudget(entities) * FORTRESS_WALLS_POWER, FORTRESS_WALLS), garde: GUARDS_PER_DOMAIN } : {};
   for (const g of Object.values(garrisonOf(f))) {
     for (const [id, n] of Object.entries(g) as [UnitId, number][]) army[id] = (army[id] ?? 0) + n;
   }
