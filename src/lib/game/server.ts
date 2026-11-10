@@ -44,6 +44,7 @@ import {
   STAGE_MIN_SIZE,
   MAX_TITHE,
   NEW_PLAYER_TITHE,
+  DONOR_TIER_BONUS,
   STAGES,
   DEFENSE_IDS,
   UNIT_IDS,
@@ -89,6 +90,9 @@ import {
   stageSize,
   setTithe,
   payTithe,
+  openShare,
+  recordGift,
+  type StageShare,
   stagesDoneAt,
   type PlayerState,
   type RaidReport,
@@ -136,7 +140,7 @@ interface PlayerRow {
   upgrades: string[];
   total_produced: number;
   total_contributed: number;
-  military?: { levels?: Record<string, number>; research?: { id: string; endsAt: number }[] | { id: string; endsAt: number } | null; academy?: number; sabotageImmuneUntil?: number; ruinImmuneUntil?: number; elanUntil?: number; tithe?: number; titheOwed?: number; titheSet?: boolean } | null;
+  military?: { levels?: Record<string, number>; research?: { id: string; endsAt: number }[] | { id: string; endsAt: number } | null; academy?: number; sabotageImmuneUntil?: number; ruinImmuneUntil?: number; elanUntil?: number; tithe?: number; titheOwed?: number; titheSet?: boolean; share?: StageShare | null; donorTiers?: number } | null;
   total_clicks: number;
   last_update: string;
   last_click_at: string;
@@ -158,7 +162,7 @@ interface PlayerRow {
   next_raid_at: string | null;
   next_contrib_at: string | null;
   version: number;
-  profiles: { username: string; display_name: string | null; is_bot: boolean } | null;
+  profiles: { username: string; display_name: string | null; is_bot: boolean; ecus?: number | null } | null;
 }
 
 interface WorksiteRow {
@@ -182,6 +186,8 @@ interface Entity {
   nextRaidAt: number | null;
   nextContribAt: number | null;
   allianceId: number | null;
+  /** Écus du profil (B2) : jamais remis à zéro, jamais pillés. */
+  ecus: number;
 }
 
 const ms = (t: string | null | undefined) => (t ? Date.parse(t) : 0);
@@ -213,6 +219,7 @@ function toEntity(row: PlayerRow): Entity {
     isLord: !!lord || !!row.profiles?.is_bot,
     lord,
     version: row.version,
+    ecus: Number(row.profiles?.ecus ?? 0),
     lastSeen: ms(row.last_seen),
     nextRaidAt: row.next_raid_at ? ms(row.next_raid_at) : null,
     nextContribAt: row.next_contrib_at ? ms(row.next_contrib_at) : null,
@@ -253,6 +260,10 @@ function toEntity(row: PlayerRow): Entity {
       tithe: Math.min(MAX_TITHE, Math.max(0, Number(row.military?.tithe ?? 0) || 0)),
       titheOwed: Math.max(0, Number(row.military?.titheOwed ?? 0) || 0),
       titheSet: row.military?.titheSet === true,
+      share: row.military?.share && Number.isFinite(Number(row.military.share.size))
+        ? { stage: Number(row.military.share.stage), size: Number(row.military.share.size), given: Number(row.military.share.given ?? 0), tiers: Number(row.military.share.tiers ?? 0) }
+        : null,
+      donorTiers: Math.max(0, Math.floor(Number(row.military?.donorTiers ?? 0) || 0)),
     },
   };
 }
@@ -280,7 +291,7 @@ function toJson(e: Entity, state: PlayerState, extra: Record<string, unknown> = 
     troops: state.troops,
     defenses: state.defenses,
     stationed: state.stationed,
-    military: { levels: state.levels, research: state.research, academy: state.academy, sabotageImmuneUntil: state.sabotageImmuneUntil, ruinImmuneUntil: state.ruinImmuneUntil, elanUntil: state.elanUntil, tithe: state.tithe, titheOwed: state.titheOwed, titheSet: state.titheSet },
+    military: { levels: state.levels, research: state.research, academy: state.academy, sabotageImmuneUntil: state.sabotageImmuneUntil, ruinImmuneUntil: state.ruinImmuneUntil, elanUntil: state.elanUntil, tithe: state.tithe, titheOwed: state.titheOwed, titheSet: state.titheSet, share: state.share, donorTiers: state.donorTiers },
     click_strikes: state.clickStrikes,
     click_paused_until: iso(state.clickPausedUntil),
     ...extra,
@@ -313,7 +324,7 @@ async function loadWorksite(admin: SupabaseClient, seasonId: number): Promise<Wo
 /** Charge tous les participants de la saison (au plus une dizaine de joueurs et 3 seigneurs). */
 async function loadEntities(admin: SupabaseClient, seasonId: number, userId: string): Promise<Map<string, Entity>> {
   const select = () =>
-    admin.from("player_states").select("*, profiles(username, display_name, is_bot)").eq("season_id", seasonId);
+    admin.from("player_states").select("*, profiles(username, display_name, is_bot, ecus)").eq("season_id", seasonId);
   const fortP = admin.from("fortresses").select("holder").eq("season_id", seasonId).maybeSingle();
   let { data, error } = await select();
   if (error) throw new Error(`Joueurs introuvables : ${error.message}`);
@@ -1355,8 +1366,10 @@ export async function runAction(admin: SupabaseClient, userId: string, action: G
       loadEvent(admin, season.id, now, entities, world, flat),
       loadAllianceNames(admin, season.id),
     ]);
-    const current = advance(me.state, now, world);
+    // La part de chantier de l'étape en cours s'ouvre la première fois qu'on voit le joueur pendant l'étape.
+    const current = openShare(advance(me.state, now, world), worksite.stage, world, now);
     let finalState = current;
+    let ecus = me.ecus;
     let error: string | null = null;
     let message: string | undefined;
 
@@ -1531,6 +1544,8 @@ export async function runAction(admin: SupabaseClient, userId: string, action: G
       const paid = payTithe(finalState);
       finalState = paid.state;
       const contribution = (outcome.ok ? (outcome.value.contribution ?? 0) : 0) + paid.paid;
+      const gift = recordGift(finalState, contribution);
+      finalState = gift.state;
       const { data, error: rpcError } = await admin.rpc("commit_state", {
         p_season: season.id,
         p_state: toJson(me, finalState, {}),
@@ -1546,6 +1561,11 @@ export async function runAction(admin: SupabaseClient, userId: string, action: G
       if (!result.ok && result.conflict) continue;
       if (result.worksite) worksite = worksiteFromRow(result.worksite);
       if (contribution > 0) await recordContribution(season.id, userId, finalState.totalContributed);
+      if (gift.tiers > 0) {
+        const { data: total } = await admin.rpc("add_ecus", { p_user: userId, p_amount: gift.ecus });
+        ecus = Number(total ?? ecus + gift.ecus);
+        message = `🎖️ Palier de don atteint : +${gift.tiers * DONOR_TIER_BONUS * 100} % de production jusqu'à la fin de la saison et ${gift.ecus} écus.`;
+      }
     }
 
     const meNow = entities.get(userId) ?? me;
@@ -1569,6 +1589,7 @@ export async function runAction(admin: SupabaseClient, userId: string, action: G
       season,
       rivals: rivalsFor(meNow, finalState, entities, worldFrom(worksite), flat, now, intel, allianceNames, conflicts.wars).map((r) => (titles.has(r.id) ? { ...r, titles: titles.get(r.id) } : r)),
       myTitles: titles.get(userId) ?? [],
+      ecus,
       ...info,
       alliances: [...allianceNames].map(([id, name]) => ({ id, name, size: [...entities.values()].filter((e) => e.allianceId === id).length })),
       war: warView(meNow, conflicts.wars, allianceNames),

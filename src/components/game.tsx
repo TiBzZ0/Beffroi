@@ -14,6 +14,9 @@ import {
   ELAN_PER_CLICK_MS,
   MAX_TITHE,
   ADVISED_TITHE,
+  DONOR_TIERS,
+  DONOR_TIER_ECUS,
+  DONOR_TIER_BONUS,
   ACADEMY_SPEED,
   RESEARCH_QUEUE_MAX,
   DEFENSES,
@@ -308,6 +311,7 @@ function Hero({ snap, rate, clickGain, game }: { snap: GameSnapshot; rate: numbe
           <span>{finished ? `${STAGES.length}/${STAGES.length}` : `étape ${w.stage + 1}/${STAGES.length}`}</span>
         </div>
       </div>
+      {!finished && <ShareLine snap={snap} />}
       {!finished && !snap.state.titheSet && <TitheBanner run={game.run} />}
       <ResearchLine state={snap.state} now={game.serverNow()} />
     </section>
@@ -484,11 +488,46 @@ function Worksite({ snap, live, run }: { snap: GameSnapshot; live: PlayerState; 
           </button>
         ))}
       </div>
+      {!finished && <ShareLine snap={snap} detailed />}
       {!finished && <TitheSlider state={snap.state} run={run} />}
       <p className="note num">
         Tu as versé {formatNumber(snap.state.totalContributed)} pierres. {w.activePlayers} bâtisseur{w.activePlayers > 1 ? "s" : ""} actif{w.activePlayers > 1 ? "s" : ""} cette semaine. Chaque étape vaut 4 heures de leur production, fixée à son ouverture.
       </p>
     </>
+  );
+}
+
+/** B2 : progression vers le prochain palier de don de l'étape, et les écus. */
+function ShareLine({ snap, detailed = false }: { snap: GameSnapshot; detailed?: boolean }) {
+  const share = snap.state.share;
+  const ecus = snap.ecus ?? 0;
+  const bonus = Math.round((snap.state.donorTiers ?? 0) * DONOR_TIER_BONUS * 100);
+  if (!share || share.stage !== snap.worksite.stage) return null;
+  const next = share.tiers < DONOR_TIERS.length ? DONOR_TIERS[share.tiers] : null;
+  const goal = next !== null ? share.size * next : share.size;
+  const pct = Math.min(100, (share.given / Math.max(1, goal)) * 100);
+  return (
+    <div className="share-line">
+      <div className="bar-caption num">
+        <span>
+          {next !== null
+            ? `Ta part : palier ${share.tiers + 1}/${DONOR_TIERS.length} à ${next * 100} %, ${formatNumber(share.given)} / ${formatNumber(goal)}`
+            : `Ta part est versée en entier : les 3 paliers de l'étape sont atteints`}
+        </span>
+        <span>🪙 {ecus}</span>
+      </div>
+      {next !== null && (
+        <div className="bar bar-thin">
+          <span style={{ width: `${pct}%` }} />
+        </div>
+      )}
+      {detailed && (
+        <p className="note">
+          Ta part de chantier vaut 4 heures de ta production, mesurée au début de l&apos;étape. À 25 %, 50 % et 100 % versés, tu gagnes +{DONOR_TIER_BONUS * 100} % de production jusqu&apos;à la fin de la saison et {DONOR_TIER_ECUS.join(", ")} écus.
+          {bonus > 0 ? ` Tes paliers te rapportent déjà +${bonus} %.` : ""} Tes écus serviront dès la saison 1.
+        </p>
+      )}
+    </div>
   );
 }
 

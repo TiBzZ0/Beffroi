@@ -35,4 +35,12 @@ export const CHANGELOG: ChangeEntry[] = [
       "⛪ Dîme automatique : dans l'onglet du chantier, un curseur de 0 à 20 % envoie d'office cette part de ta production (hors ligne comprise) au chantier. Elle compte comme un don pour tout. On conseille 10 %.",
     ],
   },
+  {
+    id: 4,
+    date: "10 novembre",
+    items: [
+      "🎖️ Paliers de don : à chaque étape, ta part de chantier vaut 4 heures de ta production. À 25 %, 50 % et 100 % versés (dîme comprise), tu gagnes +2 % de production jusqu'à la fin de la saison, cumulable d'étape en étape, et 5, 10 puis 15 écus.",
+      "🪙 Écus : une nouvelle monnaie gardée sur ton profil, jamais pillée ni remise à zéro. Tes écus serviront dès la saison 1.",
+    ],
+  },
 ];

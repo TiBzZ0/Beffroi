@@ -117,6 +117,8 @@ export interface GameSnapshot {
   event: EventView | null;
   /** Mes titres gagnés à la saison précédente. */
   myTitles: string[];
+  /** Écus du joueur (monnaie de profil, dépensable dès la saison 1). */
+  ecus: number;
   /** Fournie lors des synchronisations et des raids ; sinon le client garde la précédente. */
   chronicle?: ChronicleEntry[];
 }

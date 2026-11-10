@@ -12,6 +12,8 @@ import {
   maxAffordable,
   newPlayerState,
   payTithe,
+  openShare,
+  recordGift,
   setTithe,
   productionPerSecond,
   stageSize,
@@ -229,6 +231,27 @@ describe("dîme automatique", () => {
     expect(setTithe(s, 12).ok && setTithe(s, 12)).toMatchObject({ value: { tithe: 0.12, titheSet: true } });
     expect(setTithe(s, 21).ok).toBe(false);
     expect(setTithe(s, 2.5).ok).toBe(false);
+  });
+});
+
+describe("paliers de don", () => {
+  it("la part vaut 4 h de production, mesurée à l'ouverture de l'étape", () => {
+    const s = openShare(withGenerators({ tailleur: 10 }), 2, noWorld, T0);
+    expect(s.share).toEqual({ stage: 2, size: 10 * 4 * 3600, given: 0, tiers: 0 });
+    expect(openShare(withGenerators({ tailleur: 99 }), 2, noWorld, T0).share?.size).not.toBe(s.share?.size);
+    expect(openShare(s, 2, noWorld, T0 + 1)).toBe(s);
+  });
+
+  it("25, 50 et 100 % versés : +2 % de production et 5, 10, 15 écus", () => {
+    const s = openShare(withGenerators({ tailleur: 10 }), 0, noWorld, T0);
+    const size = s.share!.size;
+    const a = recordGift(s, size * 0.3);
+    expect(a).toMatchObject({ tiers: 1, ecus: 5 });
+    const b = recordGift(a.state, size);
+    expect(b).toMatchObject({ tiers: 2, ecus: 25 });
+    expect(b.state.donorTiers).toBe(3);
+    expect(recordGift(b.state, size).tiers).toBe(0);
+    expect(productionPerSecond(b.state, noWorld, 0)).toBeCloseTo(10 * 1.06);
   });
 });
 

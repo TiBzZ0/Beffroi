@@ -74,6 +74,10 @@ import {
   STAGE_MIN_SIZE,
   STAGE_SIZE_HOURS,
   MAX_TITHE,
+  SHARE_HOURS,
+  DONOR_TIERS,
+  DONOR_TIER_ECUS,
+  DONOR_TIER_BONUS,
 } from "./config";
 import { armySize, armyValue, battle, cleanArmy, type Army, type BattleOptions, type Levels } from "./battle";
 
@@ -122,12 +126,23 @@ export interface PlayerState {
   tithe: number;
   /** Dîme prélevée mais pas encore versée (le serveur la verse à l'enregistrement suivant). */
   titheOwed: number;
+  /** Part de chantier de l'étape en cours (B2) : taille fixée à l'ouverture, dons versés, paliers atteints. */
+  share: StageShare | null;
+  /** Paliers de don atteints depuis le début de la saison (+2 % de production chacun). */
+  donorTiers: number;
   /** Le joueur a déjà réglé sa dîme (sinon on lui montre le bandeau « Règle ta dîme »). */
   titheSet: boolean;
   /** Son alliance tient la forteresse (bonus de production). Fixé par le serveur, jamais enregistré. */
   fortress?: boolean;
   /** Coup de pouce aux joueurs distancés (0.3 = +30 % de production et de défense). Fixé par le serveur, jamais enregistré. */
   catchUp?: number;
+}
+
+export interface StageShare {
+  stage: number;
+  size: number;
+  given: number;
+  tiers: number;
 }
 
 /** Ce que le joueur doit savoir du monde pour calculer sa production. */
@@ -172,6 +187,8 @@ export function newPlayerState(now: number): PlayerState {
     tithe: 0,
     titheOwed: 0,
     titheSet: false,
+    share: null,
+    donorTiers: 0,
   };
 }
 
@@ -220,7 +237,7 @@ export function catchUpBonus(produced: number, leaderProduced: number): number {
 
 /** Multiplicateur global de production (améliorations, chantier, héritage, coup de pouce). */
 export function productionMultiplier(state: PlayerState, world: WorldState, stagesDone: number): number {
-  let m = (1 + (world.legacyBonus ?? 0)) * (state.fortress ? FORTRESS_PRODUCTION_BONUS : 1) * (1 + (state.catchUp ?? 0));
+  let m = (1 + (world.legacyBonus ?? 0)) * (state.fortress ? FORTRESS_PRODUCTION_BONUS : 1) * (1 + (state.catchUp ?? 0)) * (1 + DONOR_TIER_BONUS * (state.donorTiers ?? 0));
   for (const u of ownedUpgrades(state)) {
     if (u.effect.kind === "production") m *= u.effect.multiplier;
   }
@@ -404,6 +421,35 @@ export function payTithe(state: PlayerState): { state: PlayerState; paid: number
   const paid = Math.floor(state.titheOwed ?? 0);
   if (paid < 1) return { state, paid: 0 };
   return { state: { ...state, titheOwed: state.titheOwed - paid, totalContributed: state.totalContributed + paid }, paid };
+}
+
+/**
+ * Ouvre la part de chantier du joueur pour l'étape en cours : 4 h de sa production,
+ * mesurée la première fois qu'on le voit pendant cette étape.
+ */
+export function openShare(state: PlayerState, stage: number, world: WorldState, now: number): PlayerState {
+  if (stage >= STAGES.length || state.share?.stage === stage) return state;
+  const size = Math.max(1, Math.ceil(productionPerSecond(state, world, stagesDoneAt(world, now)) * SHARE_HOURS * 3600));
+  return { ...state, share: { stage, size, given: 0, tiers: 0 } };
+}
+
+/** Compte un don dans la part de chantier ; renvoie les paliers franchis et les écus gagnés. */
+export function recordGift(state: PlayerState, amount: number): { state: PlayerState; tiers: number; ecus: number } {
+  const share = state.share;
+  if (!share || !(amount > 0)) return { state, tiers: 0, ecus: 0 };
+  const given = share.given + amount;
+  let tiers = share.tiers;
+  let ecus = 0;
+  while (tiers < DONOR_TIERS.length && given >= share.size * DONOR_TIERS[tiers]) {
+    ecus += DONOR_TIER_ECUS[tiers];
+    tiers++;
+  }
+  const gained = tiers - share.tiers;
+  return {
+    state: { ...state, share: { ...share, given, tiers }, donorTiers: (state.donorTiers ?? 0) + gained },
+    tiers: gained,
+    ecus,
+  };
 }
 
 /** Taille d'une étape à son ouverture : 4 h de la production cumulée des joueurs actifs. */

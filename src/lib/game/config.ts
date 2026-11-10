@@ -169,6 +169,12 @@ export const STAGE_SIZE_HOURS = 4;
 export const MAX_TITHE = 0.2;
 export const NEW_PLAYER_TITHE = 0.05;
 export const ADVISED_TITHE = 0.1;
+/** B2 : paliers de don par étape, en part de la part de chantier du joueur (4 h de sa production). */
+export const SHARE_HOURS = 4;
+export const DONOR_TIERS = [0.25, 0.5, 1] as const;
+export const DONOR_TIER_ECUS = [5, 10, 15] as const;
+/** Chaque palier atteint donne +2 % de production jusqu'à la fin de la saison. */
+export const DONOR_TIER_BONUS = 0.02;
 /** Taille minimale d'une étape, pour un chantier sans joueur actif. */
 export const STAGE_MIN_SIZE = 50_000;
 

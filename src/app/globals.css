@@ -952,3 +952,11 @@ a {
 .tithe-banner .row-actions {
   margin-top: 8px;
 }
+
+.share-line {
+  margin-top: 8px;
+}
+.bar.bar-thin {
+  height: 6px;
+  margin-top: 4px;
+}
