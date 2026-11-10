@@ -28,4 +28,11 @@ export const CHANGELOG: ChangeEntry[] = [
       "🏗️ Chantier : la taille d'une étape est fixée à son ouverture, à 4 heures de la production de tous les joueurs actifs, et ne bouge plus ensuite. L'étape en cours a été redimensionnée, la pierre déjà versée est gardée.",
     ],
   },
+  {
+    id: 3,
+    date: "10 novembre",
+    items: [
+      "⛪ Dîme automatique : dans l'onglet du chantier, un curseur de 0 à 20 % envoie d'office cette part de ta production (hors ligne comprise) au chantier. Elle compte comme un don pour tout. On conseille 10 %.",
+    ],
+  },
 ];

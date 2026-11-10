@@ -12,6 +12,8 @@ import {
   LEVEL_BONUS,
   ELAN_MAX_MS,
   ELAN_PER_CLICK_MS,
+  MAX_TITHE,
+  ADVISED_TITHE,
   ACADEMY_SPEED,
   RESEARCH_QUEUE_MAX,
   DEFENSES,
@@ -306,6 +308,7 @@ function Hero({ snap, rate, clickGain, game }: { snap: GameSnapshot; rate: numbe
           <span>{finished ? `${STAGES.length}/${STAGES.length}` : `étape ${w.stage + 1}/${STAGES.length}`}</span>
         </div>
       </div>
+      {!finished && !snap.state.titheSet && <TitheBanner run={game.run} />}
       <ResearchLine state={snap.state} now={game.serverNow()} />
     </section>
   );
@@ -481,10 +484,60 @@ function Worksite({ snap, live, run }: { snap: GameSnapshot; live: PlayerState; 
           </button>
         ))}
       </div>
+      {!finished && <TitheSlider state={snap.state} run={run} />}
       <p className="note num">
-        Tu as versé {formatNumber(snap.state.totalContributed)} pierres. {w.activePlayers} bâtisseur{w.activePlayers > 1 ? "s" : ""} actif{w.activePlayers > 1 ? "s" : ""} cette semaine : la taille des étapes s&apos;adapte au nombre de joueurs.
+        Tu as versé {formatNumber(snap.state.totalContributed)} pierres. {w.activePlayers} bâtisseur{w.activePlayers > 1 ? "s" : ""} actif{w.activePlayers > 1 ? "s" : ""} cette semaine. Chaque étape vaut 4 heures de leur production, fixée à son ouverture.
       </p>
     </>
+  );
+}
+
+/** Dîme automatique : une part de la production passive part d'office au chantier. */
+function TitheSlider({ state, run }: { state: PlayerState; run: ReturnType<typeof useGame>["run"] }) {
+  const saved = Math.round((state.tithe ?? 0) * 100);
+  const [draft, setDraft] = useState<number | null>(null);
+  const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const value = draft ?? saved;
+  const change = (percent: number) => {
+    setDraft(percent);
+    if (timer.current) clearTimeout(timer.current);
+    timer.current = setTimeout(async () => {
+      await run({ type: "tithe", percent });
+      setDraft(null);
+    }, 600);
+  };
+  return (
+    <div className="tithe">
+      <label className="row-title" htmlFor="tithe">
+        Dîme automatique : <span className="num">{value} %</span>
+      </label>
+      <input id="tithe" type="range" min={0} max={MAX_TITHE * 100} step={1} value={value} onChange={(e) => change(Number(e.target.value))} />
+      <p className="note">
+        Cette part de ta production, même hors ligne, part d&apos;office au chantier au lieu de ton stock. Elle compte comme un don. On conseille {ADVISED_TITHE * 100} %.
+      </p>
+    </div>
+  );
+}
+
+function TitheBanner({ run }: { run: ReturnType<typeof useGame>["run"] }) {
+  const [busy, setBusy] = useState(false);
+  const pick = async (percent: number) => {
+    setBusy(true);
+    await run({ type: "tithe", percent });
+    setBusy(false);
+  };
+  return (
+    <div className="notice notice-info tithe-banner">
+      <strong>Règle ta dîme.</strong> Une part de ta production peut aller d&apos;office au chantier, même quand tu n&apos;es pas là. On conseille {ADVISED_TITHE * 100} %, réglable à tout moment dans l&apos;onglet du chantier.
+      <div className="row-actions">
+        <button className="btn btn-primary" disabled={busy} onClick={() => pick(ADVISED_TITHE * 100)}>
+          Verser {ADVISED_TITHE * 100} %
+        </button>
+        <button className="btn btn-ghost" disabled={busy} onClick={() => pick(0)}>
+          Pas de dîme
+        </button>
+      </div>
+    </div>
   );
 }
 

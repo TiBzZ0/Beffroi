@@ -42,6 +42,8 @@ import {
   COMBATANTS,
   SEASON_DAYS,
   STAGE_MIN_SIZE,
+  MAX_TITHE,
+  NEW_PLAYER_TITHE,
   STAGES,
   DEFENSE_IDS,
   UNIT_IDS,
@@ -85,6 +87,8 @@ import {
   rebuildRuin,
   resolveRaid,
   stageSize,
+  setTithe,
+  payTithe,
   stagesDoneAt,
   type PlayerState,
   type RaidReport,
@@ -132,7 +136,7 @@ interface PlayerRow {
   upgrades: string[];
   total_produced: number;
   total_contributed: number;
-  military?: { levels?: Record<string, number>; research?: { id: string; endsAt: number }[] | { id: string; endsAt: number } | null; academy?: number; sabotageImmuneUntil?: number; ruinImmuneUntil?: number; elanUntil?: number } | null;
+  military?: { levels?: Record<string, number>; research?: { id: string; endsAt: number }[] | { id: string; endsAt: number } | null; academy?: number; sabotageImmuneUntil?: number; ruinImmuneUntil?: number; elanUntil?: number; tithe?: number; titheOwed?: number; titheSet?: boolean } | null;
   total_clicks: number;
   last_update: string;
   last_click_at: string;
@@ -246,6 +250,9 @@ function toEntity(row: PlayerRow): Entity {
       sabotageImmuneUntil: Number(row.military?.sabotageImmuneUntil ?? 0),
       ruinImmuneUntil: Number(row.military?.ruinImmuneUntil ?? 0),
       elanUntil: Number(row.military?.elanUntil ?? 0),
+      tithe: Math.min(MAX_TITHE, Math.max(0, Number(row.military?.tithe ?? 0) || 0)),
+      titheOwed: Math.max(0, Number(row.military?.titheOwed ?? 0) || 0),
+      titheSet: row.military?.titheSet === true,
     },
   };
 }
@@ -273,7 +280,7 @@ function toJson(e: Entity, state: PlayerState, extra: Record<string, unknown> = 
     troops: state.troops,
     defenses: state.defenses,
     stationed: state.stationed,
-    military: { levels: state.levels, research: state.research, academy: state.academy, sabotageImmuneUntil: state.sabotageImmuneUntil, ruinImmuneUntil: state.ruinImmuneUntil, elanUntil: state.elanUntil },
+    military: { levels: state.levels, research: state.research, academy: state.academy, sabotageImmuneUntil: state.sabotageImmuneUntil, ruinImmuneUntil: state.ruinImmuneUntil, elanUntil: state.elanUntil, tithe: state.tithe, titheOwed: state.titheOwed, titheSet: state.titheSet },
     click_strikes: state.clickStrikes,
     click_paused_until: iso(state.clickPausedUntil),
     ...extra,
@@ -315,7 +322,11 @@ async function loadEntities(admin: SupabaseClient, seasonId: number, userId: str
   if (missing.length > 0) {
     const now = iso(Date.now());
     await admin.from("player_states").upsert(
-      missing.map((id) => ({ user_id: id, season_id: seasonId, last_update: now, last_click_at: now, last_seen: now })),
+      missing.map((id) => ({
+        user_id: id, season_id: seasonId, last_update: now, last_click_at: now, last_seen: now,
+        // Un nouveau compte démarre avec une dîme de 5 % (les seigneurs n'en versent pas).
+        ...(LORDS.some((l) => l.id === id) ? {} : { military: { tithe: NEW_PLAYER_TITHE, titheSet: true } }),
+      })),
       { onConflict: "user_id,season_id", ignoreDuplicates: true },
     );
     ({ data, error } = await select());
@@ -1298,6 +1309,10 @@ function applySimpleAction(state: PlayerState, action: GameAction, now: number, 
       const r = startResearch(state, String(action.id), now);
       return r.ok ? { ok: true, value: { state: r.value, log: { action: "research", details: { id: action.id, level: queuedLevel(state, action.id as CombatantId) + 1 } } } } : r;
     }
+    case "tithe": {
+      const r = setTithe(state, Number(action.percent));
+      return r.ok ? { ok: true, value: { state: r.value, log: { action: "tithe", details: { percent: action.percent } } } } : r;
+    }
     case "academy": {
       const r = buyAcademy(state);
       return r.ok ? { ok: true, value: { state: r.value, log: { action: "academy", details: { level: r.value.academy } } } } : r;
@@ -1512,7 +1527,10 @@ export async function runAction(admin: SupabaseClient, userId: string, action: G
       const outcome = applySimpleAction(current, action, now, world);
       if (outcome.ok) finalState = outcome.value.state;
       else error = outcome.error;
-      const contribution = outcome.ok ? (outcome.value.contribution ?? 0) : 0;
+      // La dîme prélevée par la production est versée au chantier à chaque enregistrement.
+      const paid = payTithe(finalState);
+      finalState = paid.state;
+      const contribution = (outcome.ok ? (outcome.value.contribution ?? 0) : 0) + paid.paid;
       const { data, error: rpcError } = await admin.rpc("commit_state", {
         p_season: season.id,
         p_state: toJson(me, finalState, {}),

@@ -937,3 +937,18 @@ a {
   height: 6px;
   margin-top: 3px;
 }
+
+.tithe {
+  margin-top: 14px;
+}
+.tithe input[type="range"] {
+  width: 100%;
+  accent-color: var(--accent, currentColor);
+}
+.tithe-banner {
+  margin-top: 12px;
+  text-align: left;
+}
+.tithe-banner .row-actions {
+  margin-top: 8px;
+}

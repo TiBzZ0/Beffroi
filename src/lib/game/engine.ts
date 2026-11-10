@@ -73,6 +73,7 @@ import {
   type UpgradeDef,
   STAGE_MIN_SIZE,
   STAGE_SIZE_HOURS,
+  MAX_TITHE,
 } from "./config";
 import { armySize, armyValue, battle, cleanArmy, type Army, type BattleOptions, type Levels } from "./battle";
 
@@ -117,6 +118,12 @@ export interface PlayerState {
   ruinImmuneUntil: number;
   /** Fin de la réserve d'élan (bonus de production tant qu'on frappe). */
   elanUntil: number;
+  /** Dîme : part de la production passive versée d'office au chantier (0 à 0,2). */
+  tithe: number;
+  /** Dîme prélevée mais pas encore versée (le serveur la verse à l'enregistrement suivant). */
+  titheOwed: number;
+  /** Le joueur a déjà réglé sa dîme (sinon on lui montre le bandeau « Règle ta dîme »). */
+  titheSet: boolean;
   /** Son alliance tient la forteresse (bonus de production). Fixé par le serveur, jamais enregistré. */
   fortress?: boolean;
   /** Coup de pouce aux joueurs distancés (0.3 = +30 % de production et de défense). Fixé par le serveur, jamais enregistré. */
@@ -162,6 +169,9 @@ export function newPlayerState(now: number): PlayerState {
     sabotageImmuneUntil: 0,
     ruinImmuneUntil: 0,
     elanUntil: 0,
+    tithe: 0,
+    titheOwed: 0,
+    titheSet: false,
   };
 }
 
@@ -264,12 +274,23 @@ export function advance(state: PlayerState, now: number, world: WorldState, opts
   const events = [...world.stageCompletedAt, state.burnedUntil, state.elanUntil ?? 0];
   const breakpoints = events.filter((t) => t > start && t < now).sort((a, b) => a - b);
   let gain = 0;
+  let tithed = 0;
+  const tithe = Math.min(MAX_TITHE, Math.max(0, state.tithe ?? 0));
   let cursor = start;
   for (const t of [...breakpoints, now]) {
-    gain += (rateAt(state, world, cursor, opts) * (t - cursor)) / 1000;
+    const part = (rateAt(state, world, cursor, opts) * (t - cursor)) / 1000;
+    gain += part;
+    // La dîme ne s'applique que tant qu'une étape du chantier est ouverte.
+    if (tithe > 0 && stagesDoneAt(world, cursor) < STAGES.length) tithed += part * tithe;
     cursor = t;
   }
-  return { ...state, stone: state.stone + gain, totalProduced: state.totalProduced + gain, lastUpdate: now };
+  return {
+    ...state,
+    stone: state.stone + gain - tithed,
+    totalProduced: state.totalProduced + gain,
+    titheOwed: (state.titheOwed ?? 0) + tithed,
+    lastUpdate: now,
+  };
 }
 
 /** Prix de `qty` bâtiments supplémentaires (série géométrique). */
@@ -370,6 +391,19 @@ export function contribute(state: PlayerState, amount: number): Result<PlayerSta
     ok: true,
     value: { ...state, stone: state.stone - given, totalContributed: state.totalContributed + given },
   };
+}
+
+/** Règle la dîme, en pour cent entiers de 0 à 20. */
+export function setTithe(state: PlayerState, percent: number): Result<PlayerState> {
+  if (!Number.isInteger(percent) || percent < 0 || percent > MAX_TITHE * 100) return { ok: false, error: "Dîme invalide." };
+  return { ok: true, value: { ...state, tithe: percent / 100, titheSet: true } };
+}
+
+/** Verse au chantier la dîme prélevée (pierres entières) ; le reste attend le prochain versement. */
+export function payTithe(state: PlayerState): { state: PlayerState; paid: number } {
+  const paid = Math.floor(state.titheOwed ?? 0);
+  if (paid < 1) return { state, paid: 0 };
+  return { state: { ...state, titheOwed: state.titheOwed - paid, totalContributed: state.totalContributed + paid }, paid };
 }
 
 /** Taille d'une étape à son ouverture : 4 h de la production cumulée des joueurs actifs. */

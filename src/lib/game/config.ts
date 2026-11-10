@@ -165,6 +165,10 @@ export const LORD_GIFT_MAX_SHARE = 0.25;
 export const STAGE_BASES = STAGES.map((s) => s.basePerPlayer);
 /** Taille d'une étape à son ouverture : tant d'heures de la production cumulée des joueurs actifs. */
 export const STAGE_SIZE_HOURS = 4;
+/** Dîme automatique : au plus 20 % de la production passive, 5 % pour un nouveau compte, 10 % conseillés. */
+export const MAX_TITHE = 0.2;
+export const NEW_PLAYER_TITHE = 0.05;
+export const ADVISED_TITHE = 0.1;
 /** Taille minimale d'une étape, pour un chantier sans joueur actif. */
 export const STAGE_MIN_SIZE = 50_000;
 

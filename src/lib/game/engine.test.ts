@@ -11,6 +11,8 @@ import {
   generatorCost,
   maxAffordable,
   newPlayerState,
+  payTithe,
+  setTithe,
   productionPerSecond,
   stageSize,
   type PlayerState,
@@ -201,6 +203,32 @@ describe("chantier commun", () => {
     expect(stageSize([1000, 500])).toBe(1500 * 4 * 3600);
     expect(stageSize([])).toBe(STAGE_MIN_SIZE);
     expect(stageSize([Number.NaN, -3, 1])).toBe(STAGE_MIN_SIZE);
+  });
+});
+
+describe("dîme automatique", () => {
+  it("prélève sa part de la production passive pour le chantier", () => {
+    const s = { ...withGenerators({ tailleur: 10 }), tithe: 0.1 }; // 10/s
+    const after = advance(s, T0 + 10_000, noWorld);
+    expect(after.stone).toBeCloseTo(90);
+    expect(after.titheOwed).toBeCloseTo(10);
+    expect(after.totalProduced).toBeCloseTo(100);
+    const paid = payTithe(after);
+    expect(paid.paid).toBe(10);
+    expect(paid.state.totalContributed).toBe(10);
+  });
+
+  it("ne prélève rien une fois le beffroi achevé", () => {
+    const s = { ...withGenerators({ tailleur: 10 }), tithe: 0.2 };
+    const done: WorldState = { stageCompletedAt: Array.from({ length: 8 }, () => T0 - 1) };
+    expect(advance(s, T0 + 10_000, done).titheOwed).toBe(0);
+  });
+
+  it("se règle de 0 à 20 % par pas de 1 %", () => {
+    const s = newPlayerState(T0);
+    expect(setTithe(s, 12).ok && setTithe(s, 12)).toMatchObject({ value: { tithe: 0.12, titheSet: true } });
+    expect(setTithe(s, 21).ok).toBe(false);
+    expect(setTithe(s, 2.5).ok).toBe(false);
   });
 });
 
