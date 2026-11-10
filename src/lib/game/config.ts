@@ -540,6 +540,8 @@ export const MIN_TARGET_SIZE = 0.1;
 export const RANSOM_SHARE = 0.3;
 /** E3 : équité, coefficient min(1, 2 × taille relative) sur le butin et la rançon (1 en revanche). */
 export const FAIRNESS_SLOPE = 2;
+/** A11 : les dégâts de chaque camp sont multipliés à chaque round par un tirage entre 0,85 et 1,15. */
+export const BATTLE_SWING = 0.15;
 export const INFIRMARY_MS = 30 * 60_000;
 export const WOUNDED_WINNER = 0.6;
 export const WOUNDED_ATTACKER_BEATEN = 0.3;

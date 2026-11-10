@@ -95,4 +95,11 @@ export const CHANGELOG: ChangeEntry[] = [
       "👑 Maître d'œuvre : le premier lot fini de l'étape donne son nom à l'étage et choisit un bonus de 24 heures pour ses membres : +15 % de production, +25 % de points de vie en défense, ou +25 % de butin. Sans choix au bout d'une heure, c'est la production.",
     ],
   },
+  {
+    id: 12,
+    date: "10 novembre",
+    items: [
+      "🎲 Hasard des combats : à chaque round, les dégâts de chaque camp varient de 15 % en plus ou en moins. Une bataille serrée n'est plus jouée d'avance.",
+    ],
+  },
 ];

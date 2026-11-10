@@ -3,7 +3,7 @@
 // (les arbalétriers s'abritent derrière les chevaliers, les murs encaissent), avec un
 // multiplicateur contre certaines catégories (les piques contre les chevaux, etc.).
 
-import { BATTLE_ROUNDS, CHANCE_SIMULATIONS, COMBATANTS, LEVEL_BONUS, type CombatantDef, type CombatantId } from "./config";
+import { BATTLE_ROUNDS, BATTLE_SWING, CHANCE_SIMULATIONS, COMBATANTS, LEVEL_BONUS, type CombatantDef, type CombatantId } from "./config";
 
 export type Army = Partial<Record<CombatantId, number>>;
 /** Niveau d'amélioration de chaque type (+10 % d'attaque et de PV par niveau). */
@@ -145,8 +145,11 @@ export function battle(attacker: Army, defender: Army, rng: () => number, opts: 
     rounds++;
     const aLv = opts.attackerLevels;
     const dLv = opts.defenderLevels;
-    const onDef = casualties(def, damageOn(att, def, mult, aLv, dLv), rng, dLv);
-    const onAtt = casualties(att, damageOn(def, att, 1, dLv, aLv), rng, aLv);
+    // A11 : à chaque round, les dégâts de chaque camp varient de ±15 %.
+    const swingAtt = 1 - BATTLE_SWING + rng() * 2 * BATTLE_SWING;
+    const swingDef = 1 - BATTLE_SWING + rng() * 2 * BATTLE_SWING;
+    const onDef = casualties(def, damageOn(att, def, mult * swingAtt, aLv, dLv), rng, dLv);
+    const onAtt = casualties(att, damageOn(def, att, swingDef, dLv, aLv), rng, aLv);
     def = subtract(def, onDef);
     att = subtract(att, onAtt);
     defenderLost = add(defenderLost, onDef);
