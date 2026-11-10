@@ -76,6 +76,14 @@ import {
   MAX_TITHE,
   CURFEW_MINUTES,
   CURFEW_DELAY_MS,
+  VEIN_MIN_MS,
+  VEIN_MAX_MS,
+  VEIN_VISIBLE_MS,
+  VEIN_GRACE_MS,
+  VEIN_FRENZY_CHANCE,
+  VEIN_FRENZY_MS,
+  VEIN_FRENZY_FACTOR,
+  VEIN_RAIN_SECONDS,
   SHARE_HOURS,
   DONOR_TIERS,
   DONOR_TIER_ECUS,
@@ -136,6 +144,9 @@ export interface PlayerState {
   curfew: Curfew;
   /** Compteurs relevés au dernier passage du joueur (résumé « pendant ton absence »). Fixé par le serveur. */
   seen?: { produced: number; contributed: number; levels: Levels };
+  /** Veine d'or (C1) : heure d'apparition de la prochaine, et fin de la frénésie en cours. */
+  veinAt: number;
+  frenzyUntil: number;
   /** Le joueur a déjà réglé sa dîme (sinon on lui montre le bandeau « Règle ta dîme »). */
   titheSet: boolean;
   /** Son alliance tient la forteresse (bonus de production). Fixé par le serveur, jamais enregistré. */
@@ -200,6 +211,8 @@ export function newPlayerState(now: number): PlayerState {
     tithe: 0,
     titheOwed: 0,
     titheSet: false,
+    veinAt: 0,
+    frenzyUntil: 0,
     curfew: { start: null },
     share: null,
     donorTiers: 0,
@@ -290,7 +303,8 @@ export interface AdvanceOptions {
 export function rateAt(state: PlayerState, world: WorldState, t: number, opts: AdvanceOptions = {}): number {
   const base = opts.flatRate ?? productionPerSecond(state, world, stagesDoneAt(world, t));
   const elan = !opts.flatRate && t < (state.elanUntil ?? 0) ? 1 + elanBonus(state) : 1;
-  return (t < state.burnedUntil ? base * BURN_PRODUCTION_FACTOR : base) * elan;
+  const frenzy = !opts.flatRate && t < (state.frenzyUntil ?? 0) ? VEIN_FRENZY_FACTOR : 1;
+  return (t < state.burnedUntil ? base * BURN_PRODUCTION_FACTOR : base) * elan * frenzy;
 }
 
 /**
@@ -302,7 +316,7 @@ export function advance(state: PlayerState, now: number, world: WorldState, opts
   state = settleCurfew(settleResearch(state, now), now);
   if (now <= state.lastUpdate) return state;
   const start = Math.max(state.lastUpdate, now - OFFLINE_CAP_MS);
-  const events = [...world.stageCompletedAt, state.burnedUntil, state.elanUntil ?? 0];
+  const events = [...world.stageCompletedAt, state.burnedUntil, state.elanUntil ?? 0, state.frenzyUntil ?? 0];
   const breakpoints = events.filter((t) => t > start && t < now).sort((a, b) => a - b);
   let gain = 0;
   let tithed = 0;
@@ -453,6 +467,31 @@ export function setCurfew(state: PlayerState, start: number | null, now: number)
   const current = settleCurfew(state, now).curfew ?? { start: null };
   if (current.start === start) return { ok: true, value: { ...state, curfew: { start } } };
   return { ok: true, value: { ...state, curfew: { start: current.start, next: { start, from: now + CURFEW_DELAY_MS } } } };
+}
+
+/** Programme la prochaine veine d'or si la précédente est passée (le joueur doit être là pour la voir). */
+export function scheduleVein(state: PlayerState, now: number, rng: () => number = Math.random): PlayerState {
+  if (state.veinAt > 0 && now <= state.veinAt + VEIN_VISIBLE_MS + VEIN_GRACE_MS) return state;
+  return { ...state, veinAt: now + VEIN_MIN_MS + Math.floor(rng() * (VEIN_MAX_MS - VEIN_MIN_MS)) };
+}
+
+export type VeinOutcome = { kind: "frenzy"; until: number } | { kind: "rain"; stone: number };
+
+/** Prise d'une veine d'or ; l'état doit déjà être avancé jusqu'à `now`. */
+export function catchVein(state: PlayerState, now: number, world: WorldState, rng: () => number = Math.random): Result<{ state: PlayerState; outcome: VeinOutcome }> {
+  if (!(state.veinAt > 0) || now < state.veinAt - VEIN_GRACE_MS || now > state.veinAt + VEIN_VISIBLE_MS + VEIN_GRACE_MS) {
+    return { ok: false, error: "La veine s'est refermée." };
+  }
+  const next = { ...state, veinAt: now + VEIN_MIN_MS + Math.floor(rng() * (VEIN_MAX_MS - VEIN_MIN_MS)) };
+  if (rng() < VEIN_FRENZY_CHANCE) {
+    const until = now + VEIN_FRENZY_MS;
+    return { ok: true, value: { state: { ...next, frenzyUntil: until }, outcome: { kind: "frenzy", until } } };
+  }
+  const stone = productionPerSecond(state, world, stagesDoneAt(world, now)) * VEIN_RAIN_SECONDS;
+  return {
+    ok: true,
+    value: { state: { ...next, stone: next.stone + stone, totalProduced: next.totalProduced + stone }, outcome: { kind: "rain", stone } },
+  };
 }
 
 /** Règle la dîme, en pour cent entiers de 0 à 20. */

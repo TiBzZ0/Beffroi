@@ -18,6 +18,7 @@ import {
   DONOR_TIER_ECUS,
   DONOR_TIER_BONUS,
   CURFEW_MINUTES,
+  VEIN_VISIBLE_MS,
   ACADEMY_SPEED,
   RESEARCH_QUEUE_MAX,
   DEFENSES,
@@ -123,6 +124,24 @@ export function Game({ userId }: { userId: string }) {
 }
 
 /** Panneau « Ce qui change » : les nouvelles règles, une fois à la connexion suivante. */
+/** C1 : la veine d'or apparaît 12 secondes ; le serveur décide de l'heure et de ce qu'elle rapporte. */
+function Vein({ veinAt, now, run }: { veinAt: number; now: number; run: ReturnType<typeof useGame>["run"] }) {
+  const [taken, setTaken] = useState(0);
+  if (!(veinAt > 0) || now < veinAt || now > veinAt + VEIN_VISIBLE_MS || taken === veinAt) return null;
+  // Position stable pour une veine donnée, autour de la pierre.
+  const angle = (veinAt % 360) * (Math.PI / 180);
+  const style = { left: `calc(50% + ${Math.round(Math.cos(angle) * 110)}px)`, top: `calc(50% + ${Math.round(Math.sin(angle) * 90)}px)` };
+  const take = () => {
+    setTaken(veinAt);
+    void run({ type: "vein" });
+  };
+  return (
+    <button className="vein" style={style} onClick={take} aria-label="Veine d'or : la toucher">
+      ✨
+    </button>
+  );
+}
+
 /** B3 : ce qui s'est passé pendant l'absence (30 minutes ou plus). */
 function AwayModal({ away, event, onClose }: { away: AwaySummary; event: EventView | null | undefined; onClose: () => void }) {
   const lines: string[] = [];
@@ -323,11 +342,15 @@ function Hero({ snap, rate, clickGain, game }: { snap: GameSnapshot; rate: numbe
               bonus={elanBonus(snap.state)}
             />
           )}
+          {(snap.state.frenzyUntil ?? 0) > game.serverNow() && (
+            <div className="catch-up">✨ Frénésie : production doublée encore {Math.ceil((snap.state.frenzyUntil - game.serverNow()) / 1000)} s</div>
+          )}
           <div className="hammer-hint">
             {paused ? `🔨 Marteau confisqué encore ${Math.ceil((snap.state.clickPausedUntil - game.serverNow()) / 1000)} s` : `Frappe la pierre : +${formatRate(clickGain)} par coup`}
           </div>
         </div>
         <div className="hammer-zone">
+          <Vein veinAt={snap.state.veinAt ?? 0} now={game.serverNow()} run={game.run} />
           <button className="hammer" disabled={paused} onPointerDown={onHit} aria-label={`Tailler la pierre (+${formatRate(clickGain)})`}>
             🪨
           </button>

@@ -12,6 +12,8 @@ import {
   maxAffordable,
   newPlayerState,
   payTithe,
+  scheduleVein,
+  catchVein,
   inCurfew,
   setCurfew,
   openShare,
@@ -286,6 +288,37 @@ describe("couvre-feu", () => {
   it("refuse une plage invalide", () => {
     expect(setCurfew(newPlayerState(0), 1440, 0).ok).toBe(false);
     expect(setCurfew(newPlayerState(0), 12.5, 0).ok).toBe(false);
+  });
+});
+
+describe("veines d'or", () => {
+  it("apparaît entre 5 et 10 minutes plus tard, puis se reprogramme une fois passée", () => {
+    const s = scheduleVein(newPlayerState(T0), T0, () => 0.5);
+    expect(s.veinAt).toBe(T0 + 450_000);
+    expect(scheduleVein(s, T0 + 100_000)).toBe(s);
+    expect(scheduleVein(s, T0 + 470_000, () => 0).veinAt).toBe(T0 + 470_000 + 300_000);
+  });
+
+  it("frénésie : production doublée pendant 30 s", () => {
+    const s = advance({ ...withGenerators({ tailleur: 10 }), veinAt: T0 }, T0 + 1_000, noWorld);
+    const r = catchVein(s, T0 + 1_000, noWorld, () => 0.1);
+    expect(r.ok && r.value.outcome.kind).toBe("frenzy");
+    if (!r.ok) return;
+    const after = advance(r.value.state, T0 + 61_000, noWorld);
+    expect(after.stone).toBeCloseTo(10 * 61 + 10 * 30);
+  });
+
+  it("pluie : 3 minutes de production d'un coup", () => {
+    const s = { ...withGenerators({ tailleur: 10 }), veinAt: T0 };
+    const r = catchVein(s, T0, noWorld, () => 0.9);
+    expect(r.ok && r.value.state.stone).toBeCloseTo(1800);
+  });
+
+  it("refuse une veine refermée ou pas encore là", () => {
+    const s = { ...withGenerators({ tailleur: 10 }), veinAt: T0 };
+    expect(catchVein(s, T0 + 20_000, noWorld).ok).toBe(false);
+    expect(catchVein(s, T0 - 10_000, noWorld).ok).toBe(false);
+    expect(catchVein(newPlayerState(T0), T0, noWorld).ok).toBe(false);
   });
 });
 

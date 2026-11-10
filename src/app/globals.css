@@ -970,3 +970,24 @@ a {
   margin-left: 4px;
   width: auto;
 }
+
+.vein {
+  position: absolute;
+  z-index: 3;
+  transform: translate(-50%, -50%);
+  width: 52px;
+  height: 52px;
+  border-radius: 50%;
+  border: 2px solid #d4a017;
+  background: radial-gradient(circle at 35% 35%, #fff3b0, #e6b422 60%, #a87b00);
+  font-size: 1.4rem;
+  cursor: pointer;
+  box-shadow: 0 0 16px rgba(230, 180, 34, 0.8);
+  animation: vein-pulse 1s ease-in-out infinite;
+}
+@keyframes vein-pulse {
+  50% { transform: translate(-50%, -50%) scale(1.12); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .vein { animation: none; }
+}

@@ -96,6 +96,8 @@ import {
   type Curfew,
   inCurfew,
   setCurfew,
+  scheduleVein,
+  catchVein,
   stagesDoneAt,
   type PlayerState,
   type RaidReport,
@@ -144,7 +146,7 @@ interface PlayerRow {
   upgrades: string[];
   total_produced: number;
   total_contributed: number;
-  military?: { levels?: Record<string, number>; research?: { id: string; endsAt: number }[] | { id: string; endsAt: number } | null; academy?: number; sabotageImmuneUntil?: number; ruinImmuneUntil?: number; elanUntil?: number; tithe?: number; titheOwed?: number; titheSet?: boolean; share?: StageShare | null; donorTiers?: number; curfew?: Curfew | null; seen?: PlayerState["seen"] | null } | null;
+  military?: { levels?: Record<string, number>; research?: { id: string; endsAt: number }[] | { id: string; endsAt: number } | null; academy?: number; sabotageImmuneUntil?: number; ruinImmuneUntil?: number; elanUntil?: number; tithe?: number; titheOwed?: number; titheSet?: boolean; share?: StageShare | null; donorTiers?: number; curfew?: Curfew | null; seen?: PlayerState["seen"] | null; veinAt?: number; frenzyUntil?: number } | null;
   total_clicks: number;
   last_update: string;
   last_click_at: string;
@@ -280,6 +282,8 @@ function toEntity(row: PlayerRow): Entity {
         : null,
       donorTiers: Math.max(0, Math.floor(Number(row.military?.donorTiers ?? 0) || 0)),
       curfew: cleanCurfew(row.military?.curfew),
+      veinAt: Number(row.military?.veinAt ?? 0) || 0,
+      frenzyUntil: Number(row.military?.frenzyUntil ?? 0) || 0,
       ...(row.military?.seen ? { seen: { produced: Number(row.military.seen.produced ?? 0), contributed: Number(row.military.seen.contributed ?? 0), levels: armyCounts(row.military.seen.levels ?? {}, [...UNIT_IDS, ...DEFENSE_IDS]) } } : {}),
     },
   };
@@ -308,7 +312,7 @@ function toJson(e: Entity, state: PlayerState, extra: Record<string, unknown> = 
     troops: state.troops,
     defenses: state.defenses,
     stationed: state.stationed,
-    military: { levels: state.levels, research: state.research, academy: state.academy, sabotageImmuneUntil: state.sabotageImmuneUntil, ruinImmuneUntil: state.ruinImmuneUntil, elanUntil: state.elanUntil, tithe: state.tithe, titheOwed: state.titheOwed, titheSet: state.titheSet, share: state.share, donorTiers: state.donorTiers, curfew: state.curfew, seen: state.seen ?? null },
+    military: { levels: state.levels, research: state.research, academy: state.academy, sabotageImmuneUntil: state.sabotageImmuneUntil, ruinImmuneUntil: state.ruinImmuneUntil, elanUntil: state.elanUntil, tithe: state.tithe, titheOwed: state.titheOwed, titheSet: state.titheSet, share: state.share, donorTiers: state.donorTiers, curfew: state.curfew, seen: state.seen ?? null, veinAt: state.veinAt, frenzyUntil: state.frenzyUntil },
     click_strikes: state.clickStrikes,
     click_paused_until: iso(state.clickPausedUntil),
     ...extra,
@@ -1343,12 +1347,27 @@ interface Outcome {
   state: PlayerState;
   contribution?: number;
   log?: { action: string; details: Record<string, unknown> };
+  message?: string;
 }
 
 function applySimpleAction(state: PlayerState, action: GameAction, now: number, world: WorldState): Result<Outcome> {
   switch (action.type) {
     case "sync":
-      return { ok: true, value: { state } };
+      // Le joueur est là : on programme sa prochaine veine d'or si besoin.
+      return { ok: true, value: { state: scheduleVein(state, now) } };
+    case "vein": {
+      const r = catchVein(state, now, world);
+      if (!r.ok) return r;
+      const o = r.value.outcome;
+      return {
+        ok: true,
+        value: {
+          state: r.value.state,
+          log: { action: "vein", details: o.kind === "rain" ? { kind: o.kind, stone: Math.floor(o.stone) } : { kind: o.kind } },
+          message: o.kind === "frenzy" ? "✨ Frénésie ! Ta production est doublée pendant 30 secondes." : `✨ Pluie de pierre : +${Math.floor(o.stone).toLocaleString("fr-FR")} pierres.`,
+        },
+      };
+    }
     case "click": {
       const r = applyClicks(state, Number(action.count), now, world);
       if (r.paused && !(state.clickPausedUntil > now)) {
@@ -1600,6 +1619,7 @@ export async function runAction(admin: SupabaseClient, userId: string, action: G
       const outcome = applySimpleAction(current, action, now, world);
       if (outcome.ok) finalState = outcome.value.state;
       else error = outcome.error;
+      if (outcome.ok && outcome.value.message) message = outcome.value.message;
       // La dîme prélevée par la production est versée au chantier à chaque enregistrement.
       const paid = payTithe(finalState);
       finalState = paid.state;

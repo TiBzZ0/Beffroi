@@ -178,6 +178,20 @@ export const DONOR_TIER_BONUS = 0.02;
 /** C2 : couvre-feu de 8 h par jour ; un changement de plage prend effet 24 h plus tard. */
 export const CURFEW_MINUTES = 8 * 60;
 export const CURFEW_DELAY_MS = 24 * 3_600_000;
+/**
+ * C1 : veines d'or. Une pierre dorée toutes les 5 à 10 minutes (si le joueur est là), visible 12 secondes.
+ * Frénésie (×2 pendant 30 s, 60 %) ou pluie de pierre (3 min de production, 40 %).
+ * En moyenne 90 s de production pour 450 s d'attente : +20 % au plus pour un joueur très attentif.
+ */
+export const VEIN_MIN_MS = 5 * 60_000;
+export const VEIN_MAX_MS = 10 * 60_000;
+export const VEIN_VISIBLE_MS = 12_000;
+/** Marge accordée à la latence du réseau pour valider une prise. */
+export const VEIN_GRACE_MS = 2_000;
+export const VEIN_FRENZY_CHANCE = 0.6;
+export const VEIN_FRENZY_MS = 30_000;
+export const VEIN_FRENZY_FACTOR = 2;
+export const VEIN_RAIN_SECONDS = 180;
 /** Taille minimale d'une étape, pour un chantier sans joueur actif. */
 export const STAGE_MIN_SIZE = 50_000;
 

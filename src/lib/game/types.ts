@@ -196,6 +196,7 @@ export type GameAction =
   | { type: "academy" }
   | { type: "tithe"; percent: number }
   | { type: "curfew"; start: number | null }
+  | { type: "vein" }
   | { type: "sabotage"; target: string };
 
 export interface EventView {
