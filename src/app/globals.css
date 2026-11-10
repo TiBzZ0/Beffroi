@@ -1064,3 +1064,27 @@ a {
 .mini-site {
   display: flow-root;
 }
+
+/* B7 : déroulé des batailles et simulateur */
+.rounds {
+  margin-top: 4px;
+  font-size: 0.85rem;
+}
+.rounds summary {
+  cursor: pointer;
+  color: var(--ink-soft);
+}
+.rounds ol {
+  margin: 4px 0 0;
+  padding-left: 18px;
+}
+.simulator {
+  margin-top: 8px;
+  padding: 8px 10px;
+  border: 1px dashed var(--line);
+  border-radius: var(--radius);
+  background: var(--panel-2);
+}
+.simulator p {
+  margin: 0 0 6px;
+}

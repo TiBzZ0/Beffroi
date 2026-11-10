@@ -1088,7 +1088,7 @@ async function runConflictAction(
       // Infirmerie : une part de ses propres troupes tombées revient dans 30 minutes.
       const healed = addWounded(current, woundedOf(mine.byOwner[""] ?? {}, fight.success ? WOUNDED_WINNER : WOUNDED_ATTACKER_BEATEN), now);
       const after: PlayerState = { ...healed, troops: mine.troops, stationed: mine.stationed, lastRaidAt: now, shieldUntil: 0 };
-      const details = { success: fight.success, chance, rounds: fight.rounds, alliance: me.allianceId, attackerLost: fight.attackerLost, defenderLost: fight.defenderLost };
+      const details = { success: fight.success, chance, rounds: fight.rounds, alliance: me.allianceId, attackerLost: fight.attackerLost, defenderLost: fight.defenderLost, log: fight.log };
       const r = await writeFortress(after, fight.success ? me.allianceId : f.holder, fight.success ? {} : theirs.stationed, fight.success, "fortress_attack", details);
       if (r === "conflict") return "conflict";
       if (f.holder !== null) {
@@ -1659,7 +1659,7 @@ async function awaySummary(admin: SupabaseClient, seasonId: number, me: Entity, 
 }
 
 function chronicleDetails(r: RaidReport, chance: number) {
-  return { success: r.success, chance, rounds: r.rounds, stolen: r.stolen, ransom: r.ransom, allyShares: r.allyShares, destroyed: r.destroyed, attackerLost: r.attackerLost, defenderLost: r.defenderLost, revenge: r.revenge };
+  return { success: r.success, chance, rounds: r.rounds, stolen: r.stolen, ransom: r.ransom, allyShares: r.allyShares, destroyed: r.destroyed, attackerLost: r.attackerLost, defenderLost: r.defenderLost, revenge: r.revenge, log: r.log };
 }
 
 /** « 3 miliciens, 1 chevalier » */

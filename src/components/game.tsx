@@ -36,6 +36,7 @@ import {
   type CombatantId,
   type GeneratorId,
   type HallUnit,
+  REVENGE_ATTACK_BONUS,
 } from "@/lib/game/config";
 import {
   advance,
@@ -63,9 +64,11 @@ import {
   ruinsOf,
   stagesDoneAt,
   upgradeUnlocked,
+  attackArmy,
   type PlayerState,
 } from "@/lib/game/engine";
 import { formatNumber, formatRate } from "@/lib/game/format";
+import { battle, seededRng, type Army } from "@/lib/game/battle";
 import { worldFrom, type AwaySummary, type LotView, type AllianceSummary, type ChronicleEntry, type EventView, type GameSnapshot, type RivalView } from "@/lib/game/types";
 import { useGame, useLeaderboard, usePush, useTick } from "./use-game";
 import { CHANGELOG } from "@/lib/game/changelog";
@@ -1111,7 +1114,7 @@ function Raids({ snap, live, now, run }: { snap: GameSnapshot; live: PlayerState
   const lords = snap.rivals.filter((r) => r.isLord && (level === null || r.difficulty === level));
   const sabotage = (target: string) => act(target, { type: "sabotage", target });
   const row = (r: RivalView) => (
-    <RivalRow key={r.id} r={r} now={now} busy={busy} onRaid={raid} onSpy={spy} spyPrice={spyPrice} stone={live.stone} onSabotage={sabotage} stagesDone={stagesDoneAt(worldFrom(snap.worksite), now)} />
+    <RivalRow key={r.id} r={r} now={now} busy={busy} onRaid={raid} onSpy={spy} spyPrice={spyPrice} stone={live.stone} onSabotage={sabotage} stagesDone={stagesDoneAt(worldFrom(snap.worksite), now)} me={live} />
   );
   const views: [RaidView, string][] = [
     ["seigneurs", `Seigneurs (${snap.rivals.filter((r) => r.isLord).length})`],
@@ -1280,6 +1283,7 @@ function RivalRow({
   stone: myStone,
   onSabotage,
   stagesDone = 0,
+  me,
 }: {
   r: RivalView;
   now: number;
@@ -1290,7 +1294,9 @@ function RivalRow({
   stone: number;
   onSabotage: (id: string) => void;
   stagesDone?: number;
+  me?: PlayerState;
 }) {
+  const [sim, setSim] = useState<number | null>(null);
   const sabotagePrice = r.sabotageCost ?? 0;
   const intel = r.intelUntil > now;
   // La pierre du rival progresse en direct entre deux nouvelles du serveur.
@@ -1340,6 +1346,7 @@ function RivalRow({
               .filter(Boolean)
               .join(" · ")}
         </div>
+        {sim !== null && me && <Simulator me={me} r={r} intel={intel} seed={sim} onReplay={() => setSim(sim + 1)} onClose={() => setSim(null)} />}
       </div>
       <div className="row-actions">
         <button className="btn btn-primary" disabled={blocked || busy !== null} onClick={() => onRaid(r.id)}>
@@ -1349,6 +1356,11 @@ function RivalRow({
             {pct} % de succès
           </span>
         </button>
+        {me && sim === null && (
+          <button className="btn" onClick={() => setSim(1)} title="Joue une bataille pour de faux avec ton armée contre celle que tu vois en face.">
+            🎲 Simuler
+          </button>
+        )}
         {!intel && (
           <button className="btn" disabled={busy !== null || myStone < spyPrice} onClick={() => onSpy(r.id)} title="Révèle l'armée exacte pendant 1 h. Il peut être repéré.">
             🕵️ Espionner
@@ -1366,6 +1378,34 @@ function RivalRow({
             <span className="cost num">{formatNumber(sabotagePrice)} 🪨</span>
           </button>
         )}
+      </div>
+    </div>
+  );
+}
+
+/** B7 : simulateur avant l'attaque, une bataille pour de faux contre l'armée vue en face (rien n'est perdu). */
+function Simulator({ me, r, intel, seed, onReplay, onClose }: { me: PlayerState; r: RivalView; intel: boolean; seed: number; onReplay: () => void; onClose: () => void }) {
+  const attack = attackArmy(me);
+  const opts = { attackBonus: r.revenge ? REVENGE_ATTACK_BONUS : 1, attackerLevels: me.levels };
+  const fight = battle(attack, r.army as Army, seededRng(seed * 7919), opts);
+  return (
+    <div className="simulator">
+      <p>
+        <strong>{fight.success ? "🏆 Victoire" : "💀 Défaite"}</strong> sur ce tirage. Tu perdrais {armyIcons(fight.attackerLost, "rien")}, il perdrait{" "}
+        {armyIcons(fight.defenderLost, "rien")}.
+      </p>
+      <RoundsReport log={fight.log} open />
+      <p className="note">
+        {intel ? "Contre son armée exacte" : "Contre une estimation de son armée (espionne-le pour un calcul juste)"}, sans ses améliorations ni ses bonus de
+        défense : la chance affichée sur le bouton reste la référence.
+      </p>
+      <div className="qty">
+        <button className="btn" onClick={onReplay}>
+          🎲 Rejouer
+        </button>
+        <button className="btn btn-ghost" onClick={onClose}>
+          Fermer
+        </button>
       </div>
     </div>
   );
@@ -1920,12 +1960,32 @@ function Chronicle({ entries, me, now, rivals, alliances = [] }: { entries: Chro
         }
         return (
           <li key={e.id} className={e.targetId === me ? "hit" : undefined}>
-            <span>{text}</span>
+            <span>
+              {text}
+              {e.details.log && e.details.log.length > 0 && (e.kind === "raid" || e.kind === "fortress") && <RoundsReport log={e.details.log} />}
+            </span>
             <span className="when">{ago(e.at)}</span>
           </li>
         );
       })}
     </ul>
+  );
+}
+
+/** B7 : déroulé d'une bataille, round par round. */
+function RoundsReport({ log, open = false }: { log: NonNullable<ChronicleEntry["details"]["log"]>; open?: boolean }) {
+  return (
+    <details className="rounds" open={open}>
+      <summary>Déroulé en {log.length} round{log.length > 1 ? "s" : ""}</summary>
+      <ol>
+        {log.map((r, i) => (
+          <li key={i}>
+            <strong>Round {i + 1}</strong> · l&apos;assaillant perd {armyIcons(r.attackerLost, "rien")}, le défenseur perd {armyIcons(r.defenderLost, "rien")}. Restent{" "}
+            <span className="num">{formatNumber(r.attackerLeft)}</span> contre <span className="num">{formatNumber(r.defenderLeft)}</span>.
+          </li>
+        ))}
+      </ol>
+    </details>
   );
 }
 

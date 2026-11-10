@@ -175,4 +175,13 @@ export const CHANGELOG: ChangeEntry[] = [
     date: "10 novembre",
     items: ["🔔 Le beffroi est dessiné à côté du chantier : il gagne une pièce à chaque étape, et la pièce en cours se remplit à mesure des dons."],
   },
+  {
+    id: 23,
+    date: "10 novembre",
+    items: [
+      "📜 Chaque raid de la chronique a son déroulé round par round : les pertes de chaque camp et les effectifs restants.",
+      "🎲 Nouveau bouton Simuler sur chaque cible : une bataille pour de faux avec ton armée contre celle que tu vois en face, à rejouer autant que tu veux. Rien n'est perdu.",
+      "🐞 Le butin estimé d'un joueur tient enfin compte du plafond de 2 heures de ta production et du coefficient d'équité, comme le vrai raid.",
+    ],
+  },
 ];

@@ -72,3 +72,14 @@ describe("seigneurs attaquants", () => {
     expect(chance).toBeLessThan(0.6);
   });
 });
+
+describe("rapport de bataille (B7)", () => {
+  it("détaille chaque round et retombe sur les pertes totales", () => {
+    const fight = battle({ piquier: 40, arbaletrier: 20 }, { milicien: 30, palissade: 5 }, seededRng(3));
+    expect(fight.log).toHaveLength(fight.rounds);
+    const sum = (k: "attackerLost" | "defenderLost") =>
+      fight.log.reduce((a, r) => a + Object.values(r[k]).reduce((x, n) => x + (n ?? 0), 0), 0);
+    expect(sum("attackerLost")).toBe(Object.values(fight.attackerLost).reduce((x, n) => x + (n ?? 0), 0));
+    expect(sum("defenderLost")).toBe(Object.values(fight.defenderLost).reduce((x, n) => x + (n ?? 0), 0));
+  });
+});

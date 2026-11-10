@@ -117,6 +117,8 @@ export interface ChronicleEntry {
     ransom?: number;
     destroyed?: Record<string, number>;
     rounds?: number;
+    /** B7 : pertes de chaque round et effectifs restants. */
+    log?: { attackerLost: Record<string, number>; defenderLost: Record<string, number>; attackerLeft: number; defenderLeft: number }[];
     allyShares?: Record<string, number>;
     attackerLost?: Record<string, number>;
     defenderLost?: Record<string, number>;

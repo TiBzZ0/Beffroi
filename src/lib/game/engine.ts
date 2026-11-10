@@ -102,7 +102,7 @@ import {
   DONOR_TIER_ECUS,
   DONOR_TIER_BONUS,
 } from "./config";
-import { armySize, armyValue, battle, cleanArmy, type Army, type BattleOptions, type Levels } from "./battle";
+import { armySize, armyValue, battle, cleanArmy, type Army, type BattleOptions, type Levels, type RoundLog } from "./battle";
 
 export interface PlayerState {
   stone: number;
@@ -896,6 +896,8 @@ export interface RaidReport {
   ransom: number;
   fairness: number;
   revenge: boolean;
+  /** B7 : déroulé round par round. */
+  log?: RoundLog[];
 }
 
 export function raidArmies(attacker: PlayerState, victim: PlayerState, ctx: Pick<RaidContext, "attackerArmy" | "defenderArmy" | "victimId" | "now" | "stagesDone">) {
@@ -1000,6 +1002,7 @@ export function resolveRaid(
     ransom: 0,
     fairness: 1,
     revenge,
+    log: fight.log,
   };
   if (!fight.success) return { ok: true, value: { attacker: attackerAfter, victim: victimArmyAfter, report: base } };
 
