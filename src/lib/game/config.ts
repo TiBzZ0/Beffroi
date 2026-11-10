@@ -471,13 +471,13 @@ export const STRONG_LORD_TOP_SHARE = 0.25;
 // Événements : une caravane marchande ou un colosse apparaît régulièrement pour tout le monde.
 /** Pause entre deux événements. */
 export const EVENT_GAP_MS = 2 * 60 * 60 * 1000;
-/** Caravane : 1 h pour la piller, une fois par joueur ; chaque assaut réussi emporte une part de sa pierre. */
+/** Caravane : 1 h pour la piller, une fois par joueur. A14 : chacun affronte sa propre escorte. */
 export const CARAVAN_MS = 60 * 60 * 1000;
-/** Sa pierre de départ : 45 min de production de tous les joueurs réunis. */
+/** Une victoire rapporte 45 min de sa propre production. */
 export const CARAVAN_PRIZE_SECONDS = 45 * 60;
-/** Part de la pierre de départ emportée par un assaut réussi. */
+/** Ancienne règle (caravanes lancées avant A14) : part du chargement commun emportée par un assaut. */
 export const CARAVAN_TAKE = 0.25;
-/** Escorte (reformée à chaque assaut) : troupes médianes des joueurs × ce facteur. */
+/** Escorte : 60 % de la valeur de sa propre armée (à la création : troupes médianes × ce facteur). */
 export const CARAVAN_ESCORT_POWER = 0.6;
 export const CARAVAN_ESCORT: Partial<Record<CombatantId, number>> = { milicien: 0.3, piquier: 0.3, arbaletrier: 0.4 };
 /** Colosse : 6 h pour l'abattre à plusieurs ; ses pertes ne se reforment pas. */
@@ -485,8 +485,10 @@ export const COLOSSUS_MS = 6 * 60 * 60 * 1000;
 /** Son armée : toutes les troupes des joueurs réunies × ce facteur (au moins 3 fois la médiane). */
 export const COLOSSUS_POWER = 0.6;
 export const COLOSSUS_ARMY: Partial<Record<CombatantId, number>> = { chevalier: 0.35, piquier: 0.3, arbaletrier: 0.35 };
-/** Prime partagée au prorata des dégâts : valeur de son armée × ce facteur. */
-export const COLOSSUS_BOUNTY = 1;
+/** A15 : chaque assaut rapporte tout de suite 2 fois la valeur des pertes infligées. */
+export const COLOSSUS_BOUNTY = 2;
+/** A15 : un colosse abattu donne en plus 15 minutes de sa production à chaque joueur qui l'a touché. */
+export const COLOSSUS_KILL_SECONDS = 15 * 60;
 
 /** Un joueur est « en ligne » s'il a été actif il y a moins de ce délai (sa page se synchronise chaque minute). */
 export const ONLINE_MS = 2.5 * 60 * 1000;

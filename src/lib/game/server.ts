@@ -24,7 +24,6 @@ import {
   EVENT_GAP_MS,
   CARAVAN_MS,
   CARAVAN_PRIZE_SECONDS,
-  CARAVAN_TAKE,
   CARAVAN_ESCORT_POWER,
   CARAVAN_ESCORT,
   COLOSSUS_MS,
@@ -46,6 +45,7 @@ import {
   NEW_PLAYER_TITHE,
   DONOR_TIER_BONUS,
   QUESTS,
+  COLOSSUS_KILL_SECONDS,
   FORTRESS_TRUCE_MS,
   LORD_RAID_CHANCE,
   LOT_PRIME_SHARE,
@@ -1088,11 +1088,11 @@ interface EventRow {
 const EVENT_INFO: Record<EventKind, { name: string; description: string }> = {
   caravane: {
     name: "Caravane marchande",
-    description: "Elle traverse la région chargée de pierre. Un assaut par joueur ; chaque victoire emporte une part du chargement.",
+    description: "Elle traverse la région chargée de pierre. Un assaut par joueur, contre une escorte qui vaut 60 % de ton armée ; une victoire rapporte 45 minutes de ta production.",
   },
   colosse: {
     name: "Le Colosse de Grisemont",
-    description: "Une armée immense qui ne se reforme pas. Abattez-la à plusieurs : la prime est partagée selon les pertes infligées.",
+    description: "Une armée immense qui ne se reforme pas. Chaque assaut rapporte 2 fois la valeur des pertes infligées ; s'il tombe, chaque joueur qui l'a touché reçoit 15 minutes de sa production.",
   },
 };
 
@@ -1125,9 +1125,9 @@ async function loadEvent(admin: SupabaseClient, seasonId: number, now: number, e
   const { data: open } = await admin.from("events").select("*").eq("season_id", seasonId).eq("settled", false);
   for (const raw of open ?? []) {
     const e = eventRow(raw);
-    const finished = ms(e.ends_at) <= now || (e.kind === "caravane" && e.pool <= 0) || (e.kind === "colosse" && armySize(e.army) === 0);
+    const finished = ms(e.ends_at) <= now || (e.kind === "colosse" && armySize(e.army) === 0);
     if (!finished) return { active: e, levels: medianLevels(entities), nextAt: ms(e.ends_at), nextKind: e.kind === "caravane" ? "colosse" : "caravane" };
-    await admin.rpc("settle_event", { p_event: e.id });
+    await admin.rpc("settle_event_v2", { p_event: e.id, p_bonus: killBonus(e, entities, now, world, flat) });
   }
   const { data: last } = await admin.from("events").select("kind, ends_at").eq("season_id", seasonId).order("ends_at", { ascending: false }).limit(1).maybeSingle();
   const nextKind: EventKind = last?.kind === "caravane" ? "colosse" : "caravane";
@@ -1149,7 +1149,8 @@ async function loadEvent(admin: SupabaseClient, seasonId: number, now: number, e
     duration = COLOSSUS_MS;
   }
   // L'index unique empêche deux événements simultanés si deux joueurs arrivent en même temps.
-  const { error: insertError } = await admin.from("events").insert({ season_id: seasonId, kind: nextKind, ends_at: iso(now + duration), army, army_start: army, pool: prize, prize });
+  // A14, A15 : plus de chargement ni de prime communs (pool 0) ; `prize` n'est plus qu'une indication.
+  const { error: insertError } = await admin.from("events").insert({ season_id: seasonId, kind: nextKind, ends_at: iso(now + duration), army, army_start: army, pool: 0, prize });
   // Seul celui qui a vraiment créé l'événement prévient tout le monde.
   if (!insertError) {
     notify(admin, "all", nextKind === "caravane"
@@ -1163,48 +1164,68 @@ async function loadEvent(admin: SupabaseClient, seasonId: number, now: number, e
 }
 
 /** Défenseurs qu'affronte un assaut : l'escorte entière de la caravane, ou ce qu'il reste du colosse. */
-function eventDefense(e: EventRow): Army {
-  return e.kind === "caravane" ? e.army_start : e.army;
+/** A14 : l'escorte de chaque joueur vaut 60 % de la valeur de sa propre armée. */
+function caravanEscort(state: PlayerState): Army {
+  return armyFromBudget(armyValue(attackArmy(state)) * CARAVAN_ESCORT_POWER, CARAVAN_ESCORT);
+}
+
+function eventDefense(e: EventRow, state: PlayerState): Army {
+  return e.kind === "caravane" ? caravanEscort(state) : e.army;
+}
+
+/** A15 : colosse abattu, 15 minutes de production pour chaque joueur qui l'a touché. */
+function killBonus(e: EventRow, entities: Map<string, Entity>, now: number, world: WorldState, flat: Map<string, number>): Record<string, number> {
+  if (e.kind !== "colosse") return {};
+  const out: Record<string, number> = {};
+  for (const id of Object.keys(e.attackers)) {
+    const ent = entities.get(id);
+    if (!ent) continue;
+    out[id] = Math.floor(currentRate(ent, advance(ent.state, now, world), now, world, flat) * COLOSSUS_KILL_SECONDS);
+  }
+  return out;
 }
 
 function eventBlocker(state: PlayerState, e: EventRow, meId: string, now: number): string | null {
   if (e.kind === "caravane" && meId in e.attackers) return "Tu as déjà attaqué cette caravane.";
-  if (e.kind === "caravane" && e.pool <= 0) return "La caravane est vide.";
   if (now - state.lastRaidAt < RAID_COOLDOWN_MS) return "Tes troupes se reposent encore.";
   if (armySize(attackArmy(state)) === 0) return "Il te faut des troupes pour attaquer.";
   return null;
 }
 
-async function runEventAttack(admin: SupabaseClient, seasonId: number, me: Entity, current: PlayerState, ev: EventState, now: number): Promise<"conflict" | { error?: string; state?: PlayerState; message?: string; settle?: number }> {
+async function runEventAttack(admin: SupabaseClient, seasonId: number, me: Entity, current: PlayerState, ev: EventState, now: number, rate: number): Promise<"conflict" | { error?: string; state?: PlayerState; message?: string; settle?: number }> {
   const e = ev.active;
   if (!e) return { error: "Aucun événement en cours." };
   const blocked = eventBlocker(current, e, me.id, now);
   if (blocked) return { error: blocked };
-  const fight = battle(attackArmy(current), eventDefense(e), Math.random, { attackerLevels: current.levels, defenderLevels: ev.levels });
+  const fight = battle(attackArmy(current), eventDefense(e, current), Math.random, { attackerLevels: current.levels, defenderLevels: ev.levels });
   const mine = splitTroopLosses(current, fight.attackerLost);
   let after: PlayerState = { ...current, troops: mine.troops, stationed: mine.stationed, lastRaidAt: now };
   const attackers = { ...e.attackers };
   let army = e.army;
-  let pool = e.pool;
+  const pool = e.pool;
   let message: string;
+  let taken = 0;
   if (e.kind === "caravane") {
-    // Le dernier pillard emporte aussi les miettes, pour ne pas laisser une caravane « vide » à 3 pierres.
-    const share = Math.floor(Math.min(pool, e.prize * CARAVAN_TAKE));
-    const take = fight.success ? (pool - share < e.prize * 0.01 ? pool : share) : 0;
-    pool -= take;
-    after = { ...after, stone: after.stone + take };
-    attackers[me.id] = take;
+    // A14 : sa propre escorte, et 45 minutes de sa propre production en cas de victoire.
+    taken = fight.success ? Math.floor(rate * CARAVAN_PRIZE_SECONDS) : 0;
+    after = { ...after, stone: after.stone + taken };
+    attackers[me.id] = taken;
     message = fight.success
-      ? `🐪 Caravane pillée : +${Math.round(take).toLocaleString("fr-FR")} pierres ! Tes pertes : ${describeArmy(fight.attackerLost)}.`
+      ? `🐪 Caravane pillée : +${Math.round(taken).toLocaleString("fr-FR")} pierres ! Tes pertes : ${describeArmy(fight.attackerLost)}.`
       : `🐪 L'escorte de la caravane t'a repoussé. Tes pertes : ${describeArmy(fight.attackerLost)}.`;
   } else {
     const dealt = armyValue(fight.defenderLost);
     army = fight.defenderLeft;
     attackers[me.id] = (attackers[me.id] ?? 0) + dealt;
+    // A15 : prime immédiate de 2 fois les pertes infligées (sauf colosse lancé avant cette règle, à prime commune).
+    taken = e.pool > 0 ? 0 : Math.floor(dealt * COLOSSUS_BOUNTY);
+    after = { ...after, stone: after.stone + taken };
     message =
       armySize(army) === 0
-        ? `🗿 Le Colosse est abattu ! La prime de ${Math.round(pool).toLocaleString("fr-FR")} pierres est partagée selon les pertes infligées.`
-        : `🗿 Tu as fauché ${describeArmy(fight.defenderLost) || "personne"}. Tes pertes : ${describeArmy(fight.attackerLost)}.`;
+        ? e.pool > 0
+          ? `🗿 Le Colosse est abattu ! La prime de ${Math.round(pool).toLocaleString("fr-FR")} pierres est partagée selon les pertes infligées.`
+          : `🗿 Le Colosse est abattu ! +${Math.round(taken).toLocaleString("fr-FR")} pierres de prime, et chaque joueur qui l'a touché reçoit 15 minutes de sa production.`
+        : `🗿 Tu as fauché ${describeArmy(fight.defenderLost) || "personne"}${taken > 0 ? ` : +${Math.round(taken).toLocaleString("fr-FR")} pierres de prime` : ""}. Tes pertes : ${describeArmy(fight.attackerLost)}.`;
   }
   const { data, error } = await admin.rpc("apply_event", {
     p_season: seasonId,
@@ -1227,27 +1248,27 @@ async function runEventAttack(admin: SupabaseClient, seasonId: number, me: Entit
       event: e.kind,
       eventId: e.id,
       success: fight.success,
-      stolen: e.pool - pool,
+      stolen: taken,
       dealt: e.kind === "colosse" ? armyValue(fight.defenderLost) : 0,
       attackerLost: fight.attackerLost,
       defenderLost: fight.defenderLost,
     },
   });
-  const finished = (e.kind === "caravane" && pool <= 0) || (e.kind === "colosse" && armySize(army) === 0);
+  const finished = e.kind === "colosse" && armySize(army) === 0;
   return { state: after, message, settle: finished ? e.id : undefined };
 }
 
-function eventView(meId: string, state: PlayerState, ev: EventState, now: number): EventView | null {
+function eventView(meId: string, state: PlayerState, ev: EventState, now: number, rate: number): EventView | null {
   const e = ev.active;
   if (!e) {
     const info = EVENT_INFO[ev.nextKind];
     return { id: 0, kind: ev.nextKind, ...info, active: false, startsAt: ev.nextAt, endsAt: ev.nextAt, army: {}, armyLeft: 1, pool: 0, prize: 0, mine: 0, attackers: 0, chance: 0, take: 0, blocker: null };
   }
-  const defense = eventDefense(e);
+  const defense = eventDefense(e, state);
   const startValue = armyValue(e.army_start);
   const totalDealt = Object.values(e.attackers).reduce((a, b) => a + b, 0);
   let take: number;
-  if (e.kind === "caravane") take = Math.floor(Math.min(e.pool, e.prize * CARAVAN_TAKE));
+  if (e.kind === "caravane") take = Math.floor(rate * CARAVAN_PRIZE_SECONDS);
   else take = armyValue(battle(attackArmy(state), defense, seededRng(0xc0105), { attackerLevels: state.levels, defenderLevels: ev.levels }).defenderLost);
   return {
     id: e.id,
@@ -1693,14 +1714,15 @@ export async function runAction(admin: SupabaseClient, userId: string, action: G
     let message: string | undefined;
 
     if (action.type === "event_attack") {
-      const r = await runEventAttack(admin, season.id, me, current, events, now);
+      const r = await runEventAttack(admin, season.id, me, current, events, now, currentRate(me, current, now, world, flat));
       if (r === "conflict") continue;
       if (r.error) error = r.error;
       message = r.message;
       if (r.state) finalState = r.state;
       if (r.settle !== undefined) {
-        // Colosse abattu : la prime vient d'être versée, on relit l'état qui fait foi.
-        await admin.rpc("settle_event", { p_event: r.settle });
+        // Colosse abattu : 15 minutes de production pour chaque joueur qui l'a touché, puis on relit l'état qui fait foi.
+        const { data: killed } = await admin.from("events").select("*").eq("id", r.settle).maybeSingle();
+        await admin.rpc("settle_event_v2", { p_event: r.settle, p_bonus: killed ? killBonus(eventRow(killed), entities, now, world, flat) : {} });
         entities = await loadEntities(admin, season.id, userId);
         const fresh = entities.get(userId);
         if (fresh) finalState = advance(fresh.state, now, world);
@@ -1949,7 +1971,7 @@ export async function runAction(admin: SupabaseClient, userId: string, action: G
       ...info,
       alliances: [...allianceNames].map(([id, name]) => ({ id, name, size: [...entities.values()].filter((e) => e.allianceId === id).length })),
       war: warView(meNow, conflicts.wars, allianceNames),
-      event: eventView(userId, finalState, events, now),
+      event: eventView(userId, finalState, events, now, currentRate(meNow, finalState, now, worldFrom(worksite), flat)),
       fortress: fortressView(meNow, finalState, conflicts.fortress, entities, allianceNames, now, intel.get(FORTRESS_INTEL) ?? null),
       chronicle,
     };

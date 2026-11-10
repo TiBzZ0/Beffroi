@@ -123,4 +123,12 @@ export const CHANGELOG: ChangeEntry[] = [
       "🏰 Forteresse : après une prise, pas d'assaut pendant 30 minutes, le temps pour l'alliance d'y poster sa garnison.",
     ],
   },
+  {
+    id: 16,
+    date: "10 novembre",
+    items: [
+      "🐪 Caravane : chacun affronte sa propre escorte, qui vaut 60 % de son armée, et une victoire rapporte 45 minutes de sa propre production. Un assaut par caravane, et plus de limite aux quatre premiers.",
+      "🗿 Colosse : chaque assaut rapporte tout de suite 2 fois la valeur des pertes infligées. S'il tombe, chaque joueur qui l'a touché reçoit en plus 15 minutes de sa production. Le colosse en cours garde l'ancienne prime commune.",
+    ],
+  },
 ];

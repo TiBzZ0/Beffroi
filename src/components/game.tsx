@@ -1619,12 +1619,14 @@ function EventCard({ e, now, busy, onAttack, history, me }: { e: EventView; now:
         <div className="row-desc">{e.description}</div>
         <div className="row-desc army-line num">{armyIcons(e.army)}</div>
         <div className="event-bar" aria-label="Défenseurs restants">
-          <span style={{ width: `${Math.round((e.kind === "caravane" ? (e.prize > 0 ? e.pool / e.prize : 0) : e.armyLeft) * 100)}%` }} />
+          <span style={{ width: `${Math.round((e.kind === "caravane" ? Math.max(0, e.endsAt - now) / Math.max(1, e.endsAt - e.startsAt) : e.armyLeft) * 100)}%` }} />
         </div>
         <div className="row-desc num">
           {e.kind === "caravane"
-            ? `Chargement : ${formatNumber(e.pool)} / ${formatNumber(e.prize)} 🪨 · ${e.mine > 0 ? `tu as pris ${formatNumber(e.mine)} 🪨` : `un assaut réussi rapporte ${formatNumber(e.take)} 🪨`}`
-            : `Prime : ${formatNumber(e.pool)} 🪨 · ${e.attackers} combattant${e.attackers > 1 ? "s" : ""} · ta part : ${Math.round(e.mine * 100)} %`}
+            ? `${e.attackers} pillard${e.attackers > 1 ? "s" : ""} · ${e.mine > 0 ? `tu as pris ${formatNumber(e.mine)} 🪨` : `une victoire te rapporte ${formatNumber(e.take)} 🪨`}`
+            : e.pool > 0
+              ? `Prime : ${formatNumber(e.pool)} 🪨 · ${e.attackers} combattant${e.attackers > 1 ? "s" : ""} · ta part : ${Math.round(e.mine * 100)} %`
+              : `${e.attackers} combattant${e.attackers > 1 ? "s" : ""} · un assaut rapporte environ ${formatNumber(e.take * 2)} 🪨 de prime`}
         </div>
         <div className="row-desc">
           {e.blocker ?? (e.kind === "caravane" ? `${pct} % de chances de battre l'escorte.` : `Un assaut devrait faucher environ ${formatNumber(e.take)} 🪨 de son armée.`)}
@@ -1680,7 +1682,7 @@ function Chronicle({ entries, me, now, rivals, alliances = [] }: { entries: Chro
           if (d.phase === "attack") text = eventAttackText(e, me);
           else if (d.event === "caravane")
             text = (d.stolen ?? 0) > 0 ? `🐪 La caravane marchande est repartie, allégée de ${formatNumber(d.stolen ?? 0)} pierres (${shares}).` : "🐪 La caravane marchande est repartie intacte.";
-          else text = d.success ? `🗿 Le Colosse est tombé ! ${formatNumber(d.bounty ?? 0)} pierres de prime partagées (${shares}).` : "🗿 Le Colosse s'en va invaincu.";
+          else text = d.success ? `🗿 Le Colosse est tombé ! ${formatNumber(d.bounty ?? 0)} pierres versées à ceux qui l'ont touché (${shares}).` : "🗿 Le Colosse s'en va invaincu.";
         } else if (e.kind === "fortress") {
           text = e.details.success
             ? `🏰 ${who(e.actorId, e.actorName, true)} ${e.actorId === me ? "as pris" : "a pris"} la forteresse pour ${allianceName(e.details.alliance)} !`
