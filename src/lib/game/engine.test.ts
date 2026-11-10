@@ -5,6 +5,7 @@ import {
   applyClicks,
   buyGenerator,
   buyUpgrade,
+  catchUpBonus,
   clickValue,
   contribute,
   generatorCost,
@@ -184,6 +185,25 @@ describe("chantier commun", () => {
     expect(stageTarget(0, 3)).toBe(STAGES[0].basePerPlayer * 3);
     expect(stageTarget(0, 0)).toBe(STAGES[0].basePerPlayer);
     expect(stageTarget(1, 10)).toBe(STAGES[1].basePerPlayer * 10);
+  });
+});
+
+describe("coup de pouce aux joueurs distancés", () => {
+  it("rien tant que l'écart reste faible", () => {
+    expect(catchUpBonus(1000, 1000)).toBe(0);
+    expect(catchUpBonus(1000, 1900)).toBe(0);
+  });
+
+  it("grandit avec l'écart, plafonné", () => {
+    expect(catchUpBonus(1000, 10_000)).toBeCloseTo(0.3);
+    expect(catchUpBonus(1000, 100_000)).toBeCloseTo(0.6);
+    expect(catchUpBonus(1, 1e12)).toBe(0.8);
+    expect(catchUpBonus(0, 0)).toBe(0);
+  });
+
+  it("augmente la production", () => {
+    const base = withGenerators({ manoeuvre: 10 });
+    expect(productionPerSecond({ ...base, catchUp: 0.5 }, noWorld, 0)).toBeCloseTo(productionPerSecond(base, noWorld, 0) * 1.5);
   });
 });
 

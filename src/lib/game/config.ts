@@ -147,12 +147,19 @@ export interface StageDef {
   bonus: { production?: number; click?: number };
 }
 
-/** Le chantier commun : 3 étapes, chacune débloque un bonus permanent pour la saison. */
+/** Le chantier commun : 8 étapes, chacune débloque un bonus permanent pour la saison. */
 export const STAGES: readonly StageDef[] = [
   { name: "Les fondations", description: "Creuser et poser les assises du beffroi.", basePerPlayer: 50_000, bonusLabel: "Production +10 % pour tous", bonus: { production: 1.1 } },
   { name: "La tour de guet", description: "Monter les murs de pierre jusqu'au chemin de ronde.", basePerPlayer: 5_000_000, bonusLabel: "Coups de marteau ×2 pour tous", bonus: { click: 2 } },
   { name: "La chambre des cloches", description: "Couronner la tour et hisser les cloches.", basePerPlayer: 500_000_000, bonusLabel: "Production +25 % pour tous", bonus: { production: 1.25 } },
+  { name: "Les gargouilles", description: "Sculpter les gardiens de pierre aux quatre coins.", basePerPlayer: 20_000_000_000, bonusLabel: "Production +10 % pour tous", bonus: { production: 1.1 } },
+  { name: "Le grand bourdon", description: "Fondre la plus grosse cloche du royaume.", basePerPlayer: 150_000_000_000, bonusLabel: "Coups de marteau ×2 pour tous", bonus: { click: 2 } },
+  { name: "La flèche", description: "Élancer la flèche au-dessus des nuages.", basePerPlayer: 1_000_000_000_000, bonusLabel: "Production +15 % pour tous", bonus: { production: 1.15 } },
+  { name: "L'horloge astronomique", description: "Une horloge qui suit le soleil, la lune et les saisons.", basePerPlayer: 7_000_000_000_000, bonusLabel: "Production +20 % pour tous", bonus: { production: 1.2 } },
+  { name: "Le beffroi légendaire", description: "On en parlera dans tout le royaume pendant des siècles.", basePerPlayer: 50_000_000_000_000, bonusLabel: "Production +25 % pour tous", bonus: { production: 1.25 } },
 ];
+/** Un seigneur bâtisseur ne verse jamais plus que cette part de l'étape en cours d'un coup. */
+export const LORD_GIFT_MAX_SHARE = 0.25;
 
 export const STAGE_BASES = STAGES.map((s) => s.basePerPlayer);
 
@@ -375,3 +382,22 @@ export const LORD_ARMY: Record<LordKey, { power: number; troopShare: number; tro
 };
 /** Budget minimal d'une armée de seigneur, pour qu'il ne soit jamais sans défense. */
 export const LORD_MIN_BUDGET = 1_500;
+
+// ---------------------------------------------------------------------------
+// Coup de pouce aux joueurs distancés
+// ---------------------------------------------------------------------------
+
+/**
+ * Un joueur qui a produit au moins CATCH_UP_MIN_GAP fois moins que le premier reçoit un bonus
+ * de production et de défense : +CATCH_UP_PER_DECADE par facteur 10 d'écart, CATCH_UP_MAX au plus.
+ * Exemple : 10× derrière = +30 %, 100× = +60 %, 1 000× et plus = +80 %.
+ */
+export const CATCH_UP_MIN_GAP = 2;
+export const CATCH_UP_PER_DECADE = 0.3;
+export const CATCH_UP_MAX = 0.8;
+
+/**
+ * Seigneurs difficiles et redoutables : leur armée suit aussi le joueur le plus fort,
+ * pour rester une menace. Étalon = max(médiane, armée du plus fort × ce facteur).
+ */
+export const STRONG_LORD_TOP_SHARE = 0.25;

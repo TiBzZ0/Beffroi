@@ -8,6 +8,8 @@ import {
   LORDS,
   LORD_ARMY,
   LORD_MIN_BUDGET,
+  LORD_GIFT_MAX_SHARE,
+  STRONG_LORD_TOP_SHARE,
   REVENGE_MS,
   SPY_INTEL_MS,
   MAX_ALLIANCE_SIZE,
@@ -22,6 +24,7 @@ import {
   COMBATANTS,
   SEASON_DAYS,
   STAGE_BASES,
+  STAGES,
   DEFENSE_IDS,
   UNIT_IDS,
   type GeneratorId,
@@ -45,6 +48,7 @@ import {
   spyDetectChance,
 
   productionPerSecond,
+  catchUpBonus,
   raidArmies,
   raidBlocker,
   buyArmy,
@@ -270,6 +274,13 @@ async function loadEntities(admin: SupabaseClient, seasonId: number, userId: str
   const { data: fort } = await admin.from("fortresses").select("holder").eq("season_id", seasonId).maybeSingle();
   const holder = (fort?.holder as number | null | undefined) ?? null;
   if (holder !== null) for (const e of entities.values()) if (e.allianceId === holder) e.state = { ...e.state, fortress: true };
+  // Coup de pouce aux joueurs très distancés par le premier.
+  const humans = [...entities.values()].filter((e) => !e.isLord);
+  const leader = Math.max(0, ...humans.map((e) => e.state.totalProduced));
+  for (const e of humans) {
+    const catchUp = catchUpBonus(e.state.totalProduced, leader);
+    if (catchUp > 0) e.state = { ...e.state, catchUp };
+  }
   return entities;
 }
 
@@ -291,19 +302,37 @@ function median(values: number[]): number {
   return v.length % 2 ? v[(v.length - 1) / 2] : (v[v.length / 2 - 1] + v[v.length / 2]) / 2;
 }
 
-/** Armée des seigneurs : elle suit la médiane des vrais joueurs, selon leur caractère. */
-/** Valeur médiane des troupes des vrais joueurs : l'étalon des armées des seigneurs et de la forteresse. */
-function troopBudget(entities: Map<string, Entity>): number {
-  const humans = [...entities.values()].filter((e) => !e.isLord);
-  return Math.max(LORD_MIN_BUDGET, median(humans.map((e) => armyValue(cleanArmy({ ...e.state.troops })))));
+/** Valeur des troupes de chaque vrai joueur. */
+function humanArmies(entities: Map<string, Entity>): number[] {
+  return [...entities.values()].filter((e) => !e.isLord).map((e) => armyValue(cleanArmy({ ...e.state.troops })));
 }
 
+/** Valeur médiane des troupes des vrais joueurs : l'étalon de la forteresse et des seigneurs faciles. */
+function troopBudget(entities: Map<string, Entity>): number {
+  return Math.max(LORD_MIN_BUDGET, median(humanArmies(entities)));
+}
+
+/**
+ * Étalon de chaque niveau de seigneur :
+ * - faciles : médiane de tous les joueurs (les petits peuvent toujours piller) ;
+ * - moyens : médiane des seuls joueurs qui ont une armée ;
+ * - difficiles et redoutables : au moins une part de l'armée du plus fort, pour rester une menace.
+ */
+function lordBudgets(entities: Map<string, Entity>): Record<1 | 2 | 3 | 4, number> {
+  const all = humanArmies(entities);
+  const easy = Math.max(LORD_MIN_BUDGET, median(all));
+  const medium = Math.max(easy, median(all.filter((v) => v > 0)));
+  const strong = Math.max(medium, Math.max(0, ...all) * STRONG_LORD_TOP_SHARE);
+  return { 1: easy, 2: medium, 3: strong, 4: strong };
+}
+
+/** Armée des seigneurs : elle suit les vrais joueurs, selon leur niveau et leur caractère. */
 function lordArmies(entities: Map<string, Entity>): Map<string, { attack: Army; defense: Army }> {
-  const budget = troopBudget(entities);
+  const budgets = lordBudgets(entities);
   const out = new Map<string, { attack: Army; defense: Army }>();
   for (const l of LORDS) {
     const taste = LORD_ARMY[l.key];
-    const total = budget * taste.power;
+    const total = budgets[l.difficulty] * taste.power;
     const attack = armyFromBudget(total * taste.troopShare, taste.troops);
     const forts = armyFromBudget(total * (1 - taste.troopShare), taste.forts);
     out.set(l.id, { attack, defense: { ...attack, ...forts, garde: GUARDS_PER_DOMAIN } });
@@ -352,7 +381,9 @@ async function tickLords(admin: SupabaseClient, season: SeasonView, entities: Ma
 
     // Don au chantier (Prieure d'Aubeval).
     if (lord.contribution && me.nextContribAt !== null && me.nextContribAt <= now) {
-      const amount = Math.floor(state.stone * lord.contribution.share);
+      // Jamais plus d'un quart de l'étape en cours, et rien une fois le beffroi achevé.
+      const room = worksite.stage < STAGES.length ? worksite.target * LORD_GIFT_MAX_SHARE : 0;
+      const amount = Math.floor(Math.min(state.stone * lord.contribution.share, room));
       const r = amount >= 1 ? contribute(state, amount) : null;
       const next = r?.ok ? r.value : state;
       const { data } = await admin.rpc("commit_state", {
@@ -961,7 +992,7 @@ export async function runAction(admin: SupabaseClient, userId: string, action: G
       entities = await loadEntities(admin, season.id, userId);
       conflicts = await loadConflicts(admin, season.id, now);
       // Prendre la forteresse donne tout de suite le bonus.
-      finalState = { ...finalState, fortress: entities.get(userId)?.state.fortress };
+      finalState = { ...finalState, fortress: entities.get(userId)?.state.fortress, catchUp: entities.get(userId)?.state.catchUp };
     } else if (ALLIANCE_ACTIONS.has(action.type)) {
       const r = await runAllianceAction(admin, season.id, me, current, entities, action as AllianceAction, (e) => advanceEntity(e, now, world, flat));
       if (r === "conflict") continue;

@@ -36,6 +36,9 @@ import {
   MIN_EXPOSED_SHARE,
   SHIELD_MS,
   FORTRESS_PRODUCTION_BONUS,
+  CATCH_UP_MAX,
+  CATCH_UP_MIN_GAP,
+  CATCH_UP_PER_DECADE,
   LORD_SHIELD_MS,
   STAGES,
   UNITS,
@@ -80,6 +83,8 @@ export interface PlayerState {
   stationed: Record<string, Partial<Record<UnitId, number>>>;
   /** Son alliance tient la forteresse (bonus de production). Fixé par le serveur, jamais enregistré. */
   fortress?: boolean;
+  /** Coup de pouce aux joueurs distancés (0.3 = +30 % de production et de défense). Fixé par le serveur, jamais enregistré. */
+  catchUp?: number;
 }
 
 /** Ce que le joueur doit savoir du monde pour calculer sa production. */
@@ -151,9 +156,19 @@ export function generatorRate(state: PlayerState, id: GeneratorId): number {
   return rate;
 }
 
-/** Multiplicateur global de production (améliorations, chantier, héritage). */
+/**
+ * Coup de pouce d'un joueur selon son retard sur le premier (pierre produite depuis le début de la saison).
+ * Renvoie 0 tant que l'écart reste sous CATCH_UP_MIN_GAP.
+ */
+export function catchUpBonus(produced: number, leaderProduced: number): number {
+  const gap = leaderProduced / Math.max(1, produced);
+  if (!(gap >= CATCH_UP_MIN_GAP)) return 0;
+  return Math.min(CATCH_UP_MAX, CATCH_UP_PER_DECADE * Math.log10(gap));
+}
+
+/** Multiplicateur global de production (améliorations, chantier, héritage, coup de pouce). */
 export function productionMultiplier(state: PlayerState, world: WorldState, stagesDone: number): number {
-  let m = (1 + (world.legacyBonus ?? 0)) * (state.fortress ? FORTRESS_PRODUCTION_BONUS : 1);
+  let m = (1 + (world.legacyBonus ?? 0)) * (state.fortress ? FORTRESS_PRODUCTION_BONUS : 1) * (1 + (state.catchUp ?? 0));
   for (const u of ownedUpgrades(state)) {
     if (u.effect.kind === "production") m *= u.effect.multiplier;
   }
@@ -523,7 +538,8 @@ export function raidArmies(attacker: PlayerState, victim: PlayerState, ctx: Pick
   return {
     attack: ctx.attackerArmy ?? attackArmy(attacker),
     defense: ctx.defenderArmy ?? defenseArmy(victim),
-    attackBonus: hasRevenge(attacker, ctx.victimId, ctx.now) ? REVENGE_ATTACK_BONUS : 1,
+    // Le coup de pouce de la victime rend ses défenseurs plus durs à abattre.
+    attackBonus: (hasRevenge(attacker, ctx.victimId, ctx.now) ? REVENGE_ATTACK_BONUS : 1) / (1 + (victim.catchUp ?? 0)),
   };
 }
 
