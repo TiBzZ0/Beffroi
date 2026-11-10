@@ -48,6 +48,8 @@ export interface RivalView {
   totalPlundered: number;
   /** Joueurs : dernière activité (heure serveur). Les seigneurs n'en ont pas. */
   lastSeen?: number;
+  /** Titres gagnés à la saison précédente. */
+  titles?: string[];
   revenge: boolean;
   /** Raison pour laquelle on ne peut pas le raider maintenant, ou null. */
   blocker: string | null;
@@ -108,6 +110,8 @@ export interface GameSnapshot {
   war: WarView | null;
   fortress: FortressView;
   event: EventView | null;
+  /** Mes titres gagnés à la saison précédente. */
+  myTitles: string[];
   /** Fournie lors des synchronisations et des raids ; sinon le client garde la précédente. */
   chronicle?: ChronicleEntry[];
 }
@@ -118,9 +122,29 @@ export interface LeaderboardRow {
   total: number;
 }
 
+export type HallCategory = "builder" | "plunderer" | "producer" | "colossus" | "caravan" | "fortress" | "war";
+
+/** Un classement : joueurs ou alliances, du premier au dernier. */
+export interface Standing {
+  category: HallCategory;
+  rows: { id: string; name: string; value: number }[];
+}
+
+/** Podiums d'une saison terminée. */
+export interface SeasonHall {
+  season: number;
+  endsAt: number;
+  podiums: Standing[];
+}
+
 export interface Leaderboards {
   contributors: LeaderboardRow[];
   plunderers: LeaderboardRow[];
+  /** Saison en cours, toutes catégories. */
+  standings: Standing[];
+  /** Saisons terminées, la plus récente d'abord. */
+  hall: SeasonHall[];
+  seasonEndsAt: number;
 }
 
 export type GameAction =

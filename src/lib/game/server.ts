@@ -14,6 +14,8 @@ import {
   SPY_INTEL_MS,
   MAX_ALLIANCE_SIZE,
   FORTRESS_NAME,
+  HALL,
+  HALL_PODIUM,
   EVENT_GAP_MS,
   CARAVAN_MS,
   CARAVAN_PRIZE_SECONDS,
@@ -87,6 +89,9 @@ import {
   type FortressView,
   type WarView,
   type EventView,
+  type HallCategory,
+  type SeasonHall,
+  type Standing,
 } from "./types";
 import { armyFromBudget, armySize, armyValue, battle, cleanArmy, estimateChance, seededRng, type Army } from "./battle";
 import { recordContribution, topContributors } from "@/lib/redis";
@@ -1360,12 +1365,14 @@ export async function runAction(admin: SupabaseClient, userId: string, action: G
     const meNow = entities.get(userId) ?? me;
     // Les dernières lectures partent ensemble (les noms d'alliance ne changent qu'avec une action d'alliance).
     const namesP = ALLIANCE_ACTIONS.has(action.type) || CONFLICT_ACTIONS.has(action.type) ? loadAllianceNames(admin, season.id) : Promise.resolve(allianceNames);
-    const [intel, names, info, chronicle] = await Promise.all([
+    const [intel, names, info, chronicle, hall] = await Promise.all([
       loadIntel(admin, season.id, userId, now),
       namesP,
       namesP.then((n) => allianceInfo(admin, season.id, meNow, finalState, entities, n)),
       wantsChronicle ? loadChronicle(admin, season.id, entities) : Promise.resolve(undefined),
+      loadHall(admin),
     ]);
+    const titles = titlesFrom(hall);
     allianceNames = names;
     const snapshot: GameSnapshot = {
       serverNow: now,
@@ -1374,7 +1381,8 @@ export async function runAction(admin: SupabaseClient, userId: string, action: G
       state: finalState,
       worksite,
       season,
-      rivals: rivalsFor(meNow, finalState, entities, worldFrom(worksite), flat, now, intel, allianceNames, conflicts.wars),
+      rivals: rivalsFor(meNow, finalState, entities, worldFrom(worksite), flat, now, intel, allianceNames, conflicts.wars).map((r) => (titles.has(r.id) ? { ...r, titles: titles.get(r.id) } : r)),
+      myTitles: titles.get(userId) ?? [],
       ...info,
       alliances: [...allianceNames].map(([id, name]) => ({ id, name, size: [...entities.values()].filter((e) => e.allianceId === id).length })),
       war: warView(meNow, conflicts.wars, allianceNames),
@@ -1388,28 +1396,128 @@ export async function runAction(admin: SupabaseClient, userId: string, action: G
 }
 
 /** Classements de la saison : contributeurs au chantier et pillards (seigneurs exclus). */
+// ---------------------------------------------------------------------------
+// Classements et panthéon
+// ---------------------------------------------------------------------------
+
+/** Classements d'une saison dans toutes les catégories, arrêtés à `until` (fin de saison ou maintenant). */
+async function seasonStandings(admin: SupabaseClient, seasonId: number, until: number): Promise<Standing[]> {
+  const [{ data: players }, { data: events }, { data: captures }, { data: wars }, { data: alliances }] = await Promise.all([
+    admin.from("player_states").select("user_id, total_contributed, total_plundered, total_produced, profiles(username, is_bot)").eq("season_id", seasonId),
+    admin.from("events").select("kind, attackers").eq("season_id", seasonId),
+    admin.from("chronicle").select("created_at, details").eq("season_id", seasonId).eq("kind", "fortress").order("created_at", { ascending: true }),
+    admin.from("wars").select("winner").eq("season_id", seasonId).eq("settled", true).not("winner", "is", null),
+    admin.from("alliances").select("id, name").eq("season_id", seasonId),
+  ]);
+  type Row = { user_id: string; total_contributed: number; total_plundered: number; total_produced: number; profiles: { username: string; is_bot: boolean } | null };
+  const humans = ((players ?? []) as unknown as Row[]).filter((r) => r.profiles && !r.profiles.is_bot);
+  const names = new Map(humans.map((r) => [r.user_id, r.profiles!.username]));
+  const allianceNames = new Map((alliances ?? []).map((a) => [String(a.id), a.name as string]));
+  const totals: Record<HallCategory, Map<string, number>> = {
+    builder: new Map(humans.map((r) => [r.user_id, Number(r.total_contributed ?? 0)])),
+    plunderer: new Map(humans.map((r) => [r.user_id, Number(r.total_plundered ?? 0)])),
+    producer: new Map(humans.map((r) => [r.user_id, Number(r.total_produced ?? 0)])),
+    colossus: new Map(),
+    caravan: new Map(),
+    fortress: new Map(),
+    war: new Map(),
+  };
+  for (const e of events ?? []) {
+    const m = e.kind === "colosse" ? totals.colossus : totals.caravan;
+    for (const [id, v] of Object.entries((e.attackers ?? {}) as Record<string, number>)) m.set(id, (m.get(id) ?? 0) + Number(v));
+  }
+  // Temps de garde de la forteresse : d'une prise réussie à la suivante (ou à la fin).
+  const held = ((captures ?? []) as { created_at: string; details: { success?: boolean; alliance?: number } }[]).filter((c) => c.details?.success && c.details.alliance != null);
+  held.forEach((c, i) => {
+    const from = ms(c.created_at);
+    const to = Math.min(until, i + 1 < held.length ? ms(held[i + 1].created_at) : until);
+    const id = String(c.details.alliance);
+    if (to > from) totals.fortress.set(id, (totals.fortress.get(id) ?? 0) + (to - from));
+  });
+  for (const w of wars ?? []) totals.war.set(String(w.winner), (totals.war.get(String(w.winner)) ?? 0) + 1);
+
+  return HALL.map((h) => ({
+    category: h.id,
+    rows: [...totals[h.id]]
+      .filter(([id, v]) => v > 0 && (h.alliance ? allianceNames.has(id) : names.has(id)))
+      .map(([id, value]) => ({ id, name: (h.alliance ? allianceNames.get(id) : names.get(id)) ?? "?", value }))
+      .sort((a, b) => b.value - a.value),
+  }));
+}
+
+/** Fige le podium des saisons terminées qui ne l'ont pas encore été. */
+async function closeEndedSeasons(admin: SupabaseClient, now: number): Promise<void> {
+  const { data: ended } = await admin.from("seasons").select("id, ends_at").eq("hall_closed", false).lte("ends_at", iso(now));
+  for (const season of ended ?? []) {
+    const standings = await seasonStandings(admin, Number(season.id), ms(season.ends_at as string));
+    const rows = standings.flatMap((st) =>
+      st.rows.slice(0, HALL_PODIUM).map((r, i) => ({
+        season_id: season.id,
+        category: st.category,
+        rank: i + 1,
+        user_id: HALL.find((h) => h.id === st.category)?.alliance ? null : r.id,
+        name: r.name,
+        value: r.value,
+      })),
+    );
+    if (rows.length > 0) await admin.from("season_hall").upsert(rows, { onConflict: "season_id,category,rank", ignoreDuplicates: true });
+    await admin.from("seasons").update({ hall_closed: true }).eq("id", season.id);
+  }
+}
+
+/** Panthéon, gardé en mémoire une minute (il ne change qu'en fin de saison). */
+let hallCache: { hall: SeasonHall[]; until: number } | null = null;
+
+async function loadHall(admin: SupabaseClient): Promise<SeasonHall[]> {
+  const now = Date.now();
+  if (hallCache && hallCache.until > now) return hallCache.hall;
+  await closeEndedSeasons(admin, now);
+  const { data } = await admin.from("season_hall").select("season_id, category, rank, user_id, name, value, seasons(number, ends_at)").order("season_id", { ascending: false }).order("rank");
+  type Row = { season_id: number; category: HallCategory; rank: number; user_id: string | null; name: string; value: number; seasons: { number: number; ends_at: string } | null };
+  const bySeason = new Map<number, SeasonHall>();
+  for (const r of (data ?? []) as unknown as Row[]) {
+    let h = bySeason.get(r.season_id);
+    if (!h) {
+      h = { season: r.seasons?.number ?? 0, endsAt: ms(r.seasons?.ends_at), podiums: HALL.map((c) => ({ category: c.id, rows: [] })) };
+      bySeason.set(r.season_id, h);
+    }
+    h.podiums.find((p) => p.category === r.category)?.rows.push({ id: r.user_id ?? "", name: r.name, value: Number(r.value) });
+  }
+  const hall = [...bySeason.values()].sort((a, b) => b.season - a.season);
+  hallCache = { hall, until: now + 60_000 };
+  return hall;
+}
+
+/** Titres gagnés à la dernière saison terminée : joueur → « 🏗️ Grand bâtisseur (saison 0) ». */
+function titlesFrom(hall: SeasonHall[]): Map<string, string[]> {
+  const out = new Map<string, string[]>();
+  const last = hall[0];
+  if (!last) return out;
+  for (const p of last.podiums) {
+    const def = HALL.find((h) => h.id === p.category);
+    const first = p.rows[0];
+    if (!def || def.alliance || !first?.id) continue;
+    out.set(first.id, [...(out.get(first.id) ?? []), `${def.icon} ${def.title} (saison ${last.season})`]);
+  }
+  return out;
+}
+
 export async function getLeaderboards(admin: SupabaseClient, limit = 20): Promise<Leaderboards> {
   const season = await getActiveSeason(admin);
-  const { data } = await admin
-    .from("player_states")
-    .select("user_id, total_contributed, total_plundered, profiles(username, is_bot)")
-    .eq("season_id", season.id);
-  type Row = { user_id: string; total_contributed: number; total_plundered: number; profiles: { username: string; is_bot: boolean } | null };
-  const humans = ((data ?? []) as unknown as Row[]).filter((r) => r.profiles && !r.profiles.is_bot);
-  const names = new Map(humans.map((r) => [r.user_id, r.profiles!.username]));
-
-  let contributors: { userId: string; total: number }[] | null = await topContributors(season.id, limit);
-  contributors = (contributors ?? humans.map((r) => ({ userId: r.user_id, total: Number(r.total_contributed) })))
-    .filter((r) => names.has(r.userId) && r.total > 0)
-    .sort((a, b) => b.total - a.total)
-    .slice(0, limit);
-  const plunderers = humans
-    .map((r) => ({ userId: r.user_id, total: Number(r.total_plundered ?? 0) }))
-    .filter((r) => r.total > 0)
-    .sort((a, b) => b.total - a.total)
-    .slice(0, limit);
-
-  const withNames = (rows: { userId: string; total: number }[]): LeaderboardRow[] => rows.map((r) => ({ ...r, username: names.get(r.userId) ?? "Inconnu" }));
-  return { contributors: withNames(contributors), plunderers: withNames(plunderers) };
+  const [standings, hall, redisTop] = await Promise.all([seasonStandings(admin, season.id, Date.now()), loadHall(admin), topContributors(season.id, limit)]);
+  const rowsOf = (c: HallCategory) => standings.find((st) => st.category === c)?.rows ?? [];
+  const toBoard = (rows: { id: string; name: string; value: number }[]): LeaderboardRow[] => rows.slice(0, limit).map((r) => ({ userId: r.id, username: r.name, total: r.value }));
+  // Le compteur Redis des dons, s'il existe, est plus frais que la base.
+  const builderNames = new Map(rowsOf("builder").map((r) => [r.id, r.name]));
+  const contributors = redisTop
+    ? redisTop.filter((r) => builderNames.has(r.userId) && r.total > 0).map((r) => ({ userId: r.userId, username: builderNames.get(r.userId)!, total: r.total }))
+    : toBoard(rowsOf("builder"));
+  return {
+    contributors,
+    plunderers: toBoard(rowsOf("plunderer")),
+    standings: standings.map((st) => ({ ...st, rows: st.rows.slice(0, limit) })),
+    hall,
+    seasonEndsAt: season.endsAt,
+  };
 }
 

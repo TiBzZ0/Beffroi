@@ -5,6 +5,7 @@ import { signOut } from "@/app/(auth)/actions";
 import {
   CATEGORY_LABELS,
   MAX_ALLIANCE_SIZE,
+  HALL,
   ONLINE_MS,
   DIFFICULTY_LABELS,
   COMBATANTS,
@@ -110,6 +111,11 @@ function TopBar({ snap, now }: { snap: GameSnapshot; now: number }) {
       <div className="topbar-meta">
         <div>
           <strong>{snap.username}</strong>
+          {(snap.myTitles ?? []).map((t) => (
+            <span key={t} className="badge badge-title">
+              {t}
+            </span>
+          ))}
           <br />
           Saison {snap.season.number} · jour {day}/14
           <br />
@@ -395,19 +401,81 @@ function Worksite({ snap, live, run }: { snap: GameSnapshot; live: PlayerState; 
 }
 
 function Ranking({ boards, userId }: { boards: ReturnType<typeof useLeaderboard>; userId: string }) {
+  const [view, setView] = useState<"saison" | "pantheon">("saison");
   if (!boards) return <p className="empty">On consulte les registres…</p>;
+  const standings = boards.standings ?? [];
+  const hall = boards.hall ?? [];
   return (
     <>
-      <h3 className="section-title">🏗️ Bâtisseurs du chantier</h3>
-      <Board rows={boards.contributors} userId={userId} empty="Personne n'a encore versé de pierre. Sois le premier !" />
-      <h3 className="section-title">⚔️ Pillards</h3>
-      <Board rows={boards.plunderers} userId={userId} empty="Aucun pillage pour l'instant." />
-      <p className="note">Classements de la saison en cours. Les seigneurs voisins n&apos;y figurent pas.</p>
+      <div className="subtabs" role="group" aria-label="Classements">
+        <button className="btn" aria-pressed={view === "saison"} onClick={() => setView("saison")}>
+          Saison en cours
+        </button>
+        <button className="btn" aria-pressed={view === "pantheon"} onClick={() => setView("pantheon")}>
+          Panthéon ({hall.length})
+        </button>
+      </div>
+      {view === "saison" && (
+        <>
+          <p className="note">
+            À la fin de la saison, le podium de chaque catégorie entre au Panthéon, et chaque premier porte son titre à côté de son nom pendant toute la
+            saison suivante. Les seigneurs voisins n&apos;y figurent pas.
+          </p>
+          {HALL.map((h) => {
+            const rows = h.id === "builder" ? boards.contributors.map((r) => ({ id: r.userId, name: r.username, value: r.total })) : (standings.find((st) => st.category === h.id)?.rows ?? []);
+            return (
+              <div key={h.id}>
+                <h3 className="section-title">
+                  {h.icon} {h.label}
+                  <span className="hall-title"> · titre : {h.title}</span>
+                </h3>
+                <Board rows={rows.map((r) => ({ userId: r.id, username: r.name, total: r.value }))} userId={userId} empty="Personne pour l'instant." unit={h.unit} />
+              </div>
+            );
+          })}
+        </>
+      )}
+      {view === "pantheon" &&
+        (hall.length === 0 ? (
+          <p className="empty">Aucune saison terminée pour l&apos;instant. Le premier podium sera gravé à la fin de cette saison.</p>
+        ) : (
+          hall.map((season) => (
+            <div key={season.season} className="hall-season">
+              <h3 className="section-title">
+                Saison {season.season} · terminée le {new Date(season.endsAt).toLocaleDateString("fr-FR")}
+              </h3>
+              <ul className="hall-list">
+                {HALL.map((h) => {
+                  const rows = season.podiums.find((p) => p.category === h.id)?.rows ?? [];
+                  if (rows.length === 0) return null;
+                  return (
+                    <li key={h.id}>
+                      <strong>
+                        {h.icon} {h.title}
+                      </strong>{" "}
+                      {rows.map((r, i) => (
+                        <span key={i} className={r.id === userId ? "me" : undefined}>
+                          {["🥇", "🥈", "🥉"][i]} {r.name} ({formatValue(r.value, h.unit)}){" "}
+                        </span>
+                      ))}
+                    </li>
+                  );
+                })}
+              </ul>
+            </div>
+          ))
+        ))}
     </>
   );
 }
 
-function Board({ rows, userId, empty }: { rows: { userId: string; username: string; total: number }[]; userId: string; empty: string }) {
+function formatValue(v: number, unit: "stone" | "time" | "count"): string {
+  if (unit === "time") return duration(v);
+  if (unit === "count") return String(v);
+  return formatNumber(v);
+}
+
+function Board({ rows, userId, empty, unit = "stone" }: { rows: { userId: string; username: string; total: number }[]; userId: string; empty: string; unit?: "stone" | "time" | "count" }) {
   if (rows.length === 0) return <p className="empty">{empty}</p>;
   const medals = ["🥇", "🥈", "🥉"];
   return (
@@ -416,7 +484,7 @@ function Board({ rows, userId, empty }: { rows: { userId: string; username: stri
         <li key={r.userId} className={r.userId === userId ? "me" : undefined}>
           <span className="rank">{medals[i] ?? i + 1}</span>
           <span>{r.username}</span>
-          <span className="num">{formatNumber(r.total)}</span>
+          <span className="num">{formatValue(r.total, unit)}</span>
         </li>
       ))}
     </ol>
@@ -614,6 +682,11 @@ function RivalRow({
           {r.revenge && <span className="badge badge-revenge">revanche !</span>}
           {r.allianceName && <span className="badge">🤝 {r.allianceName}</span>}
           {r.atWar && <span className="badge badge-revenge">⚔️ en guerre</span>}
+          {(r.titles ?? []).map((t) => (
+            <span key={t} className="badge badge-title">
+              {t}
+            </span>
+          ))}
           <Presence lastSeen={r.lastSeen} now={now} />
         </div>
         <div className="row-desc num">
