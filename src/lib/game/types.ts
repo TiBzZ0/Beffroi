@@ -62,6 +62,18 @@ export interface RivalView {
   blocker: string | null;
 }
 
+/** B3 : ce qui s'est passé pendant une absence d'au moins 30 minutes. */
+export interface AwaySummary {
+  since: number;
+  produced: number;
+  tithe: number;
+  raidsLost: { by: string; stolen: number; troops: Record<string, number>; buildings: Record<string, number> }[];
+  raidsRepelled: string[];
+  sabotages: { by: string; success: boolean }[];
+  research: { id: string; levels: number }[];
+  stages: number[];
+}
+
 export interface ChronicleEntry {
   id: number;
   at: number;
@@ -119,6 +131,8 @@ export interface GameSnapshot {
   event: EventView | null;
   /** Mes titres gagnés à la saison précédente. */
   myTitles: string[];
+  /** Résumé de l'absence, envoyé une seule fois au retour du joueur. */
+  away?: AwaySummary;
   /** Écus du joueur (monnaie de profil, dépensable dès la saison 1). */
   ecus: number;
   /** Fournie lors des synchronisations et des raids ; sinon le client garde la précédente. */

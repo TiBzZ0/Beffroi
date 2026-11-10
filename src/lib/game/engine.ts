@@ -134,6 +134,8 @@ export interface PlayerState {
   donorTiers: number;
   /** Couvre-feu (C2) : début de la plage de 8 h en minutes UTC, et changement en attente. */
   curfew: Curfew;
+  /** Compteurs relevés au dernier passage du joueur (résumé « pendant ton absence »). Fixé par le serveur. */
+  seen?: { produced: number; contributed: number; levels: Levels };
   /** Le joueur a déjà réglé sa dîme (sinon on lui montre le bandeau « Règle ta dîme »). */
   titheSet: boolean;
   /** Son alliance tient la forteresse (bonus de production). Fixé par le serveur, jamais enregistré. */

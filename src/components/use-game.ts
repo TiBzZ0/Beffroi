@@ -4,7 +4,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { MAX_CLICKS_PER_SECOND } from "@/lib/game/config";
 import { advance, buyAcademy, buyArmy, buyGenerator, buyUpgrade, clickValue, stagesDoneAt, setTithe, startResearch, type PlayerState } from "@/lib/game/engine";
 import type { GeneratorId } from "@/lib/game/config";
-import { worksiteFromRow, worldFrom, type ActionResponse, type GameAction, type GameSnapshot, type Leaderboards } from "@/lib/game/types";
+import { worksiteFromRow, worldFrom, type ActionResponse, type AwaySummary, type GameAction, type GameSnapshot, type Leaderboards } from "@/lib/game/types";
 import { getBrowserClient } from "@/lib/supabase/client";
 
 const CLICK_FLUSH_MS = 3_000;
@@ -25,6 +25,7 @@ function rivalSignature(row: Record<string, unknown>): string {
 export function useGame() {
   const [snap, setSnap] = useState<GameSnapshot | null>(null);
   const [toast, setToast] = useState<string | null>(null);
+  const [away, setAway] = useState<AwaySummary | null>(null);
   const snapRef = useRef<GameSnapshot | null>(null);
   const offset = useRef(0);
   const pending = useRef(0);
@@ -58,6 +59,7 @@ export function useGame() {
     }
     snapRef.current = next;
     setSnap(next);
+    if (s.away) setAway(s.away);
   }, []);
 
   const post = useCallback(async (action: GameAction): Promise<ActionResponse> => {
@@ -309,7 +311,7 @@ export function useGame() {
     };
   }, [seasonId, run, showToast]);
 
-  return { snap, toast, run, click, predictedStone, serverNow, watchRivals, pendingClicks: () => pending.current + inflight.current };
+  return { snap, toast, away, dismissAway: () => setAway(null), run, click, predictedStone, serverNow, watchRivals, pendingClicks: () => pending.current + inflight.current };
 }
 
 /** Classement des contributeurs, rafraîchi quand le chantier avance. */

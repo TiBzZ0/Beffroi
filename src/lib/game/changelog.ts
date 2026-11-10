@@ -50,4 +50,11 @@ export const CHANGELOG: ChangeEntry[] = [
       "🌙 Couvre-feu : dans Raids › Armée, choisis une plage de 8 heures par jour pendant laquelle tu ne peux ni attaquer ni être attaqué, ni saboter ni être saboté, seigneurs et guerre compris. La production et la dîme continuent. Un changement prend effet 24 heures plus tard. Une lune 🌙 signale les joueurs en couvre-feu.",
     ],
   },
+  {
+    id: 6,
+    date: "10 novembre",
+    items: [
+      "🌄 Pendant ton absence : après 30 minutes ou plus loin du jeu, un résumé t'attend à ton retour (pierre produite, dîme versée, raids subis et repoussés, sabotages, recherches terminées, étapes franchies, événement en cours).",
+    ],
+  },
 ];

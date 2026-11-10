@@ -57,7 +57,7 @@ import {
   type PlayerState,
 } from "@/lib/game/engine";
 import { formatNumber, formatRate } from "@/lib/game/format";
-import { worldFrom, type AllianceSummary, type ChronicleEntry, type EventView, type GameSnapshot, type RivalView } from "@/lib/game/types";
+import { worldFrom, type AwaySummary, type AllianceSummary, type ChronicleEntry, type EventView, type GameSnapshot, type RivalView } from "@/lib/game/types";
 import { useGame, useLeaderboard, usePush, useTick } from "./use-game";
 import { CHANGELOG } from "@/lib/game/changelog";
 
@@ -90,6 +90,7 @@ export function Game({ userId }: { userId: string }) {
   return (
     <div className="game">
       <WhatsNew />
+      {game.away && <AwayModal away={game.away} event={snap.event} onClose={game.dismissAway} />}
       <TopBar snap={snap} now={now} />
       <div className="layout">
         <Hero snap={snap} rate={rate} clickGain={clickValue(live, world, stagesDone)} game={game} />
@@ -122,6 +123,41 @@ export function Game({ userId }: { userId: string }) {
 }
 
 /** Panneau « Ce qui change » : les nouvelles règles, une fois à la connexion suivante. */
+/** B3 : ce qui s'est passé pendant l'absence (30 minutes ou plus). */
+function AwayModal({ away, event, onClose }: { away: AwaySummary; event: EventView | null | undefined; onClose: () => void }) {
+  const lines: string[] = [];
+  lines.push(`⛏️ Tes ateliers ont produit ${formatNumber(away.produced)} pierres.`);
+  if (away.tithe >= 1) lines.push(`⛪ Ta dîme a versé ${formatNumber(away.tithe)} pierres au chantier.`);
+  for (const r of away.raidsLost) {
+    const troops = Object.values(r.troops).reduce((a, b) => a + b, 0);
+    const buildings = Object.values(r.buildings).reduce((a, b) => a + b, 0);
+    lines.push(
+      `⚔️ ${r.by} t'a pillé ${formatNumber(r.stolen)} pierres${troops ? `, ${formatNumber(troops)} troupe${troops > 1 ? "s" : ""} et fortification${troops > 1 ? "s" : ""} tombées` : ""}${buildings ? `, ${buildings} bâtiment${buildings > 1 ? "s" : ""} en ruine` : ""}.`,
+    );
+  }
+  if (away.raidsRepelled.length) lines.push(`🛡️ Raid${away.raidsRepelled.length > 1 ? "s" : ""} repoussé${away.raidsRepelled.length > 1 ? "s" : ""} : ${away.raidsRepelled.join(", ")}.`);
+  for (const sb of away.sabotages) lines.push(sb.success ? `🧨 ${sb.by} a saboté ton académie.` : `🧨 Un saboteur de ${sb.by} a été arrêté.`);
+  for (const r of away.research) lines.push(`🔬 Recherche terminée : ${COMBATANTS.get(r.id)?.name ?? r.id}${r.levels > 1 ? ` (+${r.levels} niveaux)` : ""}.`);
+  for (const i of away.stages) lines.push(`🏗️ Étape franchie : ${STAGES[i]?.name ?? i + 1}.`);
+  if (event) lines.push(event.kind === "colosse" ? "🗿 Un colosse est en cours, va le frapper dans Raids." : "🐫 Une caravane passe, va la piller dans Raids.");
+  return (
+    <div className="modal-backdrop" role="dialog" aria-modal="true" aria-label="Pendant ton absence">
+      <div className="modal panel">
+        <h2>🌄 Pendant ton absence</h2>
+        <p className="note">Depuis {new Date(away.since).toLocaleString("fr-FR", { weekday: "long", hour: "2-digit", minute: "2-digit" })}.</p>
+        <ul>
+          {lines.map((t) => (
+            <li key={t}>{t}</li>
+          ))}
+        </ul>
+        <button className="btn btn-primary" onClick={onClose}>
+          Au travail
+        </button>
+      </div>
+    </div>
+  );
+}
+
 function WhatsNew() {
   // Rendu seulement côté navigateur (le jeu attend sa première synchronisation), on peut lire le stockage tout de suite.
   const [seen, setSeen] = useState<number>(() => {

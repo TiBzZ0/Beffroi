@@ -106,6 +106,7 @@ import {
   worksiteFromRow,
   worldFrom,
   type ChronicleEntry,
+  type AwaySummary,
   type GameAction,
   type GameSnapshot,
   type LeaderboardRow,
@@ -143,7 +144,7 @@ interface PlayerRow {
   upgrades: string[];
   total_produced: number;
   total_contributed: number;
-  military?: { levels?: Record<string, number>; research?: { id: string; endsAt: number }[] | { id: string; endsAt: number } | null; academy?: number; sabotageImmuneUntil?: number; ruinImmuneUntil?: number; elanUntil?: number; tithe?: number; titheOwed?: number; titheSet?: boolean; share?: StageShare | null; donorTiers?: number; curfew?: Curfew | null } | null;
+  military?: { levels?: Record<string, number>; research?: { id: string; endsAt: number }[] | { id: string; endsAt: number } | null; academy?: number; sabotageImmuneUntil?: number; ruinImmuneUntil?: number; elanUntil?: number; tithe?: number; titheOwed?: number; titheSet?: boolean; share?: StageShare | null; donorTiers?: number; curfew?: Curfew | null; seen?: PlayerState["seen"] | null } | null;
   total_clicks: number;
   last_update: string;
   last_click_at: string;
@@ -279,6 +280,7 @@ function toEntity(row: PlayerRow): Entity {
         : null,
       donorTiers: Math.max(0, Math.floor(Number(row.military?.donorTiers ?? 0) || 0)),
       curfew: cleanCurfew(row.military?.curfew),
+      ...(row.military?.seen ? { seen: { produced: Number(row.military.seen.produced ?? 0), contributed: Number(row.military.seen.contributed ?? 0), levels: armyCounts(row.military.seen.levels ?? {}, [...UNIT_IDS, ...DEFENSE_IDS]) } } : {}),
     },
   };
 }
@@ -306,7 +308,7 @@ function toJson(e: Entity, state: PlayerState, extra: Record<string, unknown> = 
     troops: state.troops,
     defenses: state.defenses,
     stationed: state.stationed,
-    military: { levels: state.levels, research: state.research, academy: state.academy, sabotageImmuneUntil: state.sabotageImmuneUntil, ruinImmuneUntil: state.ruinImmuneUntil, elanUntil: state.elanUntil, tithe: state.tithe, titheOwed: state.titheOwed, titheSet: state.titheSet, share: state.share, donorTiers: state.donorTiers, curfew: state.curfew },
+    military: { levels: state.levels, research: state.research, academy: state.academy, sabotageImmuneUntil: state.sabotageImmuneUntil, ruinImmuneUntil: state.ruinImmuneUntil, elanUntil: state.elanUntil, tithe: state.tithe, titheOwed: state.titheOwed, titheSet: state.titheSet, share: state.share, donorTiers: state.donorTiers, curfew: state.curfew, seen: state.seen ?? null },
     click_strikes: state.clickStrikes,
     click_paused_until: iso(state.clickPausedUntil),
     ...extra,
@@ -1286,6 +1288,42 @@ function rivalsFor(
     .sort((a, b) => Number(a.isLord) - Number(b.isLord) || (a.difficulty ?? 0) - (b.difficulty ?? 0) || b.loot - a.loot);
 }
 
+/** Absence au-delà de laquelle on résume ce qui s'est passé. */
+const AWAY_MS = 30 * 60_000;
+
+/** B3 : résumé de l'absence, d'après les compteurs du dernier passage, la chronique et le chantier. */
+async function awaySummary(admin: SupabaseClient, seasonId: number, me: Entity, state: PlayerState, worksite: WorksiteView, entities: Map<string, Entity>, now: number): Promise<AwaySummary | undefined> {
+  const seen = me.state.seen;
+  if (!seen || now - me.lastSeen < AWAY_MS) return undefined;
+  const { data } = await admin
+    .from("chronicle")
+    .select("kind, actor_id, details")
+    .eq("season_id", seasonId)
+    .eq("target_id", me.id)
+    .in("kind", ["raid", "sabotage"])
+    .gt("created_at", iso(me.lastSeen))
+    .order("created_at", { ascending: true })
+    .limit(50);
+  const rows = (data ?? []) as { kind: string; actor_id: string; details: ChronicleEntry["details"] }[];
+  const nameOf = (id: string) => entities.get(id)?.name ?? "Quelqu'un";
+  const raids = rows.filter((r) => r.kind === "raid");
+  const troopsOnly = (army: Record<string, number> | undefined) =>
+    Object.fromEntries(Object.entries(army ?? {}).filter(([id, n]) => n > 0 && (UNIT_IDS as readonly string[]).concat(DEFENSE_IDS as readonly string[]).includes(id)));
+  const research = Object.entries(state.levels ?? {})
+    .map(([id, n]) => ({ id, levels: (n ?? 0) - (seen.levels[id as CombatantId] ?? 0) }))
+    .filter((r) => r.levels > 0);
+  return {
+    since: me.lastSeen,
+    produced: Math.max(0, state.totalProduced - seen.produced),
+    tithe: Math.max(0, state.totalContributed - seen.contributed),
+    raidsLost: raids.filter((r) => r.details.success).map((r) => ({ by: nameOf(r.actor_id), stolen: r.details.stolen ?? 0, troops: troopsOnly(r.details.defenderLost), buildings: r.details.destroyed ?? {} })),
+    raidsRepelled: raids.filter((r) => !r.details.success).map((r) => nameOf(r.actor_id)),
+    sabotages: rows.filter((r) => r.kind === "sabotage").map((r) => ({ by: nameOf(r.actor_id), success: !!r.details.success })),
+    research,
+    stages: worksite.stageCompletedAt.map((at, i) => (at > me.lastSeen && at <= now ? i : -1)).filter((i) => i >= 0),
+  };
+}
+
 function chronicleDetails(r: RaidReport, chance: number) {
   return { success: r.success, chance, rounds: r.rounds, stolen: r.stolen, allyShares: r.allyShares, destroyed: r.destroyed, attackerLost: r.attackerLost, defenderLost: r.defenderLost, revenge: r.revenge };
 }
@@ -1391,6 +1429,7 @@ export async function runAction(admin: SupabaseClient, userId: string, action: G
     const current = openShare(advance(me.state, now, world), worksite.stage, world, now);
     let finalState = current;
     let ecus = me.ecus;
+    let away: AwaySummary | undefined;
     let error: string | null = null;
     let message: string | undefined;
 
@@ -1567,6 +1606,8 @@ export async function runAction(admin: SupabaseClient, userId: string, action: G
       const contribution = (outcome.ok ? (outcome.value.contribution ?? 0) : 0) + paid.paid;
       const gift = recordGift(finalState, contribution);
       finalState = gift.state;
+      if (action.type === "sync") away = await awaySummary(admin, season.id, me, finalState, worksite, entities, now);
+      finalState = { ...finalState, seen: { produced: finalState.totalProduced, contributed: finalState.totalContributed, levels: finalState.levels } };
       const { data, error: rpcError } = await admin.rpc("commit_state", {
         p_season: season.id,
         p_state: toJson(me, finalState, {}),
@@ -1611,6 +1652,7 @@ export async function runAction(admin: SupabaseClient, userId: string, action: G
       rivals: rivalsFor(meNow, finalState, entities, worldFrom(worksite), flat, now, intel, allianceNames, conflicts.wars).map((r) => (titles.has(r.id) ? { ...r, titles: titles.get(r.id) } : r)),
       myTitles: titles.get(userId) ?? [],
       ecus,
+      ...(away ? { away } : {}),
       ...info,
       alliances: [...allianceNames].map(([id, name]) => ({ id, name, size: [...entities.values()].filter((e) => e.allianceId === id).length })),
       war: warView(meNow, conflicts.wars, allianceNames),
