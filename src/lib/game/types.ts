@@ -74,7 +74,7 @@ export interface ChronicleEntry {
     amount?: number;
     /** Espion surpris à la forteresse. */
     fortress?: boolean;
-    phase?: "start" | "end";
+    phase?: "start" | "end" | "attack";
     a?: number;
     b?: number;
     scoreA?: number;
@@ -84,6 +84,9 @@ export interface ChronicleEntry {
     alliance?: number;
     /** Événement : type et parts de chacun (pierre prise ou dégâts). */
     event?: "caravane" | "colosse";
+    eventId?: number;
+    /** Colosse : pertes infligées, en valeur de pierre. */
+    dealt?: number;
     shares?: Record<string, number>;
   };
 }

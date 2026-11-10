@@ -250,10 +250,17 @@ function toSeason(row: { id: number; number: number; starts_at: string; ends_at:
   return { id: row.id, number: row.number, startsAt: Date.parse(row.starts_at), endsAt: Date.parse(row.ends_at) };
 }
 
+/** Saison en cours, gardée en mémoire 30 s (tant qu'elle n'est pas finie) pour économiser un aller-retour par action. */
+let seasonCache: { season: SeasonView; until: number } | null = null;
+
 export async function getActiveSeason(admin: SupabaseClient): Promise<SeasonView> {
+  const now = Date.now();
+  if (seasonCache && seasonCache.until > now) return seasonCache.season;
   const { data, error } = await admin.rpc("ensure_active_season", { p_days: SEASON_DAYS, p_first_stage_base: STAGE_BASES[0] });
   if (error || !data) throw new Error(`Saison introuvable : ${error?.message}`);
-  return toSeason(Array.isArray(data) ? data[0] : data);
+  const season = toSeason(Array.isArray(data) ? data[0] : data);
+  seasonCache = { season, until: Math.min(now + 30_000, season.endsAt) };
+  return season;
 }
 
 async function loadWorksite(admin: SupabaseClient, seasonId: number): Promise<WorksiteView> {
@@ -266,6 +273,7 @@ async function loadWorksite(admin: SupabaseClient, seasonId: number): Promise<Wo
 async function loadEntities(admin: SupabaseClient, seasonId: number, userId: string): Promise<Map<string, Entity>> {
   const select = () =>
     admin.from("player_states").select("*, profiles(username, display_name, is_bot)").eq("season_id", seasonId);
+  const fortP = admin.from("fortresses").select("holder").eq("season_id", seasonId).maybeSingle();
   let { data, error } = await select();
   if (error) throw new Error(`Joueurs introuvables : ${error.message}`);
   const present = new Set((data ?? []).map((r) => (r as PlayerRow).user_id));
@@ -281,7 +289,7 @@ async function loadEntities(admin: SupabaseClient, seasonId: number, userId: str
   }
   const entities = new Map((data as PlayerRow[]).map((r) => [r.user_id, toEntity(r)]));
   // L'alliance qui tient la forteresse profite de son bonus de production.
-  const { data: fort } = await admin.from("fortresses").select("holder").eq("season_id", seasonId).maybeSingle();
+  const { data: fort } = await fortP;
   const holder = (fort?.holder as number | null | undefined) ?? null;
   if (holder !== null) for (const e of entities.values()) if (e.allianceId === holder) e.state = { ...e.state, fortress: true };
   // Coup de pouce aux joueurs très distancés par le premier.
@@ -471,7 +479,7 @@ async function loadChronicle(admin: SupabaseClient, seasonId: number, entities: 
     .select("id, kind, actor_id, target_id, details, created_at")
     .eq("season_id", seasonId)
     .order("created_at", { ascending: false })
-    .limit(20);
+    .limit(40);
   const name = (id: string | null) => (id ? (entities.get(id)?.name ?? "Un inconnu") : "");
   return (data ?? []).map((r) => ({
     id: Number(r.id),
@@ -531,10 +539,14 @@ interface Conflicts {
 
 /** Clôt les guerres terminées, puis charge les guerres en cours et la forteresse. */
 async function loadConflicts(admin: SupabaseClient, seasonId: number, now: number): Promise<Conflicts> {
-  const { data: ended } = await admin.from("wars").select("id").eq("season_id", seasonId).eq("settled", false).lte("ends_at", iso(now));
+  // Les trois lectures partent ensemble ; les guerres finies sont réglées à part (rare).
+  const [{ data: ended }, { data: wars }, fortRes] = await Promise.all([
+    admin.from("wars").select("id").eq("season_id", seasonId).eq("settled", false).lte("ends_at", iso(now)),
+    admin.from("wars").select("*").eq("season_id", seasonId).eq("settled", false).gt("ends_at", iso(now)),
+    admin.from("fortresses").select("holder, garrison, version").eq("season_id", seasonId).maybeSingle(),
+  ]);
   for (const w of ended ?? []) await admin.rpc("settle_war", { p_war: w.id });
-  const { data: wars } = await admin.from("wars").select("*").eq("season_id", seasonId).eq("settled", false).gt("ends_at", iso(now));
-  let { data: fort } = await admin.from("fortresses").select("holder, garrison, version").eq("season_id", seasonId).maybeSingle();
+  let fort = fortRes.data;
   if (!fort) {
     await admin.from("fortresses").upsert({ season_id: seasonId }, { onConflict: "season_id", ignoreDuplicates: true });
     ({ data: fort } = await admin.from("fortresses").select("holder, garrison, version").eq("season_id", seasonId).maybeSingle());
@@ -831,6 +843,20 @@ async function runEventAttack(admin: SupabaseClient, seasonId: number, me: Entit
   });
   if (error?.message.includes("beffroi_conflict") || (data as { conflict?: boolean } | null)?.conflict) return "conflict";
   if (error) throw new Error(`Événement : ${error.message}`);
+  await addChronicle(admin, seasonId, {
+    kind: "event",
+    actor_id: me.id,
+    details: {
+      phase: "attack",
+      event: e.kind,
+      eventId: e.id,
+      success: fight.success,
+      stolen: e.pool - pool,
+      dealt: e.kind === "colosse" ? armyValue(fight.defenderLost) : 0,
+      attackerLost: fight.attackerLost,
+      defenderLost: fight.defenderLost,
+    },
+  });
   const finished = (e.kind === "caravane" && pool <= 0) || (e.kind === "colosse" && armySize(army) === 0);
   return { state: after, message, settle: finished ? e.id : undefined };
 }
@@ -1168,9 +1194,11 @@ export async function runAction(admin: SupabaseClient, userId: string, action: G
     const now = Date.now();
     const world = worldFrom(worksite);
     const flat = lordRates(entities, world, now);
-    let conflicts = await loadConflicts(admin, season.id, now);
-    let events = await loadEvent(admin, season.id, now, entities, world, flat);
-    let allianceNames = await loadAllianceNames(admin, season.id);
+    let [conflicts, events, allianceNames] = await Promise.all([
+      loadConflicts(admin, season.id, now),
+      loadEvent(admin, season.id, now, entities, world, flat),
+      loadAllianceNames(admin, season.id),
+    ]);
     const current = advance(me.state, now, world);
     let finalState = current;
     let error: string | null = null;
@@ -1329,9 +1357,16 @@ export async function runAction(admin: SupabaseClient, userId: string, action: G
       if (contribution > 0) await recordContribution(season.id, userId, finalState.totalContributed);
     }
 
-    const intel = await loadIntel(admin, season.id, userId, now);
-    allianceNames = await loadAllianceNames(admin, season.id);
     const meNow = entities.get(userId) ?? me;
+    // Les dernières lectures partent ensemble (les noms d'alliance ne changent qu'avec une action d'alliance).
+    const namesP = ALLIANCE_ACTIONS.has(action.type) || CONFLICT_ACTIONS.has(action.type) ? loadAllianceNames(admin, season.id) : Promise.resolve(allianceNames);
+    const [intel, names, info, chronicle] = await Promise.all([
+      loadIntel(admin, season.id, userId, now),
+      namesP,
+      namesP.then((n) => allianceInfo(admin, season.id, meNow, finalState, entities, n)),
+      wantsChronicle ? loadChronicle(admin, season.id, entities) : Promise.resolve(undefined),
+    ]);
+    allianceNames = names;
     const snapshot: GameSnapshot = {
       serverNow: now,
       userId,
@@ -1340,12 +1375,12 @@ export async function runAction(admin: SupabaseClient, userId: string, action: G
       worksite,
       season,
       rivals: rivalsFor(meNow, finalState, entities, worldFrom(worksite), flat, now, intel, allianceNames, conflicts.wars),
-      ...(await allianceInfo(admin, season.id, meNow, finalState, entities, allianceNames)),
+      ...info,
       alliances: [...allianceNames].map(([id, name]) => ({ id, name, size: [...entities.values()].filter((e) => e.allianceId === id).length })),
       war: warView(meNow, conflicts.wars, allianceNames),
       event: eventView(userId, finalState, events, now),
       fortress: fortressView(meNow, finalState, conflicts.fortress, entities, allianceNames, now, intel.get(FORTRESS_INTEL) ?? null),
-      chronicle: wantsChronicle ? await loadChronicle(admin, season.id, entities) : undefined,
+      chronicle,
     };
     return error ? { ok: false, error, snapshot } : { ok: true, snapshot, message };
   }

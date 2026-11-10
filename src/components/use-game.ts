@@ -2,7 +2,8 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { MAX_CLICKS_PER_SECOND } from "@/lib/game/config";
-import { advance, clickValue, stagesDoneAt } from "@/lib/game/engine";
+import { advance, buyArmy, buyGenerator, buyUpgrade, clickValue, stagesDoneAt, type PlayerState } from "@/lib/game/engine";
+import type { GeneratorId } from "@/lib/game/config";
 import { worksiteFromRow, worldFrom, type ActionResponse, type GameAction, type GameSnapshot, type Leaderboards } from "@/lib/game/types";
 import { getBrowserClient } from "@/lib/supabase/client";
 
@@ -43,10 +44,18 @@ export function useGame() {
     toastTimer.current = setTimeout(() => setToast(null), 3_000);
   }, []);
 
+  // Achats affichés tout de suite, avant la réponse du serveur (qui fait foi et les remplace).
+  const optimisticOps = useRef<GameAction[]>([]);
+
   const receive = useCallback((s: GameSnapshot) => {
     offset.current = s.serverNow - Date.now();
     // La chronique n'est renvoyée qu'aux synchronisations : on garde la précédente sinon.
-    const next = s.chronicle ? s : { ...s, chronicle: snapRef.current?.chronicle ?? [] };
+    let next = s.chronicle ? s : { ...s, chronicle: snapRef.current?.chronicle ?? [] };
+    // Achats encore en route : on les remet par-dessus l'état reçu pour éviter un retour en arrière.
+    if (optimisticOps.current.length > 0) {
+      const state = optimisticOps.current.reduce<PlayerState>((st, op) => applyLocal(st, op) ?? st, advance(next.state, s.serverNow, worldFrom(next.worksite)));
+      next = { ...next, state };
+    }
     snapRef.current = next;
     setSnap(next);
   }, []);
@@ -96,11 +105,24 @@ export function useGame() {
         }
         if (pending.current > 0) await sendClicks();
         const r = await post(action);
+        const i = optimisticOps.current.indexOf(action);
+        if (i >= 0) optimisticOps.current.splice(i, 1);
         if (r.snapshot) receive(r.snapshot);
         if (!r.ok && action.type !== "sync") showToast(r.error);
         if (r.ok && r.message) showToast(r.message);
         return r.ok;
       };
+      if (action !== "flush-clicks") {
+        const s = snapRef.current;
+        const now = Date.now() + offset.current;
+        const local = s ? applyLocal(advance(s.state, now, worldFrom(s.worksite)), action) : null;
+        if (s && local) {
+          optimisticOps.current.push(action);
+          const next = { ...s, state: local };
+          snapRef.current = next;
+          setSnap(next);
+        }
+      }
       const p = queue.current.then(task, task);
       queue.current = p.catch(() => undefined);
       return p;
@@ -311,4 +333,17 @@ export function useTick(ms: number) {
     const id = setInterval(() => setN((n) => n + 1), ms);
     return () => clearInterval(id);
   }, [ms]);
+}
+
+/** Effet local d'un achat, s'il est sûr de réussir ; null sinon (le serveur tranchera). */
+function applyLocal(state: PlayerState, action: GameAction): PlayerState | null {
+  const r =
+    action.type === "buy"
+      ? buyGenerator(state, action.generator as GeneratorId, Number(action.qty))
+      : action.type === "army"
+        ? buyArmy(state, action.kind, action.id, Number(action.qty))
+        : action.type === "upgrade"
+          ? buyUpgrade(state, action.upgrade)
+          : null;
+  return r && r.ok ? r.value : null;
 }

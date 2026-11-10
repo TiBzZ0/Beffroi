@@ -225,11 +225,8 @@ function Generators({ live, stagesDone, snap, run }: { live: PlayerState; stages
   // On montre les bâtiments possédés, plus le prochain à découvrir.
   const visibleCount = Math.min(GENERATORS.length, Math.max(1, GENERATORS.findIndex((g) => owned(live, g.id) === 0 && live.totalProduced < g.baseCost * 0.5) + 1 || GENERATORS.length));
 
-  const buy = async (id: GeneratorId, n: number) => {
-    setBusy(id);
-    await run({ type: "buy", generator: id, qty: n });
-    setBusy(null);
-  };
+  // L'achat s'affiche tout de suite (voir useGame) : pas besoin de bloquer le bouton.
+  const buy = (id: GeneratorId, n: number) => void run({ type: "buy", generator: id, qty: n });
   const rebuild = async (id: GeneratorId) => {
     setBusy(id);
     await run({ type: "rebuild", generator: id });
@@ -266,7 +263,7 @@ function Generators({ live, stagesDone, snap, run }: { live: PlayerState; stages
                   {hidden ? "Continue de bâtir pour le découvrir." : `${g.description} ${formatRate(each)}/s chacun${n > 0 ? ` · total ${formatRate(each * n)}/s` : ""}`}
                 </div>
               </div>
-              <button className="btn btn-primary" disabled={hidden || cost > live.stone || busy !== null} onClick={() => buy(g.id, count)}>
+              <button className="btn btn-primary" disabled={hidden || cost > live.stone} onClick={() => buy(g.id, count)}>
                 +{count}
                 <span className="cost num">{formatNumber(cost)} 🪨</span>
               </button>
@@ -289,16 +286,11 @@ function Generators({ live, stagesDone, snap, run }: { live: PlayerState; stages
 }
 
 function Upgrades({ live, run }: { live: PlayerState; run: ReturnType<typeof useGame>["run"] }) {
-  const [busy, setBusy] = useState(false);
   const available = UPGRADES.filter((u) => !live.upgrades.includes(u.id) && upgradeUnlocked(live, u)).sort((a, b) => a.cost - b.cost);
   const bought = UPGRADES.filter((u) => live.upgrades.includes(u.id));
   const nextLocked = UPGRADES.filter((u) => !live.upgrades.includes(u.id) && !upgradeUnlocked(live, u)).sort((a, b) => a.cost - b.cost)[0];
 
-  const buy = async (id: string) => {
-    setBusy(true);
-    await run({ type: "upgrade", upgrade: id });
-    setBusy(false);
-  };
+  const buy = (id: string) => void run({ type: "upgrade", upgrade: id });
 
   return (
     <div className="list">
@@ -312,7 +304,7 @@ function Upgrades({ live, run }: { live: PlayerState; run: ReturnType<typeof use
             <div className="row-title">{u.name}</div>
             <div className="row-desc">{u.description}</div>
           </div>
-          <button className="btn btn-primary" disabled={u.cost > live.stone || busy} onClick={() => buy(u.id)}>
+          <button className="btn btn-primary" disabled={u.cost > live.stone} onClick={() => buy(u.id)}>
             Apprendre
             <span className="cost num">{formatNumber(u.cost)} 🪨</span>
           </button>
@@ -488,7 +480,14 @@ function Raids({ snap, live, now, run }: { snap: GameSnapshot; live: PlayerState
           </button>
         ))}
       </div>
-      {snap.event && <EventCard e={snap.event} now={now} busy={busy !== null} onAttack={() => act("event", { type: "event_attack" })} />}
+      {snap.event && <EventCard
+          e={snap.event}
+          now={now}
+          busy={busy !== null}
+          onAttack={() => act("event", { type: "event_attack" })}
+          history={(snap.chronicle ?? []).filter((c) => c.kind === "event" && c.details.phase === "attack" && c.details.eventId === snap.event?.id)}
+          me={snap.userId}
+        />}
       <p className="raid-state">
         {cooldown > 0 ? `⏳ Tes troupes se reposent encore ${duration(cooldown)}.` : "⚔️ Tes troupes sont prêtes."}
       </p>
@@ -973,8 +972,21 @@ function armyIcons(army: Record<string, number>, empty = "personne"): string {
   return parts.length ? parts.join("  ") : empty;
 }
 
-/** Événement en cours (ou le prochain) en tête de l'onglet Raids. */
-function EventCard({ e, now, busy, onAttack }: { e: EventView; now: number; busy: boolean; onAttack: () => void }) {
+/** Récit d'un assaut contre la caravane ou le colosse. */
+function eventAttackText(c: ChronicleEntry, me: string): string {
+  const d = c.details;
+  const you = c.actorId === me;
+  const who = you ? "Tu" : c.actorName;
+  const lost = armyIcons(d.attackerLost ?? {}, "aucune");
+  if (d.event === "caravane")
+    return d.success
+      ? `🐪 ${who} ${you ? "as pillé" : "a pillé"} la caravane : ${formatNumber(d.stolen ?? 0)} pierres (pertes : ${lost}).`
+      : `🐪 ${who} ${you ? "as été repoussé" : "a été repoussé"} par l'escorte de la caravane (pertes : ${lost}).`;
+  return `🗿 ${who} ${you ? "as frappé" : "a frappé"} le Colosse : ${armyIcons(d.defenderLost ?? {}, "personne")} fauchés, ${formatNumber(d.dealt ?? 0)} 🪨 de dégâts (pertes : ${lost}).`;
+}
+
+/** Événement en cours (ou le prochain) en tête de l'onglet Raids, avec ses derniers assauts. */
+function EventCard({ e, now, busy, onAttack, history, me }: { e: EventView; now: number; busy: boolean; onAttack: () => void; history: ChronicleEntry[]; me: string }) {
   const icon = e.kind === "caravane" ? "🐪" : "🗿";
   if (!e.active) {
     return (
@@ -1012,6 +1024,13 @@ function EventCard({ e, now, busy, onAttack }: { e: EventView; now: number; busy
         {e.kind === "caravane" ? "Piller" : "Attaquer"}
         {e.kind === "caravane" && <span className="cost num">{pct} %</span>}
       </button>
+      {history.length > 0 && (
+        <ul className="chronicle event-history">
+          {history.slice(0, 8).map((c) => (
+            <li key={c.id}>{eventAttackText(c, me)}</li>
+          ))}
+        </ul>
+      )}
     </div>
   );
 }
@@ -1048,7 +1067,8 @@ function Chronicle({ entries, me, now, rivals, alliances = [] }: { entries: Chro
             .map(([id]) => nameOf(id))
             .slice(0, 4)
             .join(", ");
-          if (d.event === "caravane")
+          if (d.phase === "attack") text = eventAttackText(e, me);
+          else if (d.event === "caravane")
             text = (d.stolen ?? 0) > 0 ? `🐪 La caravane marchande est repartie, allégée de ${formatNumber(d.stolen ?? 0)} pierres (${shares}).` : "🐪 La caravane marchande est repartie intacte.";
           else text = d.success ? `🗿 Le Colosse est tombé ! ${formatNumber(d.bounty ?? 0)} pierres de prime partagées (${shares}).` : "🗿 Le Colosse s'en va invaincu.";
         } else if (e.kind === "fortress") {
@@ -1091,18 +1111,13 @@ function Chronicle({ entries, me, now, rivals, alliances = [] }: { entries: Chro
 function Garrison({ live, run }: { live: PlayerState; run: ReturnType<typeof useGame>["run"] }) {
   const [qty, setQty] = useState(1);
   const [custom, setCustom] = useState("");
-  const [busy, setBusy] = useState(false);
   const presets = [1, 10, 50, 100, 500];
   const pickCustom = (text: string) => {
     setCustom(text);
     const n = Math.floor(Number(text));
     if (Number.isSafeInteger(n) && n >= 1) setQty(n);
   };
-  const buy = async (kind: "unit" | "defense", id: string) => {
-    setBusy(true);
-    await run({ type: "army", kind, id, qty });
-    setBusy(false);
-  };
+  const buy = (kind: "unit" | "defense", id: string) => void run({ type: "army", kind, id, qty });
   const rows = (kind: "unit" | "defense", defs: readonly CombatantDef<string>[]) =>
     defs.map((d) => {
       const n = ((kind === "unit" ? live.troops : live.defenses) as Record<string, number>)[d.id] ?? 0;
@@ -1121,7 +1136,7 @@ function Garrison({ live, run }: { live: PlayerState; run: ReturnType<typeof use
             </div>
             {d.bonus && <div className="row-desc strong-vs">{strengths(d.bonus)}</div>}
           </div>
-          <button className="btn btn-primary" disabled={busy || d.cost * qty > live.stone} onClick={() => buy(kind, d.id)}>
+          <button className="btn btn-primary" disabled={d.cost * qty > live.stone} onClick={() => buy(kind, d.id)}>
             +{qty}
             <span className="cost num">{formatNumber(d.cost * qty)} 🪨</span>
           </button>
