@@ -585,3 +585,39 @@ export const LORD_DEFENSE_FLOOR_SECONDS = 2 * 60 * 60;
 /** A2 : chaque coup accepté ajoute 1 s d'élan, réserve de 30 s au plus. */
 export const ELAN_PER_CLICK_MS = 1000;
 export const ELAN_MAX_MS = 30_000;
+
+// T1 : carte du royaume. Grille de 15 × 15 cases, numérotées de 1 à 15.
+export const MAP_SIZE = 15;
+export type MapPos = readonly [number, number];
+export const BELFRY_POS: MapPos = [8, 8];
+export const FORTRESS_POS: MapPos = [8, 4];
+/** Un joueur arrive à 2 cases au moins de tout lieu et à 5 cases au plus du centre. */
+export const MAP_MIN_GAP = 2;
+export const MAP_SPAWN_RADIUS = 5;
+/** Cases fixes des seigneurs : faciles en couronne près du centre, redoutables dans les coins. */
+export const LORD_POSITIONS: Record<LordKey, MapPos> = {
+  bourbelin: [14, 8],
+  aubeval: [11, 13],
+  moulinet: [5, 13],
+  bruyere: [2, 8],
+  pontcroix: [5, 3],
+  sauleraie: [11, 3],
+  corbelune: [14, 12],
+  ventebrise: [8, 15],
+  roncebois: [2, 12],
+  clairmarais: [2, 4],
+  pierrefendue: [8, 1],
+  brumeport: [14, 4],
+  grisemolle: [5, 15],
+  noirval: [11, 15],
+  lysnoir: [5, 1],
+  hautgivre: [11, 1],
+  rougemarc: [15, 1],
+  hautefaille: [1, 1],
+  marches: [15, 15],
+  orgemont: [1, 15],
+};
+
+export function mapDistance(a: MapPos, b: MapPos): number {
+  return Math.hypot(a[0] - b[0], a[1] - b[1]);
+}

@@ -143,6 +143,14 @@ export interface ChronicleEntry {
   };
 }
 
+/** T1 : carte du royaume. Positions en cases (1 à size), par id de joueur ou de seigneur. */
+export interface MapView {
+  size: number;
+  belfry: [number, number] | readonly [number, number];
+  fortress: [number, number] | readonly [number, number];
+  places: Record<string, [number, number]>;
+}
+
 export interface GameSnapshot {
   serverNow: number;
   userId: string;
@@ -171,6 +179,7 @@ export interface GameSnapshot {
   ecus: number;
   /** Fournie lors des synchronisations et des raids ; sinon le client garde la précédente. */
   chronicle?: ChronicleEntry[];
+  map?: MapView;
 }
 
 export interface LeaderboardRow {

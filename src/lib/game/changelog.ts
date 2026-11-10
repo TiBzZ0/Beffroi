@@ -192,4 +192,12 @@ export const CHANGELOG: ChangeEntry[] = [
       "👍 Tu peux réagir à un message d'un clic (👍 ⚔️ 🛡️ 🏗️ 😂 ❤️).",
     ],
   },
+  {
+    id: 25,
+    date: "10 novembre",
+    items: [
+      "🗺️ Nouvel onglet Carte : le royaume sur une grille de 15 × 15 cases, avec le beffroi au centre, Pierre-Haute, les seigneurs et tous les joueurs aux couleurs de leur alliance. Chaque domaine a reçu sa case pour la saison.",
+      "📍 Touche un domaine pour ouvrir sa fiche et voir à combien de cases il est. Bientôt, la distance comptera : les armées mettront du temps à arriver.",
+    ],
+  },
 ];

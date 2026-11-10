@@ -381,12 +381,12 @@ a {
 
 .tabs {
   display: grid;
-  grid-template-columns: repeat(8, 1fr);
+  grid-template-columns: repeat(auto-fit, minmax(68px, 1fr));
   border-bottom: 1px solid var(--line);
 }
 @media (max-width: 480px) {
   .tabs {
-    grid-template-columns: repeat(4, 1fr);
+    grid-template-columns: repeat(5, 1fr);
   }
 }
 .subtabs {
@@ -1147,4 +1147,39 @@ a {
   background: var(--panel);
   color: var(--ink);
   font: inherit;
+}
+
+/* T1 : carte du royaume */
+.kingdom-map {
+  max-width: 480px;
+  margin: 0 auto 10px;
+}
+.kingdom-map svg {
+  width: 100%;
+  height: auto;
+  background: var(--panel-2);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+}
+.map-grid line {
+  stroke: var(--line);
+  stroke-width: 0.5;
+}
+.map-icon {
+  font-size: 15px;
+  text-anchor: middle;
+  dominant-baseline: central;
+  user-select: none;
+}
+.map-badge {
+  font-size: 8px;
+  text-anchor: middle;
+  dominant-baseline: central;
+}
+.map-place {
+  cursor: pointer;
+}
+.map-place.picked circle,
+.map-place.picked text.map-icon {
+  filter: drop-shadow(0 0 3px var(--gold));
 }

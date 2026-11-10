@@ -37,6 +37,7 @@ import {
   type GeneratorId,
   type HallUnit,
   REVENGE_ATTACK_BONUS,
+  mapDistance,
 } from "@/lib/game/config";
 import {
   advance,
@@ -74,7 +75,7 @@ import { useChat, useGame, useLeaderboard, usePush, useTick } from "./use-game";
 import { CHAT_MAX_LENGTH, CHAT_REACTIONS, type ChatChannel } from "@/lib/game/chat-config";
 import { CHANGELOG } from "@/lib/game/changelog";
 
-type Tab = "ateliers" | "ameliorations" | "chantier" | "armee" | "raids" | "alliance" | "messages" | "classement";
+type Tab = "ateliers" | "ameliorations" | "chantier" | "armee" | "carte" | "raids" | "alliance" | "messages" | "classement";
 type Qty = 1 | 10 | "max";
 const DAY_MS = 86_400_000;
 
@@ -87,7 +88,7 @@ export function Game({ userId }: { userId: string }) {
   const leaderboard = useLeaderboard(tab === "classement" && !!snap, snap?.worksite.total);
   const { watchRivals } = game;
   useEffect(() => {
-    watchRivals(tab === "raids" || tab === "alliance");
+    watchRivals(tab === "raids" || tab === "alliance" || tab === "carte");
   }, [tab, watchRivals]);
   // B8 : pastille « recherche terminée » tant que l'onglet Armée n'a pas été ouvert depuis.
   const research = snap?.state.research;
@@ -141,6 +142,7 @@ export function Game({ userId }: { userId: string }) {
             <TabButton id="ameliorations" tab={tab} setTab={selectTab} label="Savoirs" dot={affordableUpgrades > 0} />
             <TabButton id="chantier" tab={tab} setTab={selectTab} label="Chantier" />
             <TabButton id="armee" tab={tab} setTab={selectTab} label="Armée" dot={researchDone} />
+            <TabButton id="carte" tab={tab} setTab={selectTab} label="Carte" />
             <TabButton id="raids" tab={tab} setTab={selectTab} label={eventLive ? "Raids ⚡" : "Raids"} dot={eventLive || snap.rivals.some((r) => r.revenge && !r.blocker)} />
             <TabButton id="alliance" tab={tab} setTab={selectTab} label="Alliance" dot={snap.invites.length > 0} />
             <TabButton id="messages" tab={tab} setTab={selectTab} label="Messages" />
@@ -151,6 +153,7 @@ export function Game({ userId }: { userId: string }) {
             {tab === "ameliorations" && <Upgrades live={live} run={game.run} />}
             {tab === "chantier" && <Worksite snap={snap} live={live} run={game.run} />}
             {tab === "armee" && <Army snap={snap} live={live} now={now} run={game.run} />}
+            {tab === "carte" && <KingdomMap snap={snap} live={live} now={now} run={game.run} />}
             {tab === "raids" && <Raids snap={snap} live={live} now={now} run={game.run} />}
             {tab === "alliance" && <AllianceTab snap={snap} live={live} now={now} run={game.run} />}
             {tab === "messages" && <Chat userId={userId} hasAlliance={!!snap.alliance} now={now} />}
@@ -1975,6 +1978,106 @@ function agoText(t: number, now: number): string {
   if (m < 60) return `il y a ${m} min`;
   if (m < 1440) return `il y a ${Math.floor(m / 60)} h`;
   return `il y a ${Math.floor(m / 1440)} j`;
+}
+
+/** Couleur stable d'une alliance sur la carte. */
+const ALLIANCE_COLORS = ["#2f6db3", "#3f8f3a", "#b35a1f", "#7a3fa0", "#b3304a", "#1f8f8a", "#8a7a1f", "#555"];
+function allianceColor(id: number | null | undefined): string | undefined {
+  return id == null ? undefined : ALLIANCE_COLORS[Math.abs(id) % ALLIANCE_COLORS.length];
+}
+
+/** T1 : carte du royaume. Toucher un lieu ouvre sa fiche. */
+function KingdomMap({ snap, live, now, run }: { snap: GameSnapshot; live: PlayerState; now: number; run: ReturnType<typeof useGame>["run"] }) {
+  const [picked, setPicked] = useState<string | null>(null);
+  const [busy, setBusy] = useState<string | null>(null);
+  const map = snap.map;
+  if (!map) return <p className="empty">On déplie la carte…</p>;
+  const cell = 24;
+  const size = map.size * cell;
+  const at = (p: readonly [number, number]) => ({ cx: (p[0] - 0.5) * cell, cy: (map.size - p[1] + 0.5) * cell });
+  const mine = map.places[snap.userId];
+  const myAlliance = snap.alliance?.id ?? null;
+  const allianceIdOf = (name: string | null) => snap.alliances.find((a) => a.name === name)?.id ?? null;
+  const rival = snap.rivals.find((r) => r.id === picked);
+  const act = async (target: string, action: Parameters<typeof run>[0]) => {
+    setBusy(target);
+    await run(action);
+    setBusy(null);
+  };
+  const spyPrice = spyCost(live, worldFrom(snap.worksite), now);
+  const placeDistance = (p?: readonly [number, number]) => (mine && p ? mapDistance(mine, p) : null);
+  return (
+    <>
+      <p className="note">
+        Le royaume vu d&apos;en haut : 🔔 le beffroi au centre, 🏰 Pierre-Haute, les seigneurs sous leur blason, les joueurs sous leur écu, aux couleurs de leur
+        alliance. Toi, tu es l&apos;étoile. Touche un lieu pour ouvrir sa fiche.
+      </p>
+      <div className="kingdom-map">
+        <svg viewBox={`0 0 ${size} ${size}`} role="img" aria-label="Carte du royaume">
+          {Array.from({ length: map.size + 1 }, (_, i) => (
+            <g key={i} className="map-grid">
+              <line x1={i * cell} y1={0} x2={i * cell} y2={size} />
+              <line x1={0} y1={i * cell} x2={size} y2={i * cell} />
+            </g>
+          ))}
+          <text {...(({ cx, cy }) => ({ x: cx, y: cy }))(at(map.belfry))} className="map-icon">
+            🔔
+          </text>
+          <text {...(({ cx, cy }) => ({ x: cx, y: cy }))(at(map.fortress))} className="map-icon" onClick={() => setPicked(null)}>
+            🏰
+          </text>
+          {Object.entries(map.places).map(([id, p]) => {
+            const { cx, cy } = at(p);
+            const me = id === snap.userId;
+            const r = snap.rivals.find((x) => x.id === id);
+            if (!me && !r) return null;
+            const color = me ? allianceColor(myAlliance) : allianceColor(allianceIdOf(r?.allianceName ?? null));
+            const guarded = r && (r.shieldUntil > now || r.curfew);
+            return (
+              <g key={id} className={`map-place${picked === id ? " picked" : ""}`} onClick={() => !me && setPicked(id)} role="button" aria-label={me ? "Ton domaine" : r?.name}>
+                {color && <circle cx={cx} cy={cy} r={cell * 0.48} fill={color} opacity={0.35} />}
+                <text x={cx} y={cy} className="map-icon">
+                  {me ? "⭐" : r?.isLord ? r.blazon : "🛡️"}
+                </text>
+                {guarded && (
+                  <text x={cx + cell * 0.32} y={cy - cell * 0.28} className="map-badge">
+                    {r?.curfew ? "🌙" : "🔰"}
+                  </text>
+                )}
+              </g>
+            );
+          })}
+        </svg>
+      </div>
+      {rival ? (
+        <>
+          <p className="raid-state">
+            📍 {rival.name} est à {(placeDistance(map.places[rival.id]) ?? 0).toLocaleString("fr-FR", { maximumFractionDigits: 1 })} cases de chez toi.
+          </p>
+          {rival.allied ? (
+            <p className="note">C&apos;est un allié : tu peux lui envoyer des renforts depuis l&apos;onglet Alliance.</p>
+          ) : (
+            <div className="list">
+              <RivalRow
+                r={rival}
+                now={now}
+                busy={busy}
+                onRaid={(t) => act(t, { type: "raid", target: t })}
+                onSpy={(t) => act(t, { type: "spy", target: t })}
+                spyPrice={spyPrice}
+                stone={live.stone}
+                onSabotage={(t) => act(t, { type: "sabotage", target: t })}
+                stagesDone={stagesDoneAt(worldFrom(snap.worksite), now)}
+                me={live}
+              />
+            </div>
+          )}
+        </>
+      ) : (
+        <p className="empty">Touche un domaine sur la carte.</p>
+      )}
+    </>
+  );
 }
 
 /** B11 : messages courts, canal général ou d'alliance, avec réactions. */

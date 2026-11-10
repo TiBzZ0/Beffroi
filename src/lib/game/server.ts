@@ -66,7 +66,15 @@ import {
   UNIT_IDS,
   type GeneratorId,
   type LordDef,
+  BELFRY_POS,
+  FORTRESS_POS,
+  LORD_POSITIONS,
+  MAP_MIN_GAP,
+  MAP_SIZE,
+  MAP_SPAWN_RADIUS,
+  type MapPos,
 } from "./config";
+import { fixedPlaces, pickSpawn } from "./map";
 import {
   advance,
   applyClicks,
@@ -136,6 +144,7 @@ import {
   type GameAction,
   type GameSnapshot,
   type LeaderboardRow,
+  type MapView,
   type Leaderboards,
   type RivalView,
   type SeasonView,
@@ -2026,12 +2035,13 @@ export async function runAction(admin: SupabaseClient, userId: string, action: G
     const meNow = entities.get(userId) ?? me;
     // Les dernières lectures partent ensemble (les noms d'alliance ne changent qu'avec une action d'alliance).
     const namesP = ALLIANCE_ACTIONS.has(action.type) || CONFLICT_ACTIONS.has(action.type) ? loadAllianceNames(admin, season.id) : Promise.resolve(allianceNames);
-    const [intel, names, info, chronicle, hall] = await Promise.all([
+    const [intel, names, info, chronicle, hall, positions] = await Promise.all([
       loadIntel(admin, season.id, userId, now),
       namesP,
       namesP.then((n) => allianceInfo(admin, season.id, meNow, finalState, entities, n)),
       wantsChronicle ? loadChronicle(admin, season.id, entities) : Promise.resolve(undefined),
       loadHall(admin),
+      loadPositions(admin, season.id, entities),
     ]);
     const titles = titlesFrom(hall);
     allianceNames = names;
@@ -2054,10 +2064,54 @@ export async function runAction(admin: SupabaseClient, userId: string, action: G
       event: eventView(userId, finalState, events, now, currentRate(meNow, finalState, now, worldFrom(worksite), flat)),
       fortress: fortressView(meNow, finalState, conflicts.fortress, entities, allianceNames, now, intel.get(FORTRESS_INTEL) ?? null),
       chronicle,
+      map: mapView(positions),
     };
     return error ? { ok: false, error, snapshot } : { ok: true, snapshot, message };
   }
   return { ok: false, error: "Trop d'actions simultanées, réessaie." };
+}
+
+// ---------------------------------------------------------------------------
+// T1 : carte du royaume
+// ---------------------------------------------------------------------------
+
+let positionsCache: { seasonId: number; byId: Map<string, MapPos> } | null = null;
+
+/** Positions de tous les lieux de la saison ; place les joueurs qui n'en ont pas encore. */
+async function loadPositions(admin: SupabaseClient, seasonId: number, entities: Map<string, Entity>): Promise<Map<string, MapPos>> {
+  const missing = () => [...entities.values()].filter((e) => !e.lord && !e.isLord && !positionsCache?.byId.has(e.id));
+  if (!positionsCache || positionsCache.seasonId !== seasonId || missing().length > 0) {
+    const { data } = await admin.from("map_positions").select("user_id, x, y").eq("season_id", seasonId);
+    const byId = new Map<string, MapPos>((data ?? []).map((r) => [r.user_id as string, [Number(r.x), Number(r.y)] as MapPos]));
+    positionsCache = { seasonId, byId };
+    for (const e of missing()) {
+      for (let attempt = 0; attempt < 5; attempt++) {
+        const spot = pickSpawn([...fixedPlaces(), ...positionsCache.byId.values()]);
+        if (!spot) break;
+        const { error } = await admin.from("map_positions").insert({ season_id: seasonId, user_id: e.id, x: spot[0], y: spot[1] });
+        if (!error) {
+          positionsCache.byId.set(e.id, spot);
+          break;
+        }
+        // Case prise entre-temps, ou joueur déjà placé par une autre requête : on relit.
+        const { data: again } = await admin.from("map_positions").select("user_id, x, y").eq("season_id", seasonId);
+        for (const r of again ?? []) positionsCache.byId.set(r.user_id as string, [Number(r.x), Number(r.y)]);
+        if (positionsCache.byId.has(e.id)) break;
+      }
+    }
+  }
+  const out = new Map(positionsCache.byId);
+  for (const e of entities.values()) if (e.lord) out.set(e.id, LORD_POSITIONS[e.lord.key]);
+  return out;
+}
+
+function mapView(positions: Map<string, MapPos>): MapView {
+  return {
+    size: MAP_SIZE,
+    belfry: BELFRY_POS,
+    fortress: FORTRESS_POS,
+    places: Object.fromEntries([...positions].map(([id, p]) => [id, [p[0], p[1]] as [number, number]])),
+  };
 }
 
 /** Classements de la saison : contributeurs au chantier et pillards (seigneurs exclus). */
