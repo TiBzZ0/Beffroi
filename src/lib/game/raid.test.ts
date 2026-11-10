@@ -15,6 +15,7 @@ import {
   newPlayerState,
   rebuildRuin,
   productionPerSecond,
+  raidArmies,
   lootShares,
   recallReinforcements,
   sendReinforcements,
@@ -302,5 +303,15 @@ describe("incendie et ruines", () => {
     expect(r.value.ruins.tailleur).toBe(0);
     expect(r.value.stone).toBe(1e6 - cost);
     expect(rebuildRuin(r.value, "tailleur").ok).toBe(false);
+  });
+});
+
+describe("coup de pouce en défense", () => {
+  it("les défenseurs d'un joueur distancé encaissent moins", () => {
+    const attacker = player({ troops: { chevalier: 10 } });
+    const plain = raidArmies(attacker, player(), { victimId: "v", now: NOW });
+    const helped = raidArmies(attacker, player({ catchUp: 0.6 }), { victimId: "v", now: NOW });
+    expect(plain.attackBonus).toBe(1);
+    expect(helped.attackBonus).toBeCloseTo(1 / 1.6);
   });
 });

@@ -181,6 +181,11 @@ function Hero({ snap, rate, clickGain, game }: { snap: GameSnapshot; rate: numbe
           </div>
           <div className="stone-label">pierres taillées</div>
           <div className="rate num">{formatRate(rate)} / seconde</div>
+          {(snap.state.catchUp ?? 0) > 0 && (
+            <div className="catch-up" title="Bonus accordé tant que tu es loin derrière le premier joueur. Il diminue à mesure que tu le rattrapes.">
+              🤝 Coup de pouce : +{Math.round((snap.state.catchUp ?? 0) * 100)} % de production et de défense
+            </div>
+          )}
           <div className="hammer-hint">
             {paused ? `🔨 Marteau confisqué encore ${Math.ceil((snap.state.clickPausedUntil - game.serverNow()) / 1000)} s` : `Frappe la pierre : +${formatRate(clickGain)} par coup`}
           </div>
@@ -204,7 +209,7 @@ function Hero({ snap, rate, clickGain, game }: { snap: GameSnapshot; rate: numbe
         </div>
         <div className="bar-caption num">
           <span>{finished ? `${formatNumber(w.total)} pierres versées` : `${formatNumber(w.progress)} / ${formatNumber(w.target)}`}</span>
-          <span>{finished ? "3/3" : `étape ${w.stage + 1}/3`}</span>
+          <span>{finished ? `${STAGES.length}/${STAGES.length}` : `étape ${w.stage + 1}/${STAGES.length}`}</span>
         </div>
       </div>
     </section>

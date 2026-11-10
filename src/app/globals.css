@@ -807,3 +807,10 @@ a {
 .garrison-head .section-title {
   margin: 0 0 8px;
 }
+
+.catch-up {
+  margin-top: 4px;
+  font-size: 0.85rem;
+  color: var(--ok);
+  font-weight: 600;
+}
