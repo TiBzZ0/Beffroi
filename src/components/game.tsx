@@ -30,7 +30,6 @@ import {
   generatorRate,
   lootOf,
   spyCost,
-  sabotageCost,
   academyCost,
   levelOf,
   researchCost,
@@ -539,10 +538,9 @@ function Raids({ snap, live, now, run }: { snap: GameSnapshot; live: PlayerState
   const raid = (target: string) => act(target, { type: "raid", target });
   const players = snap.rivals.filter((r) => !r.isLord && !r.allied);
   const lords = snap.rivals.filter((r) => r.isLord && (level === null || r.difficulty === level));
-  const sabotagePrice = sabotageCost(live, worldFrom(snap.worksite), now);
   const sabotage = (target: string) => act(target, { type: "sabotage", target });
   const row = (r: RivalView) => (
-    <RivalRow key={r.id} r={r} now={now} busy={busy} onRaid={raid} onSpy={spy} spyPrice={spyPrice} stone={live.stone} onSabotage={sabotage} sabotagePrice={sabotagePrice} />
+    <RivalRow key={r.id} r={r} now={now} busy={busy} onRaid={raid} onSpy={spy} spyPrice={spyPrice} stone={live.stone} onSabotage={sabotage} />
   );
   const views: [RaidView, string][] = [
     ["armee", "Armée"],
@@ -669,7 +667,6 @@ function RivalRow({
   spyPrice,
   stone: myStone,
   onSabotage,
-  sabotagePrice,
 }: {
   r: RivalView;
   now: number;
@@ -679,8 +676,8 @@ function RivalRow({
   spyPrice: number;
   stone: number;
   onSabotage: (id: string) => void;
-  sabotagePrice: number;
 }) {
+  const sabotagePrice = r.sabotageCost ?? 0;
   const intel = r.intelUntil > now;
   // La pierre du rival progresse en direct entre deux nouvelles du serveur.
   const stone = r.stone + (r.rate * Math.max(0, now - r.stoneAt)) / 1000;

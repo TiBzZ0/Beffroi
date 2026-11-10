@@ -1158,7 +1158,7 @@ function rivalsFor(
         lastSeen: e.isLord ? undefined : e.lastSeen,
         revenge,
         blocker: raidBlocker(myState, s, ctx),
-        ...(e.isLord || allied ? {} : { academy: s.academy, researching: !!s.research, sabotageBlocker: sabotageBlocker(s, now) }),
+        ...(e.isLord || allied ? {} : { academy: s.academy, researching: !!s.research, sabotageBlocker: sabotageBlocker(s, now), sabotageCost: sabotageCost(myState, s, world, now) }),
       };
     })
     .sort((a, b) => Number(a.isLord) - Number(b.isLord) || (a.difficulty ?? 0) - (b.difficulty ?? 0) || b.loot - a.loot);
@@ -1295,8 +1295,8 @@ export async function runAction(admin: SupabaseClient, userId: string, action: G
       entities = await loadEntities(admin, season.id, userId);
     } else if (action.type === "sabotage") {
       const target = entities.get(String(action.target));
-      const cost = sabotageCost(current, world, now);
       const targetState = target ? advanceEntity(target, now, world, flat) : null;
+      const cost = targetState ? sabotageCost(current, targetState, world, now) : 0;
       if (!target || !targetState || target.id === me.id || target.isLord) error = "Cible inconnue.";
       else if (isAllied(me, target)) error = "On ne sabote pas un allié.";
       else if (current.stone < cost) error = `Il faut ${Math.ceil(cost).toLocaleString("fr-FR")} pierres pour payer un saboteur.`;

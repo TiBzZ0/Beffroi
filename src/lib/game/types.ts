@@ -54,6 +54,7 @@ export interface RivalView {
   academy?: number;
   researching?: boolean;
   sabotageBlocker?: string | null;
+  sabotageCost?: number;
   revenge: boolean;
   /** Raison pour laquelle on ne peut pas le raider maintenant, ou null. */
   blocker: string | null;

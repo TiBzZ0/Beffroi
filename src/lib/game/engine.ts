@@ -26,6 +26,7 @@ import {
   ACADEMY_COST_GROWTH,
   SABOTAGE_COST_SECONDS,
   SABOTAGE_MIN_COST,
+  SABOTAGE_LEVEL_SHARE,
   SABOTAGE_BASE_SUCCESS,
   SABOTAGE_PER_TOWER,
   SABOTAGE_MIN_SUCCESS,
@@ -765,8 +766,14 @@ export function buyAcademy(state: PlayerState): Result<PlayerState> {
   return { ok: true, value: { ...state, stone: state.stone - cost, academy: (state.academy ?? 0) + 1 } };
 }
 
-export function sabotageCost(state: PlayerState, world: WorldState, now: number): number {
-  return Math.max(SABOTAGE_MIN_COST, Math.ceil(rateAt(state, world, now) * SABOTAGE_COST_SECONDS));
+/**
+ * Prix d'un sabotage : une part de ce qu'a coûté le niveau d'académie visé (il grimpe donc avec l'académie de la cible),
+ * et au moins quelques minutes de la production du saboteur.
+ */
+export function sabotageCost(saboteur: PlayerState, target: PlayerState, world: WorldState, now: number): number {
+  const level = target.academy ?? 0;
+  const levelPrice = level > 0 ? ACADEMY_BASE_COST * ACADEMY_COST_GROWTH ** (level - 1) : 0;
+  return Math.max(SABOTAGE_MIN_COST, Math.ceil(rateAt(saboteur, world, now) * SABOTAGE_COST_SECONDS), Math.ceil(levelPrice * SABOTAGE_LEVEL_SHARE));
 }
 
 export function sabotageChance(defense: Army): number {

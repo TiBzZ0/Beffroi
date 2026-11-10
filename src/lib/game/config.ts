@@ -448,7 +448,8 @@ export const RESEARCH_TIME_GROWTH = 1.6;
 export const ACADEMY_SPEED = 0.25;
 export const ACADEMY_BASE_COST = 50_000;
 export const ACADEMY_COST_GROWTH = 2.5;
-/** Sabotage de l'académie d'un rival : prix = 3 min de sa propre production (1 000 au moins). */
+/** Sabotage de l'académie d'un rival : la moitié du prix du niveau visé, et au moins 3 min de sa propre production (1 000 au minimum). */
+export const SABOTAGE_LEVEL_SHARE = 0.5;
 export const SABOTAGE_COST_SECONDS = 180;
 export const SABOTAGE_MIN_COST = 1_000;
 /** Réussite : 60 %, −5 % par tour d'archers de la cible, 10 % au moins. */
