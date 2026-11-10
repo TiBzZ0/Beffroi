@@ -116,4 +116,11 @@ export const CHANGELOG: ChangeEntry[] = [
       "🗡️ Unités : le milicien frappe 4 fois plus fort les engins de siège. La palissade a 120 points de vie au lieu de 40, mais les palissades n'encaissent jamais plus d'un quart des coups (la muraille garde la moitié). Le bélier vise d'abord palissades et murailles, et chaque bélier ouvre une brèche : les obstacles encaissent moins de coups pour le reste de l'armée.",
     ],
   },
+  {
+    id: 15,
+    date: "10 novembre",
+    items: [
+      "🏰 Forteresse : après une prise, pas d'assaut pendant 30 minutes, le temps pour l'alliance d'y poster sa garnison.",
+    ],
+  },
 ];

@@ -46,6 +46,7 @@ import {
   NEW_PLAYER_TITHE,
   DONOR_TIER_BONUS,
   QUESTS,
+  FORTRESS_TRUCE_MS,
   LORD_RAID_CHANCE,
   LOT_PRIME_SHARE,
   LOT_ECUS,
@@ -863,6 +864,7 @@ interface WarRow {
 
 interface FortressRow {
   holder: number | null;
+  capturedAt: number;
   garrison: Record<string, Record<string, number>> | null;
   version: number;
 }
@@ -878,17 +880,17 @@ async function loadConflicts(admin: SupabaseClient, seasonId: number, now: numbe
   const [{ data: ended }, { data: wars }, fortRes] = await Promise.all([
     admin.from("wars").select("id").eq("season_id", seasonId).eq("settled", false).lte("ends_at", iso(now)),
     admin.from("wars").select("*").eq("season_id", seasonId).eq("settled", false).gt("ends_at", iso(now)),
-    admin.from("fortresses").select("holder, garrison, version").eq("season_id", seasonId).maybeSingle(),
+    admin.from("fortresses").select("holder, garrison, version, captured_at").eq("season_id", seasonId).maybeSingle(),
   ]);
   for (const w of ended ?? []) await admin.rpc("settle_war", { p_war: w.id });
   let fort = fortRes.data;
   if (!fort) {
     await admin.from("fortresses").upsert({ season_id: seasonId }, { onConflict: "season_id", ignoreDuplicates: true });
-    ({ data: fort } = await admin.from("fortresses").select("holder, garrison, version").eq("season_id", seasonId).maybeSingle());
+    ({ data: fort } = await admin.from("fortresses").select("holder, garrison, version, captured_at").eq("season_id", seasonId).maybeSingle());
   }
   return {
     wars: ((wars ?? []) as WarRow[]).map((w) => ({ ...w, id: Number(w.id), alliance_a: Number(w.alliance_a), alliance_b: Number(w.alliance_b) })),
-    fortress: { holder: fort?.holder != null ? Number(fort.holder) : null, garrison: (fort?.garrison as FortressRow["garrison"]) ?? {}, version: Number(fort?.version ?? 0) },
+    fortress: { holder: fort?.holder != null ? Number(fort.holder) : null, capturedAt: ms(fort?.captured_at as string | null), garrison: (fort?.garrison as FortressRow["garrison"]) ?? {}, version: Number(fort?.version ?? 0) },
   };
 }
 
@@ -939,6 +941,8 @@ function fortressBlocker(me: Entity, state: PlayerState, f: FortressRow, now: nu
   if (me.allianceId === null) return "Rejoins une alliance pour assiéger la forteresse.";
   if (f.holder === me.allianceId) return "Ton alliance tient déjà la forteresse.";
   if (inCurfew(state, now)) return "Tu es en couvre-feu : pas d'attaque pendant ta plage.";
+  // A13 : 30 minutes sans assaut après une prise, le temps de poster une garnison.
+  if (f.holder !== null && now < f.capturedAt + FORTRESS_TRUCE_MS) return `La forteresse vient de changer de mains : pas d'assaut avant ${new Date(f.capturedAt + FORTRESS_TRUCE_MS).toLocaleTimeString("fr-FR", { hour: "2-digit", minute: "2-digit", timeZone: "Europe/Paris" })}.`;
   if (now - state.lastRaidAt < RAID_COOLDOWN_MS) return "Tes troupes se reposent encore.";
   if (armySize(attackArmy(state)) === 0) return "Il te faut des troupes pour l'assaut.";
   return null;

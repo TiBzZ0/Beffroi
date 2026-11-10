@@ -407,6 +407,8 @@ export const WAR_DELAY_MS = 2 * 60 * 60 * 1000;
 export const FORTRESS_PRODUCTION_BONUS = 1.2;
 /** Garnison neutre de la forteresse libre : valeur = troupes médianes des joueurs × ce facteur. Une fois prise, seules les troupes envoyées la défendent. */
 export const FORTRESS_WALLS_POWER = 2;
+/** A13 : pas d'assaut pendant 30 minutes après une prise. */
+export const FORTRESS_TRUCE_MS = 30 * 60_000;
 export const FORTRESS_WALLS: Partial<Record<CombatantId, number>> = { muraille: 0.35, baliste: 0.35, tour: 0.3 };
 export const FORTRESS_NAME = "Forteresse de Pierre-Haute";
 export const SPY_COST_SECONDS = 60;
