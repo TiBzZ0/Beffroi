@@ -37,6 +37,7 @@ import {
   SIEGE_PRIZE_SECONDS,
   SIEGE_STAGE_LOSS,
   TOURNEY_PRIZES_SECONDS,
+  ONLINE_WINDOW_MS,
   UNITS,
   RED_MOON_RANSOM,
   WOUNDED_DEFENDER_BEATEN,
@@ -102,7 +103,7 @@ import {
   type MapPos,
 } from "./config";
 import { banditSpot, caravanPath, caravanPos, colossusPos, fixedPlaces, pickSpawn } from "./map";
-import { pickNextEvent, tourneyPodium } from "./events";
+import { drawNextEvent, tourneyPodium } from "./events";
 import {
   advance,
   applyClicks,
@@ -1253,7 +1254,7 @@ interface EventData {
   enemy?: Army;
   path?: { from: [number, number]; to: [number, number] };
   resolved?: boolean;
-  outcome?: "won" | "lost";
+  outcome?: "won" | "lost" | "left";
   /** V12 : budget commun, armées inscrites, podium. */
   budget?: number;
   entries?: Record<string, Army>;
@@ -1290,7 +1291,7 @@ const EVENT_INFO: Record<EventKind, { name: string; description: string }> = {
     description: "Une armée immense qui ne se reforme pas. Chaque assaut rapporte 2 fois la valeur des pertes infligées ; s'il tombe, chaque joueur qui l'a touché reçoit 15 minutes de sa production.",
   },
   convoi: { name: "Le convoi royal", description: "Un convoi traverse la carte et tombera dans une embuscade à mi-chemin. Poste des troupes au point d'embuscade avant : si le convoi passe, chaque escorte reçoit 45 minutes de sa production. Les troupes perdues reviennent à 60 % de l'infirmerie." },
-  siege: { name: "Le siège du beffroi", description: "Une armée marche sur le beffroi et frappe dans 3 heures. Poste des troupes au centre de la carte : victoire, 1 heure de production par défenseur ; défaite, l'étape en cours perd 10 % de sa pierre." },
+  siege: { name: "Le siège du beffroi", description: "Une armée marche sur le beffroi et frappe dans 3 heures. Poste des troupes au centre de la carte : victoire, 1 heure de production par défenseur ; défense battue, l'étape en cours perd 10 % de sa pierre. Sans défenseur, l'armée repart sans rien détruire." },
   tournoi: { name: "Le tournoi", description: "Compose une armée avec le budget fourni, sans toucher à tes troupes. Tableau à élimination à la fin de l'heure, sans pertes : 2 h, 1 h et 30 min de production pour le podium." },
 };
 
@@ -1359,20 +1360,23 @@ async function loadEvent(admin: SupabaseClient, seasonId: number, now: number, e
 
 async function loadEventInner(admin: SupabaseClient, seasonId: number, now: number, entities: Map<string, Entity>, world: WorldState, flat: Map<string, number>): Promise<EventState> {
   const { data: open } = await admin.from("events").select("*").eq("season_id", seasonId).eq("settled", false);
+  const online = [...entities.values()].filter((x) => !x.isLord && now - x.lastSeen < ONLINE_WINDOW_MS).length;
   for (const raw of open ?? []) {
     const e = eventRow(raw);
     // V10 à V12 : l'événement reste ouvert tant que le combat commun n'est pas réglé.
     const finished = (ms(e.ends_at) <= now || (e.kind === "colosse" && armySize(e.army) === 0)) && !(GROUP_EVENTS.includes(e.kind) && !e.data.resolved);
-    const next = pickNextEvent(e.kind, e.id * 7919 + seasonId);
+    const next = drawNextEvent(e.kind, e.id * 7919 + seasonId, online);
     if (!finished) return { active: e, levels: medianLevels(entities), nextAt: ms(e.ends_at) + EVENT_GAP_MS, nextKind: next };
     if (COMBAT_EVENTS.includes(e.kind)) await admin.rpc("settle_event_v2", { p_event: e.id, p_bonus: killBonus(e, entities, now, world, flat) });
     else await admin.from("events").update({ settled: true }).eq("id", e.id).eq("settled", false);
   }
   const { data: last } = await admin.from("events").select("id, kind, ends_at").eq("season_id", seasonId).order("ends_at", { ascending: false }).limit(1).maybeSingle();
-  const nextKind: EventKind = last ? pickNextEvent(last.kind as string, Number(last.id) * 7919 + seasonId) : "caravane";
   const nextAt = last ? ms(last.ends_at as string) + EVENT_GAP_MS : now;
+  // Le tirage est figé à l'annonce : ce qui a été annoncé est ce qui arrive.
+  const { data: notice } = last && now >= nextAt - EVENT_NOTICE_MS ? await admin.from("event_notices").select("kind").eq("season_id", seasonId).eq("after_event", Number(last.id)).maybeSingle() : { data: null };
+  const nextKind: EventKind = notice ? (notice.kind as EventKind) : last ? drawNextEvent(last.kind as string, Number(last.id) * 7919 + seasonId, online) : "caravane";
   const humans = [...entities.values()].filter((e) => !e.isLord);
-  if (last && now >= nextAt - EVENT_NOTICE_MS && now < nextAt) void announceNext(admin, seasonId, Number(last.id), nextKind);
+  if (last && !notice && now >= nextAt - EVENT_NOTICE_MS && now < nextAt) void announceNext(admin, seasonId, Number(last.id), nextKind);
   if (now < nextAt || humans.length === 0) return { active: null, levels: {}, nextAt, nextKind };
 
   let army: Army = {};
@@ -1430,7 +1434,7 @@ async function loadEventInner(admin: SupabaseClient, seasonId: number, now: numb
   const { data: created } = await admin.from("events").select("*").eq("season_id", seasonId).eq("settled", false).maybeSingle();
   if (!created) return { active: null, levels: {}, nextAt: now + EVENT_GAP_MS, nextKind };
   const e = eventRow(created);
-  return { active: e, levels: medianLevels(entities), nextAt: ms(e.ends_at) + EVENT_GAP_MS, nextKind: pickNextEvent(e.kind, e.id * 7919 + seasonId) };
+  return { active: e, levels: medianLevels(entities), nextAt: ms(e.ends_at) + EVENT_GAP_MS, nextKind: drawNextEvent(e.kind, e.id * 7919 + seasonId, online) };
 }
 
 /** Défenseurs qu'affronte un assaut : l'escorte entière de la caravane, ou ce qu'il reste du colosse. */
@@ -2816,6 +2820,8 @@ async function resolveGroupEvent(
   const defenders = sumArmies(posted.map((p) => p.m.troops));
   const fight = armySize(defenders) > 0 ? battle(ev.data.enemy ?? {}, defenders, Math.random, { attackerLevels: events.levels, defenderLevels: events.levels }) : null;
   const won = !!fight && !fight.success;
+  // Siège sans défenseur : l'armée repart sans rien détruire ; la perte ne frappe qu'une défense tentée et battue.
+  const outcome: "won" | "lost" | "left" = !fight ? "left" : won ? "won" : "lost";
   const pseudo = { troops: {}, stationed: Object.fromEntries(posted.map((p) => [p.m.id, { ...p.m.troops }])) } as unknown as PlayerState;
   const lostBy = fight ? splitTroopLosses(pseudo, fight.defenderLost).byOwner : {};
   const share = ev.kind === "convoi" ? CONVOY_WOUNDED : won ? WOUNDED_WINNER : WOUNDED_DEFENDER_BEATEN;
@@ -2831,13 +2837,13 @@ async function resolveGroupEvent(
     const keep = armySize(survivors) > 0 || prize > 0;
     byEntity.set(x.id, { e: x, state: { ...healed, marches: (healed.marches ?? []).flatMap((y) => (y.id === m.id ? (keep ? [back] : []) : [y])) } });
   }
-  const r = await write([...byEntity.values()], { ...ev.data, resolved: true, outcome: won ? "won" : "lost" });
+  const r = await write([...byEntity.values()], { ...ev.data, resolved: true, outcome });
   if (r !== "changed") return r;
-  if (ev.kind === "siege" && !won) await admin.rpc("siege_damage", { p_season: seasonId, p_share: SIEGE_STAGE_LOSS });
+  if (ev.kind === "siege" && outcome === "lost") await admin.rpc("siege_damage", { p_season: seasonId, p_share: SIEGE_STAGE_LOSS });
   const ids = [...byEntity.keys()];
   if (ev.kind === "convoi") {
     if (ids.length) notify(admin, ids, won ? { title: "👑 Le convoi est passé !", body: "Ton escorte rentre avec 45 minutes de ta production.", tag: "event" } : { title: "👑 Le convoi est tombé", body: "L'embuscade a eu raison de l'escorte. Tes blessés passent par l'infirmerie.", tag: "event" });
-  } else {
+  } else if (outcome !== "left") {
     notify(admin, won ? ids : "all", won ? { title: "🏰 Le beffroi a tenu !", body: "Tes défenseurs rentrent avec 1 heure de ta production.", tag: "event" } : { title: "🏰 Le beffroi a souffert du siège", body: "L'étape en cours perd 10 % de sa pierre.", tag: "event" });
   }
   return r;

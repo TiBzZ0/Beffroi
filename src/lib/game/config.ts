@@ -652,6 +652,9 @@ export const SIEGE_ATTACK_SHARE = 0.8;
 export const SIEGE_PRIZE_SECONDS = 60 * 60;
 export const SIEGE_STAGE_LOSS = 0.1;
 /** V12 : tournoi, même budget pour tous (armée médiane), sans pertes ; podium 2 h, 1 h, 30 min de production. */
+/** Joueurs en ligne (vus dans les 15 dernières minutes) qu'il faut au moment de l'annonce pour tirer ces événements. */
+export const EVENT_MIN_ONLINE: Partial<Record<EventKind, number>> = { siege: 3, convoi: 2, tournoi: 2 };
+export const ONLINE_WINDOW_MS = 15 * 60 * 1000;
 export const TOURNEY_PRIZES_SECONDS = [2 * 60 * 60, 60 * 60, 30 * 60] as const;
 /** V9 : filon géant, 3 minutes de production par tranche de 10 minutes sur place, 30 minutes au plus. */
 export const MINE_SECONDS_PER_SLICE = 3 * 60;

@@ -264,7 +264,8 @@ export const CHANGELOG: ChangeEntry[] = [
     date: "10 novembre",
     items: [
       "👑 Nouvel événement, le convoi royal (90 min) : il traverse la carte et tombe dans une embuscade à mi-chemin, face à 50 % des armées réunies des joueurs actifs. Poste des troupes au point d'embuscade avant : si le convoi passe, chaque escorte reçoit 45 minutes de sa production. Les pertes reviennent à 60 % de l'infirmerie.",
-      "🏰 Nouvel événement, le siège du beffroi (3 h) : une armée valant 80 % des armées réunies frappe le beffroi à la fin. Poste des défenseurs au centre : victoire, 1 heure de production chacun ; défaite, l'étape en cours perd 10 % de sa pierre.",
+      "🏰 Nouvel événement, le siège du beffroi (3 h) : une armée valant 80 % des armées réunies frappe le beffroi à la fin. Poste des défenseurs au centre : victoire, 1 heure de production chacun ; défense battue, l'étape en cours perd 10 % de sa pierre. Si personne ne défend, l'armée repart sans rien détruire.",
+      "👥 Le siège n'est tiré que si au moins 3 joueurs sont en ligne à l'annonce, le convoi et le tournoi au moins 2. Sinon, un autre événement prend leur place.",
       "🏆 Nouvel événement, le tournoi (1 h) : compose une armée avec le budget fourni, sans toucher à tes troupes. Tableau à élimination à la fin, sans pertes : 2 h, 1 h et 30 min de production pour le podium.",
     ],
   },

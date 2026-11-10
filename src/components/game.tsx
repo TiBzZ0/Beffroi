@@ -2112,7 +2112,9 @@ function PlaceEventCard({ e, live, now, run }: { e: EventView; live: PlayerState
         {(e.kind === "convoi" || e.kind === "siege") && (
           <div className="row-desc">
             {e.resolved
-              ? e.outcome === "won"
+              ? e.outcome === "left"
+                ? e.kind === "convoi" ? "👑 Personne n'escortait le convoi." : "🏰 Personne ne défendait : l'armée est repartie sans rien détruire."
+                : e.outcome === "won"
                 ? e.kind === "convoi" ? "👑 Le convoi est passé." : "🏰 Le beffroi a tenu."
                 : e.kind === "convoi" ? "👑 Le convoi est tombé dans l'embuscade." : "🏰 Le beffroi est tombé : l'étape a perdu 10 % de sa pierre."
               : `${e.kind === "convoi" ? "Embuscade" : "Assaut"} dans ${duration(Math.max(0, (e.battleAt ?? e.endsAt) - now))} · ennemis : ${armyIcons(e.army)} · ${e.posters ?? 0} joueur${(e.posters ?? 0) > 1 ? "s" : ""} posté${(e.posters ?? 0) > 1 ? "s" : ""}${(e.posters ?? 0) > 0 ? ` (${Math.round(e.chance * 100)} % de tenir)` : ""}`}

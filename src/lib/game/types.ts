@@ -273,7 +273,7 @@ export interface EventView {
   /** V10 à V12 : heure du combat commun, s'il est réglé et son issue. */
   battleAt?: number;
   resolved?: boolean;
-  outcome?: "won" | "lost" | null;
+  outcome?: "won" | "lost" | "left" | null;
   /** V10, V11 : nombre de joueurs postés, si j'y suis, et l'armée commune des défenseurs. */
   posters?: number;
   myPosted?: boolean;

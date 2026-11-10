@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { EVENT_WEIGHTS, MERCHANT_PRICE_SECONDS, type EventKind } from "./config";
-import { pickNextEvent, tourneyPodium } from "./events";
+import { drawNextEvent, pickNextEvent, tourneyPodium } from "./events";
 import { advance, buyFromMerchant, buyUpgrade, catchVein, eventActive, generatorCost, newPlayerState, rateAt, raidBlocker, scheduleVein, type PlayerState } from "./engine";
 import { UPGRADES } from "./config";
 
@@ -71,5 +71,16 @@ describe("tourneyPodium", () => {
   it("est déterministe", () => {
     const e = { a: { piquier: 5 }, b: { piquier: 5 }, c: { piquier: 5 }, d: { piquier: 5 }, e: { piquier: 5 } };
     expect(tourneyPodium(e, 42)).toEqual(tourneyPodium(e, 42));
+  });
+});
+
+describe("drawNextEvent", () => {
+  it("ne tire ni siège, ni convoi, ni tournoi avec un seul joueur en ligne", () => {
+    for (let seed = 0; seed < 500; seed++) expect(["siege", "convoi", "tournoi"]).not.toContain(drawNextEvent("foire", seed, 1));
+  });
+  it("ne tire pas de siège à 2 joueurs, mais le permet à 3", () => {
+    const seeds = Array.from({ length: 2000 }, (_, i) => i);
+    expect(seeds.some((s) => drawNextEvent("foire", s, 2) === "siege")).toBe(false);
+    expect(seeds.some((s) => drawNextEvent("foire", s, 3) === "siege")).toBe(true);
   });
 });

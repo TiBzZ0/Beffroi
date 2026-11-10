@@ -1,5 +1,5 @@
 // Tirage des événements du royaume.
-import { EVENT_WEIGHTS, type EventKind } from "./config";
+import { EVENT_MIN_ONLINE, EVENT_WEIGHTS, type EventKind } from "./config";
 import { battle, seededRng, type Army } from "./battle";
 
 /** Prochain événement : tiré au sort selon les poids, jamais deux fois de suite le même (tirage fixé par le précédent). */
@@ -45,4 +45,11 @@ export function tourneyPodium(entries: Record<string, Army>, seed: number): stri
     round = next;
   }
   return [round[0], finalLoser, ...semis.slice(0, 1)].filter(Boolean);
+}
+
+/** Tirage qui saute les événements de groupe quand trop peu de joueurs sont en ligne. */
+export function drawNextEvent(lastKind: string, seed: number, online: number): EventKind {
+  let kind = pickNextEvent(lastKind, seed);
+  for (let i = 1; (EVENT_MIN_ONLINE[kind] ?? 0) > online && i < 50; i++) kind = pickNextEvent(kind, seed + i);
+  return kind;
 }
