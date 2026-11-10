@@ -960,3 +960,13 @@ a {
   height: 6px;
   margin-top: 4px;
 }
+
+.curfew {
+  margin-top: 18px;
+  border-top: 1px solid var(--line);
+  padding-top: 12px;
+}
+.curfew select {
+  margin-left: 4px;
+  width: auto;
+}

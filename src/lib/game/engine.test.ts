@@ -12,10 +12,14 @@ import {
   maxAffordable,
   newPlayerState,
   payTithe,
+  inCurfew,
+  setCurfew,
   openShare,
   recordGift,
   setTithe,
   productionPerSecond,
+  raidBlocker,
+  sabotageBlocker,
   stageSize,
   type PlayerState,
   type WorldState,
@@ -252,6 +256,36 @@ describe("paliers de don", () => {
     expect(b.state.donorTiers).toBe(3);
     expect(recordGift(b.state, size).tiers).toBe(0);
     expect(productionPerSecond(b.state, noWorld, 0)).toBeCloseTo(10 * 1.06);
+  });
+});
+
+describe("couvre-feu", () => {
+  const DAY = 86_400_000;
+  const midnight = Math.floor(T0 / DAY) * DAY + 10 * DAY;
+
+  it("une plage choisie prend effet 24 h plus tard, puis couvre 8 h par jour", () => {
+    const r = setCurfew(newPlayerState(midnight), 22 * 60, midnight); // 22 h à 6 h UTC
+    expect(r.ok).toBe(true);
+    if (!r.ok) return;
+    expect(inCurfew(r.value, midnight + 23 * 3_600_000)).toBe(false); // pas encore en vigueur
+    expect(inCurfew(r.value, midnight + DAY + 23 * 3_600_000)).toBe(true);
+    expect(inCurfew(r.value, midnight + 2 * DAY + 5 * 3_600_000)).toBe(true);
+    expect(inCurfew(r.value, midnight + 2 * DAY + 6 * 3_600_000)).toBe(false);
+  });
+
+  it("bloque les raids et les sabotages dans les deux sens", () => {
+    const sleeper = { ...newPlayerState(midnight), curfew: { start: 0 }, academy: 3 };
+    const raider = { ...newPlayerState(midnight), troops: { milicien: 10 } };
+    const at = midnight + 3_600_000;
+    const ctx = { now: at, attackerId: "a", victimId: "b", victimRate: 1 };
+    expect(raidBlocker(raider, sleeper, ctx)).toMatch(/couvre-feu/);
+    expect(raidBlocker({ ...raider, curfew: { start: 0 } }, newPlayerState(midnight), ctx)).toMatch(/couvre-feu/);
+    expect(sabotageBlocker(sleeper, at, raider)).toMatch(/couvre-feu/);
+  });
+
+  it("refuse une plage invalide", () => {
+    expect(setCurfew(newPlayerState(0), 1440, 0).ok).toBe(false);
+    expect(setCurfew(newPlayerState(0), 12.5, 0).ok).toBe(false);
   });
 });
 

@@ -93,6 +93,9 @@ import {
   openShare,
   recordGift,
   type StageShare,
+  type Curfew,
+  inCurfew,
+  setCurfew,
   stagesDoneAt,
   type PlayerState,
   type RaidReport,
@@ -140,7 +143,7 @@ interface PlayerRow {
   upgrades: string[];
   total_produced: number;
   total_contributed: number;
-  military?: { levels?: Record<string, number>; research?: { id: string; endsAt: number }[] | { id: string; endsAt: number } | null; academy?: number; sabotageImmuneUntil?: number; ruinImmuneUntil?: number; elanUntil?: number; tithe?: number; titheOwed?: number; titheSet?: boolean; share?: StageShare | null; donorTiers?: number } | null;
+  military?: { levels?: Record<string, number>; research?: { id: string; endsAt: number }[] | { id: string; endsAt: number } | null; academy?: number; sabotageImmuneUntil?: number; ruinImmuneUntil?: number; elanUntil?: number; tithe?: number; titheOwed?: number; titheSet?: boolean; share?: StageShare | null; donorTiers?: number; curfew?: Curfew | null } | null;
   total_clicks: number;
   last_update: string;
   last_click_at: string;
@@ -211,6 +214,17 @@ function armyCounts<Id extends string>(raw: Record<string, number> | null | unde
   return out;
 }
 
+function curfewMinute(v: unknown): number | null {
+  const n = Number(v);
+  return v === null || v === undefined || !Number.isInteger(n) || n < 0 || n >= 1440 ? null : n;
+}
+
+function cleanCurfew(c: Curfew | null | undefined): Curfew {
+  if (!c) return { start: null };
+  const next = c.next && Number.isFinite(Number(c.next.from)) ? { start: curfewMinute(c.next.start), from: Number(c.next.from) } : null;
+  return next ? { start: curfewMinute(c.start), next } : { start: curfewMinute(c.start) };
+}
+
 function toEntity(row: PlayerRow): Entity {
   const lord = LORD_BY_ID.get(row.user_id);
   return {
@@ -264,6 +278,7 @@ function toEntity(row: PlayerRow): Entity {
         ? { stage: Number(row.military.share.stage), size: Number(row.military.share.size), given: Number(row.military.share.given ?? 0), tiers: Number(row.military.share.tiers ?? 0) }
         : null,
       donorTiers: Math.max(0, Math.floor(Number(row.military?.donorTiers ?? 0) || 0)),
+      curfew: cleanCurfew(row.military?.curfew),
     },
   };
 }
@@ -291,7 +306,7 @@ function toJson(e: Entity, state: PlayerState, extra: Record<string, unknown> = 
     troops: state.troops,
     defenses: state.defenses,
     stationed: state.stationed,
-    military: { levels: state.levels, research: state.research, academy: state.academy, sabotageImmuneUntil: state.sabotageImmuneUntil, ruinImmuneUntil: state.ruinImmuneUntil, elanUntil: state.elanUntil, tithe: state.tithe, titheOwed: state.titheOwed, titheSet: state.titheSet, share: state.share, donorTiers: state.donorTiers },
+    military: { levels: state.levels, research: state.research, academy: state.academy, sabotageImmuneUntil: state.sabotageImmuneUntil, ruinImmuneUntil: state.ruinImmuneUntil, elanUntil: state.elanUntil, tithe: state.tithe, titheOwed: state.titheOwed, titheSet: state.titheSet, share: state.share, donorTiers: state.donorTiers, curfew: state.curfew },
     click_strikes: state.clickStrikes,
     click_paused_until: iso(state.clickPausedUntil),
     ...extra,
@@ -711,6 +726,7 @@ function fortressLevels(f: FortressRow, entities: Map<string, Entity>): Levels {
 function fortressBlocker(me: Entity, state: PlayerState, f: FortressRow, now: number): string | null {
   if (me.allianceId === null) return "Rejoins une alliance pour assiéger la forteresse.";
   if (f.holder === me.allianceId) return "Ton alliance tient déjà la forteresse.";
+  if (inCurfew(state, now)) return "Tu es en couvre-feu : pas d'attaque pendant ta plage.";
   if (now - state.lastRaidAt < RAID_COOLDOWN_MS) return "Tes troupes se reposent encore.";
   if (armySize(attackArmy(state)) === 0) return "Il te faut des troupes pour l'assaut.";
   return null;
@@ -1261,9 +1277,10 @@ function rivalsFor(
         burnedUntil: s.burnedUntil,
         totalPlundered: s.totalPlundered,
         lastSeen: e.isLord ? undefined : e.lastSeen,
+        curfew: e.isLord ? undefined : inCurfew(s, now),
         revenge,
         blocker: raidBlocker(myState, s, ctx),
-        ...(e.isLord || allied ? {} : { academy: s.academy, researching: s.research.length > 0, sabotageBlocker: sabotageBlocker(s, now), sabotageCost: sabotageCost(myState, s, world, now) }),
+        ...(e.isLord || allied ? {} : { academy: s.academy, researching: s.research.length > 0, sabotageBlocker: sabotageBlocker(s, now, myState), sabotageCost: sabotageCost(myState, s, world, now) }),
       };
     })
     .sort((a, b) => Number(a.isLord) - Number(b.isLord) || (a.difficulty ?? 0) - (b.difficulty ?? 0) || b.loot - a.loot);
@@ -1319,6 +1336,10 @@ function applySimpleAction(state: PlayerState, action: GameAction, now: number, 
     case "research": {
       const r = startResearch(state, String(action.id), now);
       return r.ok ? { ok: true, value: { state: r.value, log: { action: "research", details: { id: action.id, level: queuedLevel(state, action.id as CombatantId) + 1 } } } } : r;
+    }
+    case "curfew": {
+      const r = setCurfew(state, action.start === null ? null : Number(action.start), now);
+      return r.ok ? { ok: true, value: { state: r.value, log: { action: "curfew", details: { start: action.start } } } } : r;
     }
     case "tithe": {
       const r = setTithe(state, Number(action.percent));
@@ -1411,7 +1432,7 @@ export async function runAction(admin: SupabaseClient, userId: string, action: G
       if (!target || !targetState || target.id === me.id || target.isLord) error = "Cible inconnue.";
       else if (isAllied(me, target)) error = "On ne sabote pas un allié.";
       else if (current.stone < cost) error = `Il faut ${Math.ceil(cost).toLocaleString("fr-FR")} pierres pour payer un saboteur.`;
-      else error = sabotageBlocker(targetState, now);
+      else error = sabotageBlocker(targetState, now, current);
       if (!error && target && targetState) {
         const success = Math.random() < sabotageChance(defenseArmy(targetState));
         const mine = { ...current, stone: current.stone - cost };

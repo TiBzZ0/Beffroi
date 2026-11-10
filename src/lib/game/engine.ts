@@ -74,6 +74,8 @@ import {
   STAGE_MIN_SIZE,
   STAGE_SIZE_HOURS,
   MAX_TITHE,
+  CURFEW_MINUTES,
+  CURFEW_DELAY_MS,
   SHARE_HOURS,
   DONOR_TIERS,
   DONOR_TIER_ECUS,
@@ -130,12 +132,21 @@ export interface PlayerState {
   share: StageShare | null;
   /** Paliers de don atteints depuis le début de la saison (+2 % de production chacun). */
   donorTiers: number;
+  /** Couvre-feu (C2) : début de la plage de 8 h en minutes UTC, et changement en attente. */
+  curfew: Curfew;
   /** Le joueur a déjà réglé sa dîme (sinon on lui montre le bandeau « Règle ta dîme »). */
   titheSet: boolean;
   /** Son alliance tient la forteresse (bonus de production). Fixé par le serveur, jamais enregistré. */
   fortress?: boolean;
   /** Coup de pouce aux joueurs distancés (0.3 = +30 % de production et de défense). Fixé par le serveur, jamais enregistré. */
   catchUp?: number;
+}
+
+export interface Curfew {
+  /** Minute UTC (0 à 1439) où commence la plage en vigueur, ou null sans couvre-feu. */
+  start: number | null;
+  /** Plage choisie qui entrera en vigueur à `from` (null pour supprimer le couvre-feu). */
+  next?: { start: number | null; from: number } | null;
 }
 
 export interface StageShare {
@@ -187,6 +198,7 @@ export function newPlayerState(now: number): PlayerState {
     tithe: 0,
     titheOwed: 0,
     titheSet: false,
+    curfew: { start: null },
     share: null,
     donorTiers: 0,
   };
@@ -285,7 +297,7 @@ export function rateAt(state: PlayerState, world: WorldState, t: number, opts: A
  * événement survenu pendant l'absence (étape du chantier terminée, fin d'incendie).
  */
 export function advance(state: PlayerState, now: number, world: WorldState, opts: AdvanceOptions = {}): PlayerState {
-  state = settleResearch(state, now);
+  state = settleCurfew(settleResearch(state, now), now);
   if (now <= state.lastUpdate) return state;
   const start = Math.max(state.lastUpdate, now - OFFLINE_CAP_MS);
   const events = [...world.stageCompletedAt, state.burnedUntil, state.elanUntil ?? 0];
@@ -408,6 +420,37 @@ export function contribute(state: PlayerState, amount: number): Result<PlayerSta
     ok: true,
     value: { ...state, stone: state.stone - given, totalContributed: state.totalContributed + given },
   };
+}
+
+/** Plage de couvre-feu en vigueur à `now` (minute UTC de début), ou null. */
+export function curfewStart(state: PlayerState, now: number): number | null {
+  const c = state.curfew;
+  if (!c) return null;
+  if (c.next && c.next.from <= now) return c.next.start;
+  return c.start;
+}
+
+/** Le joueur est-il dans sa plage de couvre-feu à `now` ? */
+export function inCurfew(state: PlayerState, now: number): boolean {
+  const start = curfewStart(state, now);
+  if (start === null) return false;
+  const minute = Math.floor((now % 86_400_000) / 60_000);
+  return (minute - start + 1440) % 1440 < CURFEW_MINUTES;
+}
+
+/** Fait passer en vigueur un changement de plage arrivé à échéance. */
+export function settleCurfew(state: PlayerState, now: number): PlayerState {
+  const next = state.curfew?.next;
+  if (!next || next.from > now) return state;
+  return { ...state, curfew: { start: next.start } };
+}
+
+/** Choisit une plage (minute UTC de début, ou null pour aucune) : elle prend effet 24 h plus tard. */
+export function setCurfew(state: PlayerState, start: number | null, now: number): Result<PlayerState> {
+  if (start !== null && (!Number.isInteger(start) || start < 0 || start >= 1440)) return { ok: false, error: "Plage invalide." };
+  const current = settleCurfew(state, now).curfew ?? { start: null };
+  if (current.start === start) return { ok: true, value: { ...state, curfew: { start } } };
+  return { ok: true, value: { ...state, curfew: { start: current.start, next: { start, from: now + CURFEW_DELAY_MS } } } };
 }
 
 /** Règle la dîme, en pour cent entiers de 0 à 20. */
@@ -695,6 +738,8 @@ export function raidBlocker(attacker: PlayerState, victim: PlayerState, ctx: Omi
   const revenge = hasRevenge(attacker, ctx.victimId, ctx.now);
   if (ctx.attackerId === ctx.victimId) return "On ne se pille pas soi-même.";
   if (ctx.allied) return "On ne pille pas un allié.";
+  if (inCurfew(attacker, ctx.now)) return "Tu es en couvre-feu : pas d'attaque pendant ta plage.";
+  if (inCurfew(victim, ctx.now)) return "Ce domaine est en couvre-feu.";
   // En guerre, seuls les boucliers tombent ; le repos et la règle « pas deux fois la même cible » restent.
   const free = revenge;
   if (!ctx.atWar && victim.shieldUntil > ctx.now) return "Cette cible est sous bouclier.";
@@ -930,7 +975,9 @@ export function sabotageChance(defense: Army): number {
 }
 
 /** Pourquoi on ne peut pas saboter cette cible, ou null. */
-export function sabotageBlocker(target: PlayerState, now: number): string | null {
+export function sabotageBlocker(target: PlayerState, now: number, saboteur?: PlayerState): string | null {
+  if (saboteur && inCurfew(saboteur, now)) return "Tu es en couvre-feu : pas de sabotage pendant ta plage.";
+  if (inCurfew(target, now)) return "Ce domaine est en couvre-feu.";
   if (target.sabotageImmuneUntil > now) return "Sa garde est sur le qui-vive après un sabotage récent.";
   if ((target.academy ?? 0) === 0 && (target.research ?? []).length === 0) return "Rien à saboter : pas d'académie ni de recherche en cours.";
   return null;

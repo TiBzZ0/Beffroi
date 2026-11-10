@@ -175,6 +175,9 @@ export const DONOR_TIERS = [0.25, 0.5, 1] as const;
 export const DONOR_TIER_ECUS = [5, 10, 15] as const;
 /** Chaque palier atteint donne +2 % de production jusqu'à la fin de la saison. */
 export const DONOR_TIER_BONUS = 0.02;
+/** C2 : couvre-feu de 8 h par jour ; un changement de plage prend effet 24 h plus tard. */
+export const CURFEW_MINUTES = 8 * 60;
+export const CURFEW_DELAY_MS = 24 * 3_600_000;
 /** Taille minimale d'une étape, pour un chantier sans joueur actif. */
 export const STAGE_MIN_SIZE = 50_000;
 

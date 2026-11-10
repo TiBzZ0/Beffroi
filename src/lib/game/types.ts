@@ -48,6 +48,8 @@ export interface RivalView {
   totalPlundered: number;
   /** Joueurs : dernière activité (heure serveur). Les seigneurs n'en ont pas. */
   lastSeen?: number;
+  /** Le joueur est dans sa plage de couvre-feu : ni attaque ni sabotage. */
+  curfew?: boolean;
   /** Titres gagnés à la saison précédente. */
   titles?: string[];
   /** Joueurs rivaux : niveau d'académie, recherche en cours, et ce qui empêche de les saboter (null = possible). */
@@ -179,6 +181,7 @@ export type GameAction =
   | { type: "research"; id: string }
   | { type: "academy" }
   | { type: "tithe"; percent: number }
+  | { type: "curfew"; start: number | null }
   | { type: "sabotage"; target: string };
 
 export interface EventView {

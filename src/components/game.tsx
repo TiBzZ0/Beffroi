@@ -17,6 +17,7 @@ import {
   DONOR_TIERS,
   DONOR_TIER_ECUS,
   DONOR_TIER_BONUS,
+  CURFEW_MINUTES,
   ACADEMY_SPEED,
   RESEARCH_QUEUE_MAX,
   DEFENSES,
@@ -32,6 +33,7 @@ import {
 } from "@/lib/game/config";
 import {
   advance,
+  inCurfew,
   armyWorth,
   clickValue,
   generatorCost,
@@ -777,6 +779,7 @@ function Raids({ snap, live, now, run }: { snap: GameSnapshot; live: PlayerState
           history={(snap.chronicle ?? []).filter((c) => c.kind === "event" && c.details.phase === "attack" && c.details.eventId === snap.event?.id)}
           me={snap.userId}
         />}
+      {inCurfew(live, now) && <p className="raid-state">🌙 Tu es en couvre-feu : ni attaque ni sabotage, dans un sens comme dans l&apos;autre.</p>}
       <p className="raid-state">
         {cooldown > 0 ? `⏳ Tes troupes se reposent encore ${duration(cooldown)}.` : "⚔️ Tes troupes sont prêtes."}
       </p>
@@ -786,12 +789,13 @@ function Raids({ snap, live, now, run }: { snap: GameSnapshot; live: PlayerState
             Un raid est une bataille de 4 rounds au plus : toutes tes troupes (et les renforts de tes alliés) contre les troupes, fortifications et 3 gardes
             de la cible. Chaque unité a ses forces et ses faiblesses, compose ton armée selon ce que tu vois en face. Tu gagnes si plus personne ne
             riposte en face. Les pertes sont réelles des deux côtés (70 % des fortifications abattues se relèvent). Un raid réussi vole 25 % (40 % en
-            revanche) de la pierre non sécurisée (la dernière demi-heure de production est à l&apos;abri, mais jamais plus de la moitié du stock),
+            revanche) de la pierre non sécurisée (les 2 dernières heures de production sont à l&apos;abri, mais jamais plus de la moitié du stock),
             incendie les ateliers 30 min et ruine quelques bâtiments ; la victime reçoit 4 h de bouclier (10 min pour un seigneur) et un droit de revanche (+50 % de dégâts). Les
             seigneurs difficiles ne frappent que ceux qui les ont attaqués. De loin, tu ne vois qu&apos;une estimation (≈) des armées : un espion révèle
             l&apos;armée exacte pendant 1 h, mais il peut être repéré (surtout par les tours d&apos;archers).
           </p>
           <Garrison live={live} run={run} />
+          <CurfewCard live={live} now={now} run={run} />
         </>
       )}
       {view === "forge" && <Forge live={live} now={now} run={run} />}
@@ -868,6 +872,54 @@ function AllianceTab({ snap, live, now, run }: { snap: GameSnapshot; live: Playe
   );
 }
 
+/** Heure locale (« 23 h » ou « 23 h 30 ») d'une minute UTC de la journée. */
+function localTime(utcMinute: number): string {
+  const local = (utcMinute - new Date().getTimezoneOffset() + 2880) % 1440;
+  const h = Math.floor(local / 60);
+  const m = local % 60;
+  return m ? `${h} h ${String(m).padStart(2, "0")}` : `${h} h`;
+}
+
+/** C2 : plage de 8 h par jour sans attaque ni sabotage, choisie en heure locale. */
+function CurfewCard({ live, now, run }: { live: PlayerState; now: number; run: ReturnType<typeof useGame>["run"] }) {
+  const [busy, setBusy] = useState(false);
+  const offset = new Date().getTimezoneOffset();
+  const current = live.curfew?.start ?? null;
+  const next = live.curfew?.next && live.curfew.next.from > now ? live.curfew.next : null;
+  const pick = async (value: string) => {
+    setBusy(true);
+    const start = value === "" ? null : (Number(value) * 60 + offset + 1440) % 1440;
+    await run({ type: "curfew", start });
+    setBusy(false);
+  };
+  const shown = next ? next.start : current;
+  const localHour = shown === null ? "" : String(Math.floor(((shown - offset + 1440) % 1440) / 60));
+  const span = (start: number) => `de ${localTime(start)} à ${localTime((start + CURFEW_MINUTES) % 1440)}`;
+  return (
+    <div className="curfew">
+      <div className="row-title">🌙 Couvre-feu</div>
+      <p className="note">
+        Pendant 8 heures par jour, tu ne peux ni attaquer ni être attaqué, ni saboter ni être saboté, seigneurs et guerre compris. Ta production et ta dîme continuent. Un changement prend effet 24 heures plus tard.
+      </p>
+      <label className="note" htmlFor="curfew">
+        Début de la plage (heure locale) :{" "}
+        <select id="curfew" className="input" disabled={busy} value={localHour} onChange={(e) => pick(e.target.value)}>
+          <option value="">aucun couvre-feu</option>
+          {Array.from({ length: 24 }, (_, h) => (
+            <option key={h} value={h}>
+              {h} h à {(h + CURFEW_MINUTES / 60) % 24} h
+            </option>
+          ))}
+        </select>
+      </label>
+      <p className="note">
+        {current === null ? "Aucun couvre-feu en vigueur." : `En vigueur : ${span(current)}.`}
+        {next ? ` À partir du ${new Date(next.from).toLocaleString("fr-FR", { weekday: "long", hour: "2-digit", minute: "2-digit" })} : ${next.start === null ? "aucun couvre-feu" : span(next.start)}.` : ""}
+      </p>
+    </div>
+  );
+}
+
 function RivalRow({
   r,
   now,
@@ -913,6 +965,7 @@ function RivalRow({
             </span>
           ))}
           <Presence lastSeen={r.lastSeen} now={now} />
+          {r.curfew && <span className="badge" title="En couvre-feu : ni attaque ni sabotage">🌙 couvre-feu</span>}
         </div>
         <div className="row-desc num">
           {r.temper ? `${r.temper} · ` : ""}
