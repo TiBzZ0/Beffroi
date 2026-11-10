@@ -864,7 +864,9 @@ async function runEventAttack(admin: SupabaseClient, seasonId: number, me: Entit
   let pool = e.pool;
   let message: string;
   if (e.kind === "caravane") {
-    const take = fight.success ? Math.floor(Math.min(pool, e.prize * CARAVAN_TAKE)) : 0;
+    // Le dernier pillard emporte aussi les miettes, pour ne pas laisser une caravane « vide » à 3 pierres.
+    const share = Math.floor(Math.min(pool, e.prize * CARAVAN_TAKE));
+    const take = fight.success ? (pool - share < e.prize * 0.01 ? pool : share) : 0;
     pool -= take;
     after = { ...after, stone: after.stone + take };
     attackers[me.id] = take;

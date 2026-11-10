@@ -438,18 +438,18 @@ export const HALL_PODIUM = 3;
 
 // Améliorations militaires : chaque niveau donne +10 % d'attaque et de PV au type amélioré.
 export const LEVEL_BONUS = 0.1;
-/** Prix d'un niveau : coût d'un exemplaire × 100 × 2,2^niveau actuel. */
-export const RESEARCH_COST_FACTOR = 100;
+/** Prix d'un niveau : coût d'un exemplaire × 10 000 × 2,2^niveau actuel (piquier niveau 1 : 4 M ; niveau 10 : ≈ 10 G). */
+export const RESEARCH_COST_FACTOR = 10_000;
 export const RESEARCH_COST_GROWTH = 2.2;
 /** Durée d'un niveau : 2 min × 1,6^niveau actuel (niveau 10 ≈ 3 h 40, niveau 15 ≈ 39 h), divisée par l'académie. */
 export const RESEARCH_BASE_MS = 2 * 60 * 1000;
 /** Recherches en file d'attente, celle en cours comprise. */
 export const RESEARCH_QUEUE_MAX = 3;
 export const RESEARCH_TIME_GROWTH = 1.6;
-/** Académie militaire : chaque niveau accélère la recherche de 25 % (durée ÷ (1 + 0,25 × niveau)). */
-export const ACADEMY_SPEED = 0.25;
+/** Académie militaire : chaque niveau accélère la recherche de 10 % (durée ÷ (1 + 0,1 × niveau)), et coûte 3 fois plus que le précédent. */
+export const ACADEMY_SPEED = 0.1;
 export const ACADEMY_BASE_COST = 50_000;
-export const ACADEMY_COST_GROWTH = 2.5;
+export const ACADEMY_COST_GROWTH = 3;
 /** Sabotage de l'académie d'un rival : la moitié du prix du niveau visé, et au moins 3 min de sa propre production (1 000 au minimum). */
 export const SABOTAGE_LEVEL_SHARE = 0.5;
 export const SABOTAGE_COST_SECONDS = 180;
