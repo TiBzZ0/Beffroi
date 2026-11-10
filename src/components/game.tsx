@@ -49,6 +49,7 @@ import {
 import { formatNumber, formatRate } from "@/lib/game/format";
 import { worldFrom, type AllianceSummary, type ChronicleEntry, type EventView, type GameSnapshot, type RivalView } from "@/lib/game/types";
 import { useGame, useLeaderboard, usePush, useTick } from "./use-game";
+import { CHANGELOG } from "@/lib/game/changelog";
 
 type Tab = "ateliers" | "ameliorations" | "chantier" | "raids" | "alliance" | "classement";
 type Qty = 1 | 10 | "max";
@@ -78,6 +79,7 @@ export function Game({ userId }: { userId: string }) {
 
   return (
     <div className="game">
+      <WhatsNew />
       <TopBar snap={snap} now={now} />
       <div className="layout">
         <Hero snap={snap} rate={rate} clickGain={clickValue(live, world, stagesDone)} game={game} />
@@ -105,6 +107,49 @@ export function Game({ userId }: { userId: string }) {
           {game.toast}
         </div>
       )}
+    </div>
+  );
+}
+
+/** Panneau « Ce qui change » : les nouvelles règles, une fois à la connexion suivante. */
+function WhatsNew() {
+  // Rendu seulement côté navigateur (le jeu attend sa première synchronisation), on peut lire le stockage tout de suite.
+  const [seen, setSeen] = useState<number>(() => {
+    try {
+      return Number(localStorage.getItem("beffroi.changes") ?? 0);
+    } catch {
+      return CHANGELOG.at(-1)?.id ?? 0;
+    }
+  });
+  const fresh = CHANGELOG.filter((c) => c.id > seen);
+  if (fresh.length === 0) return null;
+  const close = () => {
+    const last = CHANGELOG.at(-1)?.id ?? 0;
+    try {
+      localStorage.setItem("beffroi.changes", String(last));
+    } catch {
+      // pas de stockage : le panneau reviendra
+    }
+    setSeen(last);
+  };
+  return (
+    <div className="modal-backdrop" role="dialog" aria-modal="true" aria-label="Ce qui change">
+      <div className="modal panel">
+        <h2>📜 Ce qui change</h2>
+        {fresh.map((c) => (
+          <section key={c.id}>
+            <h3>{c.date}</h3>
+            <ul>
+              {c.items.map((t) => (
+                <li key={t}>{t}</li>
+              ))}
+            </ul>
+          </section>
+        ))}
+        <button className="btn btn-primary" onClick={close}>
+          Compris
+        </button>
+      </div>
     </div>
   );
 }
@@ -995,7 +1040,8 @@ function Wars({ snap, run, now }: { snap: GameSnapshot; run: ReturnType<typeof u
             </span>
           </div>
           <div className="row-desc">
-            Encore {duration(w.endsAt - now)}. Pendant la guerre, ni pause ni bouclier entre vous : chaque pierre pillée compte. Les vainqueurs se
+            {w.startsAt > now ? `Commence dans ${duration(w.startsAt - now)}, puis dure 24 h.` : `Encore ${duration(w.endsAt - now)}.`} Pendant la guerre, plus de
+            bouclier entre vous (le repos de 5 min reste, et pas deux fois de suite la même cible) : chaque pierre pillée compte. Les vainqueurs se
             partagent une prime égale à la moitié du butin total.
           </div>
         </div>

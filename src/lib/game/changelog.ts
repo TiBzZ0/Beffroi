@@ -1,0 +1,23 @@
+// Ce qui change : chaque mise en ligne qui touche une règle ajoute une entrée ici (la plus récente en dernier).
+// Le panneau s'affiche une fois à la connexion suivante ; c'est le seul moyen de prévenir les joueurs.
+
+export interface ChangeEntry {
+  id: number;
+  date: string;
+  items: string[];
+}
+
+export const CHANGELOG: ChangeEntry[] = [
+  {
+    id: 1,
+    date: "10 novembre",
+    items: [
+      "🔨 Marteau : un bug comptait plusieurs fois les mêmes coups et confisquait le marteau même en cliquant lentement. Il est corrigé. Le plafond passe à 20 coups par seconde.",
+      "🛡️ Les 2 dernières heures de ta production sont à l'abri des pillards (au lieu de 30 minutes), jamais plus de la moitié du stock.",
+      "⚔️ Entre joueurs, le butin d'un raid est plafonné à 2 heures de la production de l'attaquant, et on ne peut plus attaquer un domaine dix fois plus petit que soi (sauf revanche et guerre).",
+      "🩹 Un défenseur battu récupère tout de suite la moitié des troupes perdues. Après un raid qui a ruiné des bâtiments, plus aucune ruine pendant 24 heures.",
+      "🏰 Les seigneurs produisent beaucoup moins, leur coffre est plafonné à 12 heures de production, et leur défense dépend de ce qu'ils ont dans le coffre : un raid gagné rapporte à la mesure de ce qu'il coûte. Les seigneurs faciles suivent les petits joueurs.",
+      "⚔️ Guerre : elle commence 2 heures après la déclaration. Les boucliers restent levés entre ennemis, mais le repos de 5 minutes s'applique et on ne frappe pas deux fois de suite la même cible.",
+    ],
+  },
+];

@@ -214,6 +214,8 @@ export interface WarView {
   enemyName: string;
   myScore: number;
   enemyScore: number;
+  /** La guerre commence 2 h après la déclaration. */
+  startsAt: number;
   endsAt: number;
 }
 

@@ -7,16 +7,16 @@ export const SEASON_DAYS = 14;
 export const OFFLINE_CAP_MS = 8 * 60 * 60 * 1000;
 
 /** Clics acceptés au plus par seconde. L'excédent est ignoré. */
-export const MAX_CLICKS_PER_SECOND = 80;
+export const MAX_CLICKS_PER_SECOND = 20;
 /** Fenêtre maximale de clics prise en compte par lot (évite d'accumuler un crédit de clics). */
 export const CLICK_WINDOW_MAX_MS = 10_000;
 /**
- * Anti-triche : au-delà de 75 coups/s soutenus sur 5 envois de suite (≈ 15 s), le marteau est confisqué 2 min.
- * La cadence est mesurée sur au moins 6 s, pour qu'un envoi retardé par le réseau ne gonfle pas la mesure.
+ * Anti-triche : au-delà de 18 coups/s soutenus sur 5 envois de suite, le marteau est confisqué 2 min.
+ * La cadence est mesurée sur le temps réel écoulé depuis le lot précédent, et sur au moins 15 s.
  */
-export const SUSPICIOUS_CLICK_RATE = 75;
+export const SUSPICIOUS_CLICK_RATE = 18;
 export const CLICK_STRIKES_FOR_PAUSE = 5;
-export const CLICK_RATE_MIN_WINDOW_MS = 6_000;
+export const CLICK_RATE_MIN_WINDOW_MS = 15_000;
 export const CLICK_PAUSE_MS = 2 * 60 * 1000;
 
 /** Croissance du prix de chaque bâtiment supplémentaire. */
@@ -176,7 +176,7 @@ export const RAID_COOLDOWN_MS = 5 * 60 * 1000;
 export const RAID_LOOT_RATE = 0.25;
 export const REVENGE_LOOT_RATE = 0.4;
 /** Stock sécurisé : N secondes de la production de la victime ne peuvent pas être volées. */
-export const SECURED_SECONDS = 30 * 60;
+export const SECURED_SECONDS = 2 * 60 * 60;
 /** Part du stock qui reste toujours exposée au pillage, même si la production est forte. */
 export const MIN_EXPOSED_SHARE = 0.5;
 /** Ateliers incendiés : production réduite de moitié pendant 30 min. */
@@ -336,6 +336,8 @@ export const MAX_ALLIANCE_SIZE = 4;
 // Guerres d'alliances : 24 h sans pause ni bouclier entre ennemis ; la moitié du butin total
 // revient en prime à l'alliance gagnante.
 export const WAR_MS = 24 * 60 * 60 * 1000;
+/** A5 : une guerre commence 2 h après sa déclaration (le temps de s'organiser). */
+export const WAR_DELAY_MS = 2 * 60 * 60 * 1000;
 
 // Forteresse : une seule par saison, à prendre en alliance.
 /** Bonus de production pour tous les membres de l'alliance qui la tient. */
@@ -358,16 +360,16 @@ export const SPY_DETECT_MAX = 0.9;
  * dont `troopShare` en troupes (qui défendent et raident), le reste en fortifications.
  */
 export const LORD_ARMY: Record<LordKey, { power: number; troopShare: number; troops: Partial<Record<UnitId, number>>; forts: Partial<Record<DefenseId, number>> }> = {
-  bourbelin: { power: 0.1, troopShare: 0.0, troops: {}, forts: { palissade: 1 } },
+  bourbelin: { power: 0.1, troopShare: 0.0, troops: {}, forts: { palissade: 0.6, tour: 0.4 } },
   aubeval: { power: 0.25, troopShare: 0.0, troops: {}, forts: { palissade: 0.5, tour: 0.5 } },
   corbelune: { power: 0.45, troopShare: 0.6, troops: { chevalier: 0.5, arbaletrier: 0.3, milicien: 0.2 }, forts: { palissade: 0.5, tour: 0.5 } },
   ventebrise: { power: 0.55, troopShare: 0.45, troops: { arbaletrier: 0.6, chevalier: 0.4 }, forts: { tour: 0.6, palissade: 0.4 } },
   grisemolle: { power: 1.0, troopShare: 0.29, troops: { piquier: 0.5, arbaletrier: 0.5 }, forts: { muraille: 0.4, baliste: 0.4, tour: 0.2 } },
   noirval: { power: 1.4, troopShare: 0.5, troops: { chevalier: 0.6, piquier: 0.2, arbaletrier: 0.2 }, forts: { baliste: 0.5, tour: 0.3, palissade: 0.2 } },
   hautefaille: { power: 3, troopShare: 0.44, troops: { chevalier: 0.4, arbaletrier: 0.3, piquier: 0.3 }, forts: { muraille: 0.4, baliste: 0.4, tour: 0.2 } },
-  moulinet: { power: 0.1, troopShare: 0.0, troops: {}, forts: { palissade: 1 } },
+  moulinet: { power: 0.1, troopShare: 0.0, troops: {}, forts: { palissade: 0.6, tour: 0.4 } },
   bruyere: { power: 0.15, troopShare: 0.0, troops: {}, forts: { palissade: 0.6, tour: 0.4 } },
-  pontcroix: { power: 0.2, troopShare: 0.36, troops: { milicien: 1 }, forts: { palissade: 1 } },
+  pontcroix: { power: 0.2, troopShare: 0.4, troops: { milicien: 1 }, forts: { palissade: 1 } },
   sauleraie: { power: 0.2, troopShare: 0.43, troops: { chevalier: 0.6, milicien: 0.4 }, forts: { palissade: 1 } },
   roncebois: { power: 0.4, troopShare: 0.62, troops: { milicien: 0.5, arbaletrier: 0.5 }, forts: { palissade: 1 } },
   clairmarais: { power: 0.5, troopShare: 0.26, troops: { arbaletrier: 1 }, forts: { tour: 0.7, palissade: 0.3 } },
@@ -461,3 +463,22 @@ export const SABOTAGE_MIN_SUCCESS = 0.1;
 /** Un sabotage réussi abat un niveau d'académie, retarde la recherche en cours de 20 % du temps restant, et protège la cible 1 h. */
 export const SABOTAGE_DELAY = 0.2;
 export const SABOTAGE_IMMUNITY_MS = 60 * 60 * 1000;
+
+// Raids entre joueurs (audit, vague 1).
+/** A6 : butin plafonné à 2 h de production de l'attaquant, revanche comprise. */
+export const PVP_LOOT_CAP_SECONDS = 2 * 60 * 60;
+/** A6 : on ne peut pas attaquer une cible dont la taille relative est sous 0,1 (sauf guerre et revanche). */
+export const MIN_TARGET_SIZE = 0.1;
+/** A7 : le défenseur battu récupère tout de suite la moitié des troupes perdues. */
+export const DEFEATED_TROOP_RECOVERY = 0.5;
+/** A7 : après des ruines, plus aucune ruine pendant 24 h. */
+export const RUIN_IMMUNITY_MS = 24 * 60 * 60 * 1000;
+
+// Seigneurs (audit, vague 1).
+/** A3 : production des seigneurs = référence des joueurs × rateFactor × 0,17. */
+export const LORD_RATE_SCALE = 0.17;
+/** A3 : coffre plafonné à 12 h de production. */
+export const LORD_COFFER_SECONDS = 12 * 60 * 60;
+/** A4 : valeur de la défense = part du coffre selon le niveau (plancher : la même part de 2 h de production). */
+export const LORD_DEFENSE_SHARE: Record<1 | 2 | 3 | 4, number> = { 1: 0.1, 2: 0.2, 3: 0.3, 4: 0.4 };
+export const LORD_DEFENSE_FLOOR_SECONDS = 2 * 60 * 60;

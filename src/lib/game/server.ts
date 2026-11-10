@@ -14,6 +14,11 @@ import {
   SPY_INTEL_MS,
   MAX_ALLIANCE_SIZE,
   FORTRESS_NAME,
+  LORD_RATE_SCALE,
+  LORD_COFFER_SECONDS,
+  LORD_DEFENSE_SHARE,
+  LORD_DEFENSE_FLOOR_SECONDS,
+  PVP_LOOT_CAP_SECONDS,
   HALL,
   HALL_PODIUM,
   EVENT_GAP_MS,
@@ -30,6 +35,7 @@ import {
   FORTRESS_WALLS_POWER,
   RAID_COOLDOWN_MS,
   WAR_MS,
+  WAR_DELAY_MS,
   type UnitId,
   type CombatantId,
   GUARDS_PER_DOMAIN,
@@ -66,6 +72,8 @@ import {
   raidBlocker,
   buyArmy,
   rateAt,
+  relativeSize,
+  troopsHere,
   startResearch,
   buyAcademy,
   queuedLevel,
@@ -123,7 +131,7 @@ interface PlayerRow {
   upgrades: string[];
   total_produced: number;
   total_contributed: number;
-  military?: { levels?: Record<string, number>; research?: { id: string; endsAt: number }[] | { id: string; endsAt: number } | null; academy?: number; sabotageImmuneUntil?: number } | null;
+  military?: { levels?: Record<string, number>; research?: { id: string; endsAt: number }[] | { id: string; endsAt: number } | null; academy?: number; sabotageImmuneUntil?: number; ruinImmuneUntil?: number } | null;
   total_clicks: number;
   last_update: string;
   last_click_at: string;
@@ -235,6 +243,7 @@ function toEntity(row: PlayerRow): Entity {
       research: [row.military?.research ?? []].flat().map((r) => ({ id: r.id as CombatantId, endsAt: Number(r.endsAt) })),
       academy: Number(row.military?.academy ?? 0),
       sabotageImmuneUntil: Number(row.military?.sabotageImmuneUntil ?? 0),
+      ruinImmuneUntil: Number(row.military?.ruinImmuneUntil ?? 0),
     },
   };
 }
@@ -262,7 +271,7 @@ function toJson(e: Entity, state: PlayerState, extra: Record<string, unknown> = 
     troops: state.troops,
     defenses: state.defenses,
     stationed: state.stationed,
-    military: { levels: state.levels, research: state.research, academy: state.academy, sabotageImmuneUntil: state.sabotageImmuneUntil },
+    military: { levels: state.levels, research: state.research, academy: state.academy, sabotageImmuneUntil: state.sabotageImmuneUntil, ruinImmuneUntil: state.ruinImmuneUntil },
     click_strikes: state.clickStrikes,
     click_paused_until: iso(state.clickPausedUntil),
     ...extra,
@@ -339,15 +348,21 @@ function medianLevels(entities: Map<string, Entity>): Levels {
   return out;
 }
 
+/** Taille d'un domaine pour la règle des cibles trop petites : valeur de l'armée (troupes et fortifications) et production. */
+function sizeOf(state: PlayerState, rate: number): { army: number; rate: number } {
+  return { army: armyValue(cleanArmy({ ...troopsHere(state), ...state.defenses })), rate };
+}
+
 /** Production de base d'un seigneur : médiane des vrais joueurs × son caractère. */
 function lordRates(entities: Map<string, Entity>, world: WorldState, now: number): Map<string, number> {
-  const rates = [...entities.values()]
-    .filter((e) => !e.isLord)
-    .map((e) => productionPerSecond(e.state, world, stagesDoneAt(world, now)))
-    .sort((a, b) => a - b);
-  const median = rates.length === 0 ? 0 : rates.length % 2 ? rates[(rates.length - 1) / 2] : (rates[rates.length / 2 - 1] + rates[rates.length / 2]) / 2;
+  // Joueurs actifs : vus dans la fenêtre d'activité du chantier.
+  const active = [...entities.values()].filter((e) => !e.isLord && now - e.lastSeen < ACTIVE_WINDOW_DAYS * 86_400_000);
+  const rates = active.map((e) => productionPerSecond(e.state, world, stagesDoneAt(world, now))).sort((a, b) => a - b);
+  const mid = median(rates);
+  // Les seigneurs faciles suivent le quart le plus faible des joueurs, pour que les petits aient une cible.
+  const low = rates.length === 0 ? 0 : rates[Math.floor((rates.length - 1) * 0.25)];
   const out = new Map<string, number>();
-  for (const l of LORDS) out.set(l.id, Math.max(LORD_MIN_RATE, median) * l.rateFactor);
+  for (const l of LORDS) out.set(l.id, Math.max(LORD_MIN_RATE, l.difficulty === 1 ? low : mid) * l.rateFactor * LORD_RATE_SCALE);
   return out;
 }
 
@@ -382,21 +397,40 @@ function lordBudgets(entities: Map<string, Entity>): Record<1 | 2 | 3 | 4, numbe
 }
 
 /** Armée des seigneurs : elle suit les vrais joueurs, selon leur niveau et leur caractère. */
-function lordArmies(entities: Map<string, Entity>): Map<string, { attack: Army; defense: Army }> {
+/**
+ * Armées des seigneurs. L'attaque (leurs raids) suit les armées des joueurs.
+ * La défense vaut une part de leur coffre selon leur niveau (au moins la même part de 2 h de production),
+ * pour qu'un raid gagné rapporte à la mesure de ce qu'il coûte.
+ */
+function lordArmies(entities: Map<string, Entity>, world?: WorldState, now?: number, flat?: Map<string, number>): Map<string, { attack: Army; defense: Army }> {
   const budgets = lordBudgets(entities);
   const out = new Map<string, { attack: Army; defense: Army }>();
   for (const l of LORDS) {
     const taste = LORD_ARMY[l.key];
     const total = budgets[l.difficulty] * taste.power;
     const attack = armyFromBudget(total * taste.troopShare, taste.troops);
-    const forts = armyFromBudget(total * (1 - taste.troopShare), taste.forts);
-    out.set(l.id, { attack, defense: { ...attack, ...forts, garde: GUARDS_PER_DOMAIN } });
+    const e = entities.get(l.id);
+    let defenseBudget = total;
+    if (e && world && now !== undefined && flat) {
+      const rate = flat.get(l.id) ?? LORD_MIN_RATE;
+      const coffer = advanceEntity(e, now, world, flat).stone;
+      const share = LORD_DEFENSE_SHARE[l.difficulty];
+      defenseBudget = Math.max(LORD_MIN_BUDGET, share * Math.max(coffer, rate * LORD_DEFENSE_FLOOR_SECONDS));
+    }
+    const troops = armyFromBudget(defenseBudget * taste.troopShare, taste.troops);
+    const forts = armyFromBudget(defenseBudget * (1 - taste.troopShare), taste.forts);
+    out.set(l.id, { attack, defense: { ...troops, ...forts, garde: GUARDS_PER_DOMAIN } });
   }
   return out;
 }
 
 function advanceEntity(e: Entity, now: number, world: WorldState, flat: Map<string, number>): PlayerState {
-  return advance(e.state, now, world, e.isLord ? { flatRate: flat.get(e.id) ?? LORD_MIN_RATE } : {});
+  if (!e.isLord) return advance(e.state, now, world);
+  // Coffre d'un seigneur plafonné à 12 h de sa production.
+  const rate = flat.get(e.id) ?? LORD_MIN_RATE;
+  const s = advance(e.state, now, world, { flatRate: rate });
+  const cap = rate * LORD_COFFER_SECONDS;
+  return s.stone > cap ? { ...s, stone: cap } : s;
 }
 
 function currentRate(e: Entity, state: PlayerState, now: number, world: WorldState, flat: Map<string, number>): number {
@@ -561,6 +595,7 @@ interface WarRow {
   id: number;
   alliance_a: number;
   alliance_b: number;
+  starts_at: string;
   ends_at: string;
   score_a: number;
   score_b: number;
@@ -597,9 +632,10 @@ async function loadConflicts(admin: SupabaseClient, seasonId: number, now: numbe
   };
 }
 
-function warBetween(wars: WarRow[], a: number | null, b: number | null): WarRow | undefined {
+/** Guerre en cours entre deux alliances (une guerre déclarée ne commence que 2 h plus tard). */
+function warBetween(wars: WarRow[], a: number | null, b: number | null, now: number): WarRow | undefined {
   if (a === null || b === null || a === b) return undefined;
-  return wars.find((w) => (w.alliance_a === a && w.alliance_b === b) || (w.alliance_a === b && w.alliance_b === a));
+  return wars.find((w) => ms(w.starts_at) <= now && ((w.alliance_a === a && w.alliance_b === b) || (w.alliance_a === b && w.alliance_b === a)));
 }
 
 function warOf(wars: WarRow[], alliance: number | null): WarRow | undefined {
@@ -688,17 +724,17 @@ async function runConflictAction(
       if (warOf(conflicts.wars, target)) return { error: `${allianceNames.get(target)} est déjà en guerre.` };
       const { data, error } = await admin
         .from("wars")
-        .insert({ season_id: seasonId, alliance_a: me.allianceId, alliance_b: target, ends_at: iso(now + WAR_MS) })
+        .insert({ season_id: seasonId, alliance_a: me.allianceId, alliance_b: target, starts_at: iso(now + WAR_DELAY_MS), ends_at: iso(now + WAR_DELAY_MS + WAR_MS) })
         .select("id")
         .single();
       if (error || !data) throw new Error(`Guerre impossible : ${error?.message}`);
       await addChronicle(admin, seasonId, { kind: "war", actor_id: me.id, details: { phase: "start", war: data.id, a: me.allianceId, b: target } });
       notify(admin, [...entities.values()].filter((e) => !e.isLord && e.allianceId === target).map((e) => e.id), {
         title: "⚔️ Guerre déclarée !",
-        body: `${allianceNames.get(me.allianceId) ?? "Une alliance"} vous déclare la guerre pour 24 h.`,
+        body: `${allianceNames.get(me.allianceId) ?? "Une alliance"} vous déclare la guerre : elle commence dans 2 h et dure 24 h.`,
         tag: "war",
       });
-      return { message: `⚔️ Guerre déclarée à ${allianceNames.get(target)} pour 24 h ! Ni pause ni bouclier entre vous.` };
+      return { message: `⚔️ Guerre déclarée à ${allianceNames.get(target)} : elle commence dans 2 h et dure 24 h. Pas de bouclier entre vous.` };
     }
     case "fortress_attack": {
       const blocked = fortressBlocker(me, current, f, now);
@@ -970,7 +1006,7 @@ function warView(me: Entity, wars: WarRow[], names: Map<number, string>): WarVie
   if (!w) return null;
   const meA = w.alliance_a === me.allianceId;
   const enemyId = meA ? w.alliance_b : w.alliance_a;
-  return { id: w.id, enemyId, enemyName: names.get(enemyId) ?? "?", myScore: meA ? w.score_a : w.score_b, enemyScore: meA ? w.score_b : w.score_a, endsAt: ms(w.ends_at) };
+  return { id: w.id, enemyId, enemyName: names.get(enemyId) ?? "?", myScore: meA ? w.score_a : w.score_b, enemyScore: meA ? w.score_b : w.score_a, startsAt: ms(w.starts_at), endsAt: ms(w.ends_at) };
 }
 
 /**
@@ -1144,7 +1180,9 @@ function rivalsFor(
   allianceNames: Map<number, string>,
   wars: WarRow[],
 ): RivalView[] {
-  const armies = lordArmies(entities);
+  const armies = lordArmies(entities, world, now, flat);
+  const myRate = currentRate(me, myState, now, world, flat);
+  const mySize = sizeOf(myState, myRate);
   return [...entities.values()]
     .filter((e) => e.id !== me.id)
     .map((e) => {
@@ -1152,12 +1190,22 @@ function rivalsFor(
       const rate = currentRate(e, s, now, world, flat);
       const revenge = hasRevenge(myState, e.id, now);
       const allied = isAllied(me, e);
-      const atWar = !!warBetween(wars, me.allianceId, e.allianceId);
-      const ctx = { now, attackerId: me.id, victimId: e.id, victimRate: rate, allied, atWar, defenderArmy: e.isLord ? armies.get(e.id)?.defense : undefined };
+      const atWar = !!warBetween(wars, me.allianceId, e.allianceId, now);
+      const ctx = {
+        now,
+        attackerId: me.id,
+        victimId: e.id,
+        victimRate: rate,
+        allied,
+        atWar,
+        defenderArmy: e.isLord ? armies.get(e.id)?.defense : undefined,
+        attackerRate: myRate,
+        relativeSize: e.isLord ? undefined : relativeSize(sizeOf(s, rate), mySize),
+      };
       const fight = raidArmies(myState, s, ctx);
       const intelUntil = intel.get(e.id) ?? 0;
       const seen = intelUntil > now || allied ? fight.defense : fuzzyArmy(fight.defense);
-      const loot = lootOf(s.stone, rate, revenge);
+      const loot = lootOf(s.stone, rate, revenge, { lord: e.isLord, cap: e.isLord ? undefined : myRate * PVP_LOOT_CAP_SECONDS });
       return {
         id: e.id,
         name: e.name,
@@ -1374,7 +1422,7 @@ export async function runAction(admin: SupabaseClient, userId: string, action: G
         finalState = next;
         await admin.from("spy_reports").insert({ season_id: season.id, spy_id: me.id, target_id: target.id, expires_at: iso(now + SPY_INTEL_MS) });
         const targetState = advanceEntity(target, now, world, flat);
-        const defense = target.isLord ? (lordArmies(entities).get(target.id)?.defense ?? {}) : raidArmies(current, targetState, { victimId: target.id, now }).defense;
+        const defense = target.isLord ? (lordArmies(entities, world, now, flat).get(target.id)?.defense ?? {}) : raidArmies(current, targetState, { victimId: target.id, now }).defense;
         const caught = Math.random() < spyDetectChance(defense);
         if (caught) await addChronicle(admin, season.id, { kind: "spy", actor_id: me.id, target_id: target.id, details: {} });
         message = caught
@@ -1392,9 +1440,11 @@ export async function runAction(admin: SupabaseClient, userId: string, action: G
           attackerId: me.id,
           victimId: victim.id,
           victimRate: currentRate(victim, victimState, now, world, flat),
-          defenderArmy: victim.isLord ? lordArmies(entities).get(victim.id)?.defense : undefined,
+          defenderArmy: victim.isLord ? lordArmies(entities, world, now, flat).get(victim.id)?.defense : undefined,
           allied: isAllied(me, victim),
-          atWar: !!warBetween(conflicts.wars, me.allianceId, victim.allianceId),
+          atWar: !!warBetween(conflicts.wars, me.allianceId, victim.allianceId, now),
+          attackerRate: currentRate(me, current, now, world, flat),
+          relativeSize: victim.isLord ? undefined : relativeSize(sizeOf(victimState, currentRate(victim, victimState, now, world, flat)), sizeOf(current, currentRate(me, current, now, world, flat))),
         };
         const armiesNow = raidArmies(current, victimState, ctx);
         const chance = estimateChance(armiesNow.attack, armiesNow.defense, armiesNow.opts);
@@ -1418,7 +1468,7 @@ export async function runAction(admin: SupabaseClient, userId: string, action: G
           });
           if (rpcError?.message.includes("beffroi_conflict") || (data as { conflict?: boolean } | null)?.conflict) continue;
           if (rpcError) throw new Error(`Raid impossible : ${rpcError.message}`);
-          const war = warBetween(conflicts.wars, me.allianceId, victim.allianceId);
+          const war = warBetween(conflicts.wars, me.allianceId, victim.allianceId, now);
           if (war && r.value.report.stolen > 0) {
             await admin.rpc("add_war_score", { p_war: war.id, p_alliance: me.allianceId, p_amount: r.value.report.stolen });
             conflicts = await loadConflicts(admin, season.id, now);

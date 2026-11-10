@@ -22,6 +22,7 @@ import {
   splitTroopLosses,
   resolveRaid,
   ruinCost,
+  relativeSize,
   type PlayerState,
   type RaidContext,
 } from "./engine";
@@ -56,12 +57,35 @@ describe("raids", () => {
     expect(r.value.attacker.totalPlundered).toBe(25_000);
   });
 
-  it("la dernière demi-heure de production est à l'abri, mais jamais plus de la moitié du stock", () => {
-    // Production 10/s : 18 000 pierres à l'abri, mais au plus la moitié d'un stock de 20 000.
+  it("les 2 dernières heures de production sont à l'abri, mais jamais plus de la moitié du stock", () => {
+    // Production 10/s : 72 000 pierres à l'abri, mais au plus la moitié d'un stock de 20 000.
     const r = resolveRaid(player(), player({ troops: {}, stone: 20_000 }), ctx());
     expect(r.ok && r.value.report.stolen).toBe(2_500);
-    const big = resolveRaid(player(), player({ troops: {}, stone: 10 * SECURED_SECONDS + 50_000 }), ctx());
-    expect(big.ok && big.value.report.stolen).toBe(12_500);
+    const big = resolveRaid(player(), player({ troops: {}, stone: 10 * SECURED_SECONDS * 3 }), ctx());
+    expect(big.ok && big.value.report.stolen).toBe((10 * SECURED_SECONDS * 2) / 4);
+  });
+
+  it("entre joueurs, le butin est plafonné à 2 h de production de l'attaquant", () => {
+    const r = resolveRaid(player(), player({ troops: {}, stone: 1e9 }), ctx({ attackerRate: 1 }));
+    expect(r.ok && r.value.report.stolen).toBe(7_200);
+  });
+
+  it("une cible trop petite ne peut pas être attaquée, sauf en revanche ou en guerre", () => {
+    const victim = player({ troops: {} });
+    expect(resolveRaid(player(), victim, ctx({ relativeSize: 0.05 })).ok).toBe(false);
+    expect(resolveRaid(player(), victim, ctx({ relativeSize: 0.05, atWar: true })).ok).toBe(true);
+    expect(relativeSize({ army: 10, rate: 50 }, { army: 1000, rate: 100 })).toBe(0.5);
+  });
+
+  it("le défenseur battu récupère la moitié de ses troupes, et ne subit plus de ruines pendant 24 h", () => {
+    const victim = player({ troops: { milicien: 3 }, generators: { manoeuvre: 30, tailleur: 30 } });
+    const r = resolveRaid(player(), victim, ctx());
+    if (!r.ok) throw new Error(r.error);
+    expect(r.value.report.success).toBe(true);
+    expect(r.value.victim.troops.milicien).toBe(2);
+    expect(r.value.victim.ruinImmuneUntil).toBeGreaterThan(NOW);
+    const again = resolveRaid(player({ lastRaidAt: 0 }), { ...r.value.victim, shieldUntil: 0 }, ctx({ victimId: "v2" }));
+    expect(again.ok && again.value.report.destroyed).toEqual({});
   });
 
   it("incendie, bouclier et droit de revanche pour la victime", () => {
@@ -96,9 +120,9 @@ describe("raids", () => {
 
   it("la revanche est possible sans délai et double le butin", () => {
     const attacker = player({ lastRaidAt: NOW - 1000, lastRaidTarget: "v", revengeTarget: "v", revengeUntil: NOW + 1000 });
-    const r = resolveRaid(attacker, player({ troops: {}, stone: 10 * SECURED_SECONDS + 50_000 }), ctx());
+    const r = resolveRaid(attacker, player({ troops: {}, stone: 10 * SECURED_SECONDS * 3 }), ctx());
     if (!r.ok) throw new Error(r.error);
-    expect(r.value.report).toMatchObject({ revenge: true, stolen: 20_000 });
+    expect(r.value.report).toMatchObject({ revenge: true, stolen: 10 * SECURED_SECONDS * 2 * 0.4 });
     expect(r.value.attacker.revengeTarget).toBeNull();
   });
 
@@ -117,10 +141,11 @@ describe("raids", () => {
     const r = resolveRaid(player(), player({ troops: { milicien: 1 }, defenses: { palissade: 10 } }), ctx());
     if (!r.ok) throw new Error(r.error);
     expect(r.value.report.success).toBe(true);
-    expect(r.value.victim.troops.milicien).toBeUndefined();
+    // Le milicien tombé se relève (la moitié, arrondie au supérieur).
+    expect(r.value.victim.troops.milicien).toBe(1);
     // 7 palissades abattues, 70 % relevées : 2 perdues pour de bon.
     expect(r.value.victim.defenses.palissade).toBe(8);
-    expect(r.value.report.defenderLost).toEqual({ milicien: 1, palissade: 2 });
+    expect(r.value.report.defenderLost).toEqual({ palissade: 2 });
     expect(defenseArmy(r.value.victim).garde).toBe(GUARDS_PER_DOMAIN);
   });
 
@@ -219,7 +244,7 @@ describe("butin partagé", () => {
   it("les alliés reçoivent une part du butin au prorata de la valeur de leurs renforts", () => {
     // 10 chevaliers à soi (20 000) et 10 chez soi d'un allié (20 000) : moitié-moitié.
     const attacker = player({ stone: 0, troops: { chevalier: 10 }, stationed: { ally: { chevalier: 10 } } });
-    const r = resolveRaid(attacker, player({ troops: {}, stone: 10 * SECURED_SECONDS + 40_000 }), ctx());
+    const r = resolveRaid(attacker, player({ troops: {}, stone: 80_000 }), ctx());
     if (!r.ok) throw new Error(r.error);
     expect(r.value.report.stolen).toBe(10_000);
     expect(r.value.report.allyShares).toEqual({ ally: 5_000 });
@@ -230,11 +255,12 @@ describe("butin partagé", () => {
 });
 
 describe("guerres et forteresse", () => {
-  it("en guerre, ni bouclier, ni pause, ni limite de cible", () => {
-    const attacker = player({ lastRaidAt: NOW - 1000, lastRaidTarget: "v" });
+  it("en guerre, les boucliers tombent mais le repos et la règle de cible restent", () => {
     const victim = player({ troops: {}, shieldUntil: NOW + 3_600_000 });
-    expect(resolveRaid(attacker, victim, ctx()).ok).toBe(false);
-    expect(resolveRaid(attacker, victim, ctx({ atWar: true })).ok).toBe(true);
+    expect(resolveRaid(player(), victim, ctx()).ok).toBe(false);
+    expect(resolveRaid(player(), victim, ctx({ atWar: true })).ok).toBe(true);
+    expect(resolveRaid(player({ lastRaidAt: NOW - 1000 }), victim, ctx({ atWar: true })).ok).toBe(false);
+    expect(resolveRaid(player({ lastRaidTarget: "v" }), victim, ctx({ atWar: true })).ok).toBe(false);
   });
 
   it("tenir la forteresse donne +20 % de production", () => {

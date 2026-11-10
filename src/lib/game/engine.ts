@@ -26,6 +26,10 @@ import {
   ACADEMY_COST_GROWTH,
   SABOTAGE_COST_SECONDS,
   SABOTAGE_MIN_COST,
+  MIN_TARGET_SIZE,
+  PVP_LOOT_CAP_SECONDS,
+  DEFEATED_TROOP_RECOVERY,
+  RUIN_IMMUNITY_MS,
   RESEARCH_QUEUE_MAX,
   SABOTAGE_LEVEL_SHARE,
   SABOTAGE_BASE_SUCCESS,
@@ -105,6 +109,8 @@ export interface PlayerState {
   academy: number;
   /** Protégé des sabotages jusqu'à cet horodatage. */
   sabotageImmuneUntil: number;
+  /** Plus de bâtiments ruinés par un raid avant cet horodatage. */
+  ruinImmuneUntil: number;
   /** Son alliance tient la forteresse (bonus de production). Fixé par le serveur, jamais enregistré. */
   fortress?: boolean;
   /** Coup de pouce aux joueurs distancés (0.3 = +30 % de production et de défense). Fixé par le serveur, jamais enregistré. */
@@ -148,6 +154,7 @@ export function newPlayerState(now: number): PlayerState {
     research: [],
     academy: 0,
     sabotageImmuneUntil: 0,
+    ruinImmuneUntil: 0,
   };
 }
 
@@ -311,12 +318,14 @@ export function applyClicks(
 ): { state: PlayerState; accepted: number; paused: boolean } {
   const requested = Number.isFinite(count) ? Math.max(0, Math.floor(count)) : 0;
   if (now < state.clickPausedUntil) return { state: { ...state, lastClickAt: now }, accepted: 0, paused: true };
-  const windowMs = Math.min(Math.max(0, now - state.lastClickAt), CLICK_WINDOW_MAX_MS);
+  const elapsed = Math.max(0, now - state.lastClickAt);
+  const windowMs = Math.min(elapsed, CLICK_WINDOW_MAX_MS);
 
-  // Cadence surhumaine soutenue : avertissements, puis marteau confisqué.
+  // Cadence surhumaine soutenue : avertissements, puis marteau confisqué. La cadence se mesure sur le temps
+  // réel écoulé (non plafonné) : un lot honnête retardé par le réseau ne compte pas comme une rafale.
   let strikes = state.clickStrikes;
-  if (requested > 0 && windowMs >= 1000) {
-    strikes = requested / (Math.max(windowMs, CLICK_RATE_MIN_WINDOW_MS) / 1000) > SUSPICIOUS_CLICK_RATE ? strikes + 1 : Math.max(0, strikes - 1);
+  if (requested > 0 && elapsed >= 1000) {
+    strikes = requested / (Math.max(elapsed, CLICK_RATE_MIN_WINDOW_MS) / 1000) > SUSPICIOUS_CLICK_RATE ? strikes + 1 : Math.max(0, strikes - 1);
   }
   if (strikes >= CLICK_STRIKES_FOR_PAUSE) {
     return { state: { ...state, clickStrikes: 0, clickPausedUntil: now + CLICK_PAUSE_MS, lastClickAt: now }, accepted: 0, paused: true };
@@ -517,12 +526,24 @@ export function buyArmy(state: PlayerState, kind: "unit" | "defense", id: string
 // ---------------------------------------------------------------------------
 
 /**
- * Pierre qu'un raid réussi emporterait : 10 % (20 % en revanche) de la part exposée du stock.
- * La dernière demi-heure de production est à l'abri, mais jamais plus de la moitié du stock.
+ * Pierre qu'un raid réussi emporterait : 25 % (40 % en revanche) de la part exposée du stock.
+ * Chez un joueur, les 2 dernières heures de production sont à l'abri, mais jamais plus de la moitié du stock.
+ * Un seigneur n'a pas de stock à l'abri. Entre joueurs, le butin est plafonné à 2 h de production de l'attaquant.
  */
-export function lootOf(stone: number, rate: number, revenge: boolean): number {
-  const secured = Math.min(rate * SECURED_SECONDS, stone * (1 - MIN_EXPOSED_SHARE));
-  return Math.floor(Math.max(0, stone - secured) * (revenge ? REVENGE_LOOT_RATE : RAID_LOOT_RATE));
+export function lootOf(stone: number, rate: number, revenge: boolean, opts: { lord?: boolean; cap?: number } = {}): number {
+  const secured = opts.lord ? 0 : Math.min(rate * SECURED_SECONDS, stone * (1 - MIN_EXPOSED_SHARE));
+  const loot = Math.floor(Math.max(0, stone - secured) * (revenge ? REVENGE_LOOT_RATE : RAID_LOOT_RATE));
+  return opts.cap !== undefined ? Math.min(loot, Math.floor(opts.cap)) : loot;
+}
+
+/**
+ * Taille relative d'une cible : le plus grand des deux rapports (armée, production).
+ * Prendre le maximum évite qu'un joueur riche et sans armée devienne intouchable.
+ */
+export function relativeSize(target: { army: number; rate: number }, attacker: { army: number; rate: number }): number {
+  const ra = attacker.army > 0 ? target.army / attacker.army : Infinity;
+  const rp = attacker.rate > 0 ? target.rate / attacker.rate : Infinity;
+  return Math.max(ra, rp);
 }
 
 export function hasRevenge(attacker: PlayerState, victimId: string, now: number): boolean {
@@ -545,6 +566,10 @@ export interface RaidContext {
   atWar?: boolean;
   attackerArmy?: Army;
   defenderArmy?: Army;
+  /** Production de l'attaquant par seconde (plafond du butin entre joueurs). */
+  attackerRate?: number;
+  /** Taille relative de la cible (voir relativeSize) ; trop petite, on ne peut pas l'attaquer. */
+  relativeSize?: number;
   /** Tirages aléatoires entre 0 et 1 (fournis pour des tests reproductibles). */
   rng: () => number;
 }
@@ -580,10 +605,12 @@ export function raidBlocker(attacker: PlayerState, victim: PlayerState, ctx: Omi
   const revenge = hasRevenge(attacker, ctx.victimId, ctx.now);
   if (ctx.attackerId === ctx.victimId) return "On ne se pille pas soi-même.";
   if (ctx.allied) return "On ne pille pas un allié.";
-  const free = revenge || !!ctx.atWar;
+  // En guerre, seuls les boucliers tombent ; le repos et la règle « pas deux fois la même cible » restent.
+  const free = revenge;
   if (!ctx.atWar && victim.shieldUntil > ctx.now) return "Cette cible est sous bouclier.";
   if (!free && !ctx.allowRepeat && attacker.lastRaidTarget === ctx.victimId) return "Pas deux raids de suite contre la même cible.";
   if (!free && !ctx.attackerIsLord && ctx.now - attacker.lastRaidAt < RAID_COOLDOWN_MS) return "Tes troupes se reposent encore.";
+  if (!free && !ctx.atWar && !ctx.attackerIsLord && !ctx.defenderArmy && ctx.relativeSize !== undefined && ctx.relativeSize < MIN_TARGET_SIZE) return "Ce domaine est trop petit pour toi.";
   if (armySize(ctx.attackerArmy ?? attackArmy(attacker)) === 0) return "Il te faut des troupes pour lancer un raid.";
   return null;
 }
@@ -628,6 +655,16 @@ export function resolveRaid(
     }
     if (lost > 0) defenderLost[id] = lost;
   }
+  // Défenseur battu : la moitié de ses troupes tombées se relève tout de suite (arrondi au supérieur).
+  if (fight.success) {
+    for (const id of UNIT_IDS) {
+      const n = defenderLost[id] ?? 0;
+      if (n <= 0) continue;
+      const kept = n - Math.ceil(n * DEFEATED_TROOP_RECOVERY);
+      if (kept > 0) defenderLost[id] = kept;
+      else delete defenderLost[id];
+    }
+  }
   const attackerSplit = ctx.attackerArmy ? null : splitTroopLosses(attacker, fight.attackerLost);
   const victimSplit = ctx.defenderArmy ? null : splitTroopLosses(victim, defenderLost);
 
@@ -654,14 +691,19 @@ export function resolveRaid(
   };
   if (!fight.success) return { ok: true, value: { attacker: attackerAfter, victim: victimArmyAfter, report: base } };
 
-  const stolen = lootOf(victim.stone, ctx.victimRate, revenge);
+  const playerVsPlayer = !ctx.attackerIsLord && !ctx.defenderArmy;
+  const stolen = lootOf(victim.stone, ctx.victimRate, revenge, {
+    lord: !!ctx.defenderArmy,
+    cap: playerVsPlayer && ctx.attackerRate !== undefined ? ctx.attackerRate * PVP_LOOT_CAP_SECONDS : undefined,
+  });
   const allyShares = ctx.attackerArmy ? {} : lootShares(attacker, stolen);
   const allyTotal = Object.values(allyShares).reduce((a, b) => a + b, 0);
 
   // Destruction : 5 % des bâtiments (arrondi à l'inférieur), au plus un par type,
   // en commençant par les plus précieux, jamais en dessous des premiers protégés.
+  // Après un raid qui a ruiné des bâtiments, plus aucune ruine pendant 24 h (vaut aussi en guerre).
   const total = GENERATORS.reduce((sum, g) => sum + owned(victim, g.id), 0);
-  let toDestroy = Math.floor(total * RAID_DESTROY_RATE);
+  let toDestroy = (victim.ruinImmuneUntil ?? 0) > now ? 0 : Math.floor(total * RAID_DESTROY_RATE);
   const generators = { ...victim.generators };
   const ruins = { ...victim.ruins };
   const destroyed: RaidReport["destroyed"] = {};
@@ -685,6 +727,7 @@ export function resolveRaid(
         generators,
         ruins,
         burnedUntil: Math.max(victim.burnedUntil, now + BURN_MS),
+        ruinImmuneUntil: Object.keys(destroyed).length > 0 ? now + RUIN_IMMUNITY_MS : (victim.ruinImmuneUntil ?? 0),
         shieldUntil: now + (ctx.defenderArmy ? LORD_SHIELD_MS : SHIELD_MS),
         revengeTarget: ctx.attackerId,
         revengeUntil: now + REVENGE_MS,

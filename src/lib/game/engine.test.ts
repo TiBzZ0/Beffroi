@@ -109,17 +109,23 @@ describe("achats", () => {
 });
 
 describe("clics", () => {
-  it("accepte au plus 80 clics par seconde", () => {
+  it("accepte au plus 20 clics par seconde", () => {
     const s = newPlayerState(T0);
     const { accepted, state } = applyClicks(s, 1_000, T0 + 2_000, noWorld);
-    expect(accepted).toBe(160);
-    expect(state.stone).toBe(160);
+    expect(accepted).toBe(40);
+    expect(state.stone).toBe(40);
     expect(state.lastClickAt).toBe(T0 + 2_000);
   });
 
   it("plafonne la fenêtre à 10 s pour éviter le crédit de clics", () => {
     const { accepted } = applyClicks(newPlayerState(T0), 100_000, T0 + 3_600_000, noWorld);
-    expect(accepted).toBe(800);
+    expect(accepted).toBe(200);
+  });
+
+  it("un lot honnête envoyé après une coupure ne compte pas d'avertissement", () => {
+    const r = applyClicks({ ...newPlayerState(T0), clickStrikes: 4 }, 600, T0 + 60_000, noWorld);
+    expect(r.paused).toBe(false);
+    expect(r.state.clickStrikes).toBe(3);
   });
 
   it("un humain rapide, même avec un envoi en retard, n'est jamais confisqué", () => {
