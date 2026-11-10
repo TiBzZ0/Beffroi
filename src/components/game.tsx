@@ -37,6 +37,8 @@ import {
   type GeneratorId,
   type HallUnit,
   REVENGE_ATTACK_BONUS,
+  MERCHANT_OFFERS,
+  type MerchantChoice,
   mapDistance,
 } from "@/lib/game/config";
 import {
@@ -64,6 +66,7 @@ import {
   ruinCost,
   ruinsOf,
   stagesDoneAt,
+  upgradeCost,
   upgradeUnlocked,
   attackArmy,
   type PlayerState,
@@ -125,8 +128,8 @@ export function Game({ userId }: { userId: string }) {
   const live: PlayerState = { ...advance(snap.state, now, world), stone: game.predictedStone() };
   const rate = rateAt(live, world, now);
   const researchDone = tab !== "armee" && researchEnds.some((e) => e <= now && e > armySeenAt);
-  const eventLive = !!snap.event && snap.event.endsAt > now;
-  const affordableUpgrades = UPGRADES.filter((u) => !live.upgrades.includes(u.id) && upgradeUnlocked(live, u) && u.cost <= live.stone).length;
+  const eventLive = isCombatEvent(snap.event) && !!snap.event?.active && snap.event.endsAt > now;
+  const affordableUpgrades = UPGRADES.filter((u) => !live.upgrades.includes(u.id) && upgradeUnlocked(live, u) && upgradeCost(live, u) <= live.stone).length;
 
   return (
     <div className="game">
@@ -563,6 +566,7 @@ function Hero({ snap, rate, clickGain, game }: { snap: GameSnapshot; rate: numbe
           ))}
         </div>
       </div>
+      <EventBanner e={snap.event} now={game.serverNow()} stone={snap.state.stone} run={game.run} />
       <Status state={snap.state} now={game.serverNow()} />
       <div className="mini-site">
         <Belfry done={Math.min(w.stage, STAGES.length)} pct={pct} />
@@ -678,9 +682,9 @@ function Upgrades({ live, run }: { live: PlayerState; run: ReturnType<typeof use
             <div className="row-title">{u.name}</div>
             <div className="row-desc">{u.description}</div>
           </div>
-          <button className="btn btn-primary" disabled={u.cost > live.stone} onClick={() => buy(u.id)}>
+          <button className="btn btn-primary" disabled={upgradeCost(live, u) > live.stone} onClick={() => buy(u.id)}>
             Apprendre
-            <span className="cost num">{formatNumber(u.cost)} 🪨</span>
+            <span className="cost num">{formatNumber(upgradeCost(live, u))} 🪨</span>
           </button>
         </div>
       ))}
@@ -1308,7 +1312,7 @@ function RivalRow({
   // La pierre du rival progresse en direct entre deux nouvelles du serveur.
   const stone = r.stone + (r.rate * Math.max(0, now - r.stoneAt)) / 1000;
   // Mêmes règles que le serveur : plafond PvP, coefficient d'équité, stock à l'abri des étapes.
-  const loot = lootOf(stone, r.rate, r.revenge, { lord: r.isLord, cap: r.lootCap, factor: r.fairness, stagesDone });
+  const loot = lootOf(stone, r.rate, r.revenge, { lord: r.isLord, cap: r.lootCap, factor: r.fairness, stagesDone, extraSecured: r.lootSafe });
   const shielded = r.shieldUntil > now;
   const blocked = r.blocker !== null;
   const pct = Math.round(r.chance * 100);
@@ -1839,8 +1843,59 @@ function eventAttackText(c: ChronicleEntry, me: string): string {
 }
 
 /** Événement en cours (ou le prochain) en tête de l'onglet Raids, avec ses derniers assauts. */
+const EVENT_ICONS: Record<EventView["kind"], string> = { caravane: "🐪", colosse: "🗿", foire: "🎪", fete: "🎉", etoiles: "🌠", treve: "🔔", marchand: "🧺" };
+const isCombatEvent = (e: EventView | null | undefined) => !!e && (e.kind === "caravane" || e.kind === "colosse");
+
+/** Événements sans combat (foire, fête, étoiles, trêve, marchand) : un bandeau sous le compteur, et les achats du marchand. */
+function EventBanner({ e, now, stone, run }: { e: EventView | null; now: number; stone: number; run: ReturnType<typeof useGame>["run"] }) {
+  const [busy, setBusy] = useState(false);
+  if (!e) return null;
+  if (!e.active) {
+    if (e.startsAt - now > 15 * 60_000 || e.startsAt <= now) return null;
+    return (
+      <div className="event-banner">
+        {EVENT_ICONS[e.kind]} Dans {duration(e.startsAt - now)} : <strong>{e.name}</strong>
+      </div>
+    );
+  }
+  if (isCombatEvent(e) || e.endsAt <= now) return null;
+  const buy = async (choice: MerchantChoice) => {
+    setBusy(true);
+    await run({ type: "merchant", choice });
+    setBusy(false);
+  };
+  return (
+    <div className="event-banner active">
+      <div>
+        {EVENT_ICONS[e.kind]} <strong>{e.name}</strong> · encore {duration(e.endsAt - now)}
+      </div>
+      <div className="note">{e.description}</div>
+      {e.kind === "marchand" &&
+        (e.merchantBought ? (
+          <div className="note">Tu as déjà acheté à ce marchand.</div>
+        ) : (
+          <div className="merchant-offers">
+            {(Object.keys(MERCHANT_OFFERS) as MerchantChoice[]).map((c) => (
+              <button key={c} className="btn" disabled={busy || (e.merchantPrice ?? 0) > stone} onClick={() => void buy(c)}>
+                {MERCHANT_OFFERS[c].icon} {MERCHANT_OFFERS[c].label}
+                <span className="cost num">{formatNumber(e.merchantPrice ?? 0)} 🪨</span>
+              </button>
+            ))}
+          </div>
+        ))}
+    </div>
+  );
+}
+
 function EventCard({ e, now, busy, onAttack, history, me }: { e: EventView; now: number; busy: boolean; onAttack: () => void; history: ChronicleEntry[]; me: string }) {
-  const icon = e.kind === "caravane" ? "🐪" : "🗿";
+  const icon = EVENT_ICONS[e.kind];
+  if (!isCombatEvent(e) && e.active) {
+    return (
+      <p className="note event-next">
+        {icon} En ce moment : {e.name}, encore {duration(Math.max(0, e.endsAt - now))}. {e.description}
+      </p>
+    );
+  }
   if (!e.active) {
     return (
       <p className="note event-next">

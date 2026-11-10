@@ -1183,3 +1183,21 @@ a {
 .map-place.picked text.map-icon {
   filter: drop-shadow(0 0 3px var(--gold));
 }
+
+/* Événements sans combat */
+.event-banner {
+  margin: 10px 0 0;
+  padding: 8px 10px;
+  border: 1px solid var(--gold);
+  border-radius: var(--radius);
+  background: var(--panel-2);
+  text-align: left;
+}
+.event-banner .note {
+  margin: 4px 0 0;
+}
+.merchant-offers {
+  display: grid;
+  gap: 6px;
+  margin-top: 8px;
+}

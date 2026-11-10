@@ -1,4 +1,5 @@
 import type { PlayerState } from "./engine";
+import type { EventKind, MerchantChoice } from "./config";
 
 export interface WorksiteView {
   stage: number;
@@ -37,6 +38,8 @@ export interface RivalView {
   fairness?: number;
   /** Joueurs : plafond du butin (2 h de ma production), pour que l'estimation en direct suive la même règle que le serveur. */
   lootCap?: number;
+  /** V15 : secondes de stock à l'abri achetées au marchand par ce joueur. */
+  lootSafe?: number;
   /** Son alliance est en guerre contre la mienne. */
   atWar: boolean;
   /** Membre de mon alliance : on ne peut pas le piller, on peut lui envoyer des renforts. */
@@ -235,6 +238,7 @@ export type GameAction =
   | { type: "fortress_recall" }
   | { type: "event_attack" }
   | { type: "research"; id: string }
+  | { type: "merchant"; choice: MerchantChoice }
   | { type: "academy" }
   | { type: "tithe"; percent: number }
   | { type: "curfew"; start: number | null }
@@ -244,9 +248,12 @@ export type GameAction =
 
 export interface EventView {
   id: number;
-  kind: "caravane" | "colosse";
+  kind: EventKind;
   name: string;
   description: string;
+  /** V15 : prix d'un achat au marchand, et si j'ai déjà acheté à ce passage. */
+  merchantPrice?: number;
+  merchantBought?: boolean;
   /** Actif : fin de l'événement. Sinon : arrivée du prochain. */
   active: boolean;
   startsAt: number;

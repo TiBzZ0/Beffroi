@@ -22,6 +22,14 @@ import {
   HALL,
   HALL_PODIUM,
   EVENT_GAP_MS,
+  EVENT_DURATIONS_MS,
+  EVENT_NOTICE_MS,
+  EVENT_WEIGHTS,
+  MERCHANT_PRICE_SECONDS,
+  FEAST_GIFT_FACTOR,
+  MERCHANT_OFFERS,
+  type EventKind,
+  type MerchantChoice,
   CARAVAN_MS,
   CARAVAN_PRIZE_SECONDS,
   CARAVAN_ESCORT_POWER,
@@ -75,6 +83,7 @@ import {
   type MapPos,
 } from "./config";
 import { fixedPlaces, pickSpawn } from "./map";
+import { pickNextEvent } from "./events";
 import {
   advance,
   applyClicks,
@@ -103,6 +112,9 @@ import {
   troopsHere,
   startResearch,
   buyAcademy,
+  buyFromMerchant,
+  eventActive,
+  extraSecured,
   queuedLevel,
   sabotageCost,
   sabotageChance,
@@ -179,7 +191,7 @@ interface PlayerRow {
   upgrades: string[];
   total_produced: number;
   total_contributed: number;
-  military?: { levels?: Record<string, number>; research?: { id: string; endsAt: number }[] | { id: string; endsAt: number } | null; academy?: number; sabotageImmuneUntil?: number; ruinImmuneUntil?: number; elanUntil?: number; tithe?: number; titheOwed?: number; titheSet?: boolean; share?: StageShare | null; donorTiers?: number; curfew?: Curfew | null; seen?: PlayerState["seen"] | null; veinAt?: number; frenzyUntil?: number; quest?: number | null; questFlags?: string[]; wounded?: Record<string, number>; healAt?: number } | null;
+  military?: { levels?: Record<string, number>; research?: { id: string; endsAt: number }[] | { id: string; endsAt: number } | null; academy?: number; sabotageImmuneUntil?: number; ruinImmuneUntil?: number; elanUntil?: number; tithe?: number; titheOwed?: number; titheSet?: boolean; share?: StageShare | null; donorTiers?: number; curfew?: Curfew | null; seen?: PlayerState["seen"] | null; veinAt?: number; frenzyUntil?: number; quest?: number | null; questFlags?: string[]; wounded?: Record<string, number>; healAt?: number; boostProdUntil?: number; boostSafeUntil?: number; merchantEvent?: number } | null;
   total_clicks: number;
   last_update: string;
   last_click_at: string;
@@ -321,6 +333,10 @@ function toEntity(row: PlayerRow): Entity {
       questFlags: Array.isArray(row.military?.questFlags) ? row.military.questFlags.map(String) : [],
       wounded: armyCounts(row.military?.wounded ?? {}, UNIT_IDS),
       healAt: Number(row.military?.healAt ?? 0) || 0,
+      boostProdUntil: Number(row.military?.boostProdUntil ?? 0) || 0,
+      boostSafeUntil: Number(row.military?.boostSafeUntil ?? 0) || 0,
+      merchantEvent: Number(row.military?.merchantEvent ?? 0) || 0,
+      eventMods: currentEventMods,
       ...(row.military?.seen ? { seen: { produced: Number(row.military.seen.produced ?? 0), contributed: Number(row.military.seen.contributed ?? 0), levels: armyCounts(row.military.seen.levels ?? {}, [...UNIT_IDS, ...DEFENSE_IDS]) } } : {}),
     },
   };
@@ -349,7 +365,7 @@ function toJson(e: Entity, state: PlayerState, extra: Record<string, unknown> = 
     troops: state.troops,
     defenses: state.defenses,
     stationed: state.stationed,
-    military: { levels: state.levels, research: state.research, academy: state.academy, sabotageImmuneUntil: state.sabotageImmuneUntil, ruinImmuneUntil: state.ruinImmuneUntil, elanUntil: state.elanUntil, tithe: state.tithe, titheOwed: state.titheOwed, titheSet: state.titheSet, share: state.share, donorTiers: state.donorTiers, curfew: state.curfew, seen: state.seen ?? null, veinAt: state.veinAt, frenzyUntil: state.frenzyUntil, quest: state.quest, questFlags: state.questFlags, wounded: state.wounded, healAt: state.healAt },
+    military: { levels: state.levels, research: state.research, academy: state.academy, sabotageImmuneUntil: state.sabotageImmuneUntil, ruinImmuneUntil: state.ruinImmuneUntil, elanUntil: state.elanUntil, tithe: state.tithe, titheOwed: state.titheOwed, titheSet: state.titheSet, share: state.share, donorTiers: state.donorTiers, curfew: state.curfew, seen: state.seen ?? null, veinAt: state.veinAt, frenzyUntil: state.frenzyUntil, quest: state.quest, questFlags: state.questFlags, wounded: state.wounded, healAt: state.healAt, boostProdUntil: state.boostProdUntil, boostSafeUntil: state.boostSafeUntil, merchantEvent: state.merchantEvent },
     click_strikes: state.clickStrikes,
     click_paused_until: iso(state.clickPausedUntil),
     ...extra,
@@ -1154,7 +1170,9 @@ function fortressView(me: Entity, state: PlayerState, f: FortressRow, entities: 
 // Événements : caravane marchande et colosse
 // ---------------------------------------------------------------------------
 
-type EventKind = "caravane" | "colosse";
+/** Effets des derniers événements, recopiés dans chaque état chargé (une seule saison active à la fois). */
+let currentEventMods: NonNullable<PlayerState["eventMods"]> = [];
+const COMBAT_EVENTS: readonly EventKind[] = ["caravane", "colosse"];
 
 interface EventRow {
   id: number;
@@ -1170,6 +1188,11 @@ interface EventRow {
 }
 
 const EVENT_INFO: Record<EventKind, { name: string; description: string }> = {
+  foire: { name: "La grande foire", description: "Les marchands envahissent la place : les savoirs coûtent 20 % de moins et les ateliers 10 % de moins pendant 2 heures." },
+  fete: { name: "Fête des bâtisseurs", description: "Pendant 2 heures, chaque pierre versée au chantier compte double pour tes paliers de don et pour le lot de ton alliance." },
+  etoiles: { name: "Pluie d'étoiles", description: "Pendant 1 heure, les veines d'or apparaissent trois fois plus souvent. Garde l'œil ouvert !" },
+  treve: { name: "Trêve des cloches", description: "Les cloches sonnent la paix : aucune armée ne part pendant 2 heures (raids, renforts, forteresse), et tout le monde produit 25 % de plus." },
+  marchand: { name: "Le marchand ambulant", description: "Pendant 1 heure, il vend un bonus au choix pour 30 minutes de ta production. Un seul achat par passage." },
   caravane: {
     name: "Caravane marchande",
     description: "Elle traverse la région chargée de pierre. Un assaut par joueur, contre une escorte qui vaut 60 % de ton armée ; une victoire rapporte 45 minutes de ta production.",
@@ -1204,47 +1227,73 @@ function eventRow(r: Record<string, unknown>): EventRow {
   };
 }
 
+const EVENT_NOTICES: Record<EventKind, { title: string; body: string }> = {
+  caravane: { title: "🐪 Une caravane marchande arrive !", body: "Une heure pour la piller, un assaut par joueur." },
+  colosse: { title: "🗿 Le Colosse de Grisemont est apparu !", body: "Six heures pour l'abattre à plusieurs." },
+  foire: { title: "🎪 La grande foire ouvre !", body: "Savoirs à −20 % et ateliers à −10 % pendant 2 heures." },
+  fete: { title: "🎉 Fête des bâtisseurs !", body: "Tes dons comptent double pour les paliers et les lots pendant 2 heures." },
+  etoiles: { title: "🌠 Pluie d'étoiles !", body: "Les veines d'or apparaissent trois fois plus souvent pendant 1 heure." },
+  treve: { title: "🔔 Trêve des cloches", body: "Aucune armée ne part pendant 2 heures, et tout le monde produit 25 % de plus." },
+  marchand: { title: "🧺 Le marchand ambulant est là", body: "Un bonus au choix pour 30 minutes de ta production, pendant 1 heure." },
+};
+
+/** Annonce l'événement suivant 15 minutes avant ; la table garantit qu'une seule requête prévient tout le monde. */
+async function announceNext(admin: SupabaseClient, seasonId: number, afterEvent: number, kind: EventKind) {
+  const { error } = await admin.from("event_notices").insert({ season_id: seasonId, after_event: afterEvent, kind });
+  if (error) return;
+  const n = EVENT_NOTICES[kind];
+  notify(admin, "all", { title: `Dans 15 minutes : ${n.title.replace(/ !$/, "")}`, body: n.body, tag: "event-notice" });
+}
+
 /** Clôt les événements finis, lance le suivant quand la pause est passée, et renvoie celui en cours. */
 async function loadEvent(admin: SupabaseClient, seasonId: number, now: number, entities: Map<string, Entity>, world: WorldState, flat: Map<string, number>): Promise<EventState> {
+  const state = await loadEventInner(admin, seasonId, now, entities, world, flat);
+  // Les effets des derniers événements suivent chaque état chargé (foire, fête, trêve…).
+  const { data: recent } = await admin.from("events").select("kind, starts_at, ends_at").eq("season_id", seasonId).order("ends_at", { ascending: false }).limit(3);
+  currentEventMods = (recent ?? [])
+    .filter((r) => !COMBAT_EVENTS.includes(r.kind as EventKind))
+    .map((r) => ({ kind: r.kind as EventKind, from: ms(r.starts_at as string), until: ms(r.ends_at as string) }));
+  for (const e of entities.values()) e.state = { ...e.state, eventMods: currentEventMods };
+  return state;
+}
+
+async function loadEventInner(admin: SupabaseClient, seasonId: number, now: number, entities: Map<string, Entity>, world: WorldState, flat: Map<string, number>): Promise<EventState> {
   const { data: open } = await admin.from("events").select("*").eq("season_id", seasonId).eq("settled", false);
   for (const raw of open ?? []) {
     const e = eventRow(raw);
     const finished = ms(e.ends_at) <= now || (e.kind === "colosse" && armySize(e.army) === 0);
-    if (!finished) return { active: e, levels: medianLevels(entities), nextAt: ms(e.ends_at), nextKind: e.kind === "caravane" ? "colosse" : "caravane" };
-    await admin.rpc("settle_event_v2", { p_event: e.id, p_bonus: killBonus(e, entities, now, world, flat) });
+    const next = pickNextEvent(e.kind, e.id * 7919 + seasonId);
+    if (!finished) return { active: e, levels: medianLevels(entities), nextAt: ms(e.ends_at) + EVENT_GAP_MS, nextKind: next };
+    if (COMBAT_EVENTS.includes(e.kind)) await admin.rpc("settle_event_v2", { p_event: e.id, p_bonus: killBonus(e, entities, now, world, flat) });
+    else await admin.from("events").update({ settled: true }).eq("id", e.id).eq("settled", false);
   }
-  const { data: last } = await admin.from("events").select("kind, ends_at").eq("season_id", seasonId).order("ends_at", { ascending: false }).limit(1).maybeSingle();
-  const nextKind: EventKind = last?.kind === "caravane" ? "colosse" : "caravane";
+  const { data: last } = await admin.from("events").select("id, kind, ends_at").eq("season_id", seasonId).order("ends_at", { ascending: false }).limit(1).maybeSingle();
+  const nextKind: EventKind = last ? pickNextEvent(last.kind as string, Number(last.id) * 7919 + seasonId) : "caravane";
   const nextAt = last ? ms(last.ends_at as string) + EVENT_GAP_MS : now;
   const humans = [...entities.values()].filter((e) => !e.isLord);
+  if (last && now >= nextAt - EVENT_NOTICE_MS && now < nextAt) void announceNext(admin, seasonId, Number(last.id), nextKind);
   if (now < nextAt || humans.length === 0) return { active: null, levels: {}, nextAt, nextKind };
 
-  let army: Army;
-  let prize: number;
-  let duration: number;
+  let army: Army = {};
+  let prize = 0;
+  const duration = EVENT_DURATIONS_MS[nextKind];
   if (nextKind === "caravane") {
     army = armyFromBudget(troopBudget(entities) * CARAVAN_ESCORT_POWER, CARAVAN_ESCORT);
     prize = Math.floor(humans.reduce((sum, e) => sum + currentRate(e, advance(e.state, now, world), now, world, flat), 0) * CARAVAN_PRIZE_SECONDS);
-    duration = CARAVAN_MS;
-  } else {
+  } else if (nextKind === "colosse") {
     const total = humanArmies(entities).reduce((a, b) => a + b, 0);
     army = armyFromBudget(Math.max(total * COLOSSUS_POWER, troopBudget(entities) * 3), COLOSSUS_ARMY);
     prize = Math.floor(armyValue(army) * COLOSSUS_BOUNTY);
-    duration = COLOSSUS_MS;
   }
   // L'index unique empêche deux événements simultanés si deux joueurs arrivent en même temps.
   // A14, A15 : plus de chargement ni de prime communs (pool 0) ; `prize` n'est plus qu'une indication.
   const { error: insertError } = await admin.from("events").insert({ season_id: seasonId, kind: nextKind, ends_at: iso(now + duration), army, army_start: army, pool: 0, prize });
   // Seul celui qui a vraiment créé l'événement prévient tout le monde.
-  if (!insertError) {
-    notify(admin, "all", nextKind === "caravane"
-      ? { title: "🐪 Une caravane marchande arrive !", body: "Une heure pour la piller, un assaut par joueur.", tag: "event" }
-      : { title: "🗿 Le Colosse de Grisemont est apparu !", body: "Six heures pour l'abattre à plusieurs.", tag: "event" });
-  }
+  if (!insertError) notify(admin, "all", { ...EVENT_NOTICES[nextKind], tag: "event" });
   const { data: created } = await admin.from("events").select("*").eq("season_id", seasonId).eq("settled", false).maybeSingle();
   if (!created) return { active: null, levels: {}, nextAt: now + EVENT_GAP_MS, nextKind };
   const e = eventRow(created);
-  return { active: e, levels: medianLevels(entities), nextAt: ms(e.ends_at), nextKind };
+  return { active: e, levels: medianLevels(entities), nextAt: ms(e.ends_at) + EVENT_GAP_MS, nextKind: pickNextEvent(e.kind, e.id * 7919 + seasonId) };
 }
 
 /** Défenseurs qu'affronte un assaut : l'escorte entière de la caravane, ou ce qu'il reste du colosse. */
@@ -1270,6 +1319,7 @@ function killBonus(e: EventRow, entities: Map<string, Entity>, now: number, worl
 }
 
 function eventBlocker(state: PlayerState, e: EventRow, meId: string, now: number): string | null {
+  if (!COMBAT_EVENTS.includes(e.kind)) return "Cet événement ne se combat pas.";
   if (e.kind === "caravane" && meId in e.attackers) return "Tu as déjà attaqué cette caravane.";
   if (now - state.lastRaidAt < RAID_COOLDOWN_MS) return "Tes troupes se reposent encore.";
   if (armySize(attackArmy(state)) === 0) return "Il te faut des troupes pour attaquer.";
@@ -1347,6 +1397,27 @@ function eventView(meId: string, state: PlayerState, ev: EventState, now: number
   if (!e) {
     const info = EVENT_INFO[ev.nextKind];
     return { id: 0, kind: ev.nextKind, ...info, active: false, startsAt: ev.nextAt, endsAt: ev.nextAt, army: {}, armyLeft: 1, pool: 0, prize: 0, mine: 0, attackers: 0, chance: 0, take: 0, blocker: null };
+  }
+  if (!COMBAT_EVENTS.includes(e.kind)) {
+    // Événements sans combat : leur effet passe par l'état de chacun (foire, fête, étoiles, trêve) ou par l'achat au marchand.
+    return {
+      id: e.id,
+      kind: e.kind,
+      ...EVENT_INFO[e.kind],
+      active: true,
+      startsAt: ms(e.starts_at),
+      endsAt: ms(e.ends_at),
+      army: {},
+      armyLeft: 0,
+      pool: 0,
+      prize: 0,
+      mine: 0,
+      attackers: 0,
+      chance: 0,
+      take: 0,
+      blocker: null,
+      ...(e.kind === "marchand" ? { merchantPrice: Math.ceil(rate * MERCHANT_PRICE_SECONDS), merchantBought: state.merchantEvent === e.id } : {}),
+    };
   }
   const defense = eventDefense(e, state);
   const startValue = armyValue(e.army_start);
@@ -1426,6 +1497,8 @@ async function allianceInfo(admin: SupabaseClient, seasonId: number, me: Entity,
 }
 
 type AllianceAction = Extract<GameAction, { type: `alliance_${string}` | "reinforce" | "recall" }>;
+/** V6 : actions qui font partir une armée, interdites pendant la trêve. */
+const ARMY_ACTIONS = new Set(["raid", "reinforce", "fortress_attack", "fortress_station", "event_attack"]);
 const CONFLICT_ACTIONS = new Set(["war_declare", "fortress_attack", "fortress_station", "fortress_recall"]);
 const ALLIANCE_ACTIONS = new Set(["alliance_create", "alliance_invite", "alliance_accept", "alliance_decline", "alliance_leave", "reinforce", "recall"]);
 
@@ -1579,13 +1652,14 @@ function rivalsFor(
       const intelUntil = intel.get(e.id) ?? 0;
       const seen = intelUntil > now || allied ? fight.defense : fuzzyArmy(fight.defense);
       const fair = e.isLord ? 1 : fairness(ctx.relativeSize, revenge);
-      const loot = lootOf(s.stone, rate, revenge, { lord: e.isLord, cap: e.isLord ? undefined : myRate * PVP_LOOT_CAP_SECONDS, factor: fair, stagesDone: stagesDoneAt(world, now) });
+      const loot = lootOf(s.stone, rate, revenge, { lord: e.isLord, cap: e.isLord ? undefined : myRate * PVP_LOOT_CAP_SECONDS, factor: fair, stagesDone: stagesDoneAt(world, now), extraSecured: extraSecured(s, now) });
       // Rançon attendue en cas de victoire : la défense qu'on voit, abattue.
       const ransom = e.isLord ? 0 : ransomOf(seen as Army, fair);
       return {
         ransom,
         fairness: fair,
         lootCap: e.isLord ? undefined : myRate * PVP_LOOT_CAP_SECONDS,
+        lootSafe: extraSecured(s, now) || undefined,
         id: e.id,
         name: e.name,
         isLord: e.isLord,
@@ -1689,7 +1763,7 @@ interface Outcome {
   message?: string;
 }
 
-function applySimpleAction(state: PlayerState, action: GameAction, now: number, world: WorldState): Result<Outcome> {
+function applySimpleAction(state: PlayerState, action: GameAction, now: number, world: WorldState, eventId?: number): Result<Outcome> {
   switch (action.type) {
     case "sync":
       // Le joueur est là : on programme sa prochaine veine d'or si besoin.
@@ -1736,6 +1810,13 @@ function applySimpleAction(state: PlayerState, action: GameAction, now: number, 
     case "curfew": {
       const r = setCurfew(state, action.start === null ? null : Number(action.start), now);
       return r.ok ? { ok: true, value: { state: r.value, log: { action: "curfew", details: { start: action.start } } } } : r;
+    }
+    case "merchant": {
+      if (!eventId) return { ok: false, error: "Le marchand n'est pas là." };
+      const r = buyFromMerchant(state, String(action.choice), eventId, now, world);
+      return r.ok
+        ? { ok: true, value: { state: r.value, message: `🧺 Marché conclu : ${MERCHANT_OFFERS[action.choice as MerchantChoice].label.toLowerCase()}.`, log: { action: "merchant", details: { choice: action.choice } } } }
+        : r;
     }
     case "tithe": {
       const r = setTithe(state, Number(action.percent));
@@ -1800,7 +1881,9 @@ export async function runAction(admin: SupabaseClient, userId: string, action: G
     let error: string | null = null;
     let message: string | undefined;
 
-    if (action.type === "event_attack") {
+    if (ARMY_ACTIONS.has(action.type) && eventActive(current, "treve", now)) {
+      error = "Trêve des cloches : aucune armée ne part.";
+    } else if (action.type === "event_attack") {
       const r = await runEventAttack(admin, season.id, me, current, events, now, currentRate(me, current, now, world, flat));
       if (r === "conflict") continue;
       if (r.error) error = r.error;
@@ -1978,7 +2061,7 @@ export async function runAction(admin: SupabaseClient, userId: string, action: G
         if ((data as { conflict?: boolean } | null)?.conflict) continue;
       }
     } else {
-      const outcome = applySimpleAction(current, action, now, world);
+      const outcome = applySimpleAction(current, action, now, world, events.active?.kind === "marchand" ? events.active.id : undefined);
       if (outcome.ok) finalState = outcome.value.state;
       else error = outcome.error;
       if (outcome.ok && outcome.value.message) message = outcome.value.message;
@@ -1986,7 +2069,9 @@ export async function runAction(admin: SupabaseClient, userId: string, action: G
       const paid = payTithe(finalState);
       finalState = paid.state;
       const contribution = (outcome.ok ? (outcome.value.contribution ?? 0) : 0) + paid.paid;
-      const gift = recordGift(finalState, contribution);
+      // V4 : pendant la fête des bâtisseurs, les dons comptent double pour les paliers et les lots.
+      const feast = eventActive(finalState, "fete", now) ? FEAST_GIFT_FACTOR : 1;
+      const gift = recordGift(finalState, contribution * feast);
       finalState = gift.state;
       // Accueil guidé : quêtes lues dans la base (seigneur facile pillé, notifications), puis validation.
       if (action.type === "sync" && finalState.quest !== null) finalState = await questFlagsFromDb(admin, season.id, userId, finalState);
@@ -2015,7 +2100,7 @@ export async function runAction(admin: SupabaseClient, userId: string, action: G
       if (contribution > 0) await recordContribution(season.id, userId, finalState.totalContributed);
       if (contribution > 0) {
         // Le don compte aussi pour le lot du joueur, et pour celui de l'étape d'avant s'il est encore ouvert.
-        const lotMessage = await giveToLots(admin, season.id, me, stageAtLoad, contribution, entities, allianceNames);
+        const lotMessage = await giveToLots(admin, season.id, me, stageAtLoad, contribution * feast, entities, allianceNames);
         if (lotMessage) message = lotMessage;
       }
       if (questDone?.done != null) {

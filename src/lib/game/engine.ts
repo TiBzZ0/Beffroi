@@ -101,6 +101,17 @@ import {
   DONOR_TIERS,
   DONOR_TIER_ECUS,
   DONOR_TIER_BONUS,
+  FAIR_GENERATOR_FACTOR,
+  FAIR_UPGRADE_FACTOR,
+  MERCHANT_OFFERS,
+  MERCHANT_PRICE_SECONDS,
+  MERCHANT_PRODUCTION_MS,
+  MERCHANT_SAFE_MS,
+  MERCHANT_SAFE_SECONDS,
+  MERCHANT_PRODUCTION,
+  STARS_VEIN_FACTOR,
+  TRUCE_PRODUCTION,
+  type EventKind,
 } from "./config";
 import { armySize, armyValue, battle, cleanArmy, type Army, type BattleOptions, type Levels, type RoundLog } from "./battle";
 
@@ -177,6 +188,44 @@ export interface PlayerState {
   masterBonus?: { kind: MasterBonusKind; from: number; until: number };
   /** Coup de pouce aux joueurs distancés (0.3 = +30 % de production et de défense). Fixé par le serveur, jamais enregistré. */
   catchUp?: number;
+  /** Derniers événements du royaume (en cours et récents), pour leurs effets. Fixé par le serveur, jamais enregistré. */
+  eventMods?: { kind: EventKind; from: number; until: number }[];
+  /** V15 : bonus achetés au marchand, et passage du marchand où l'on a déjà acheté. */
+  boostProdUntil?: number;
+  boostSafeUntil?: number;
+  merchantEvent?: number;
+}
+
+/** V15 : secondes de stock à l'abri achetées au marchand. */
+export function extraSecured(state: PlayerState, t: number): number {
+  return t < (state.boostSafeUntil ?? 0) ? MERCHANT_SAFE_SECONDS : 0;
+}
+
+/** V15 : prix du marchand, 30 minutes de sa production. */
+export function merchantPrice(state: PlayerState, world: WorldState, now: number): number {
+  return Math.ceil(rateAt(state, world, now) * MERCHANT_PRICE_SECONDS);
+}
+
+/** V15 : achète un bonus au marchand ; l'état doit être avancé jusqu'à `now`. */
+export function buyFromMerchant(state: PlayerState, choice: string, eventId: number, now: number, world: WorldState): Result<PlayerState> {
+  if (!eventActive(state, "marchand", now)) return { ok: false, error: "Le marchand n'est pas là." };
+  if (!(choice in MERCHANT_OFFERS)) return { ok: false, error: "Le marchand ne vend pas ça." };
+  if (state.merchantEvent === eventId) return { ok: false, error: "Tu as déjà acheté à ce marchand." };
+  const price = merchantPrice(state, world, now);
+  if (price > state.stone) return { ok: false, error: "Pas assez de pierre." };
+  const paid: PlayerState = { ...state, stone: state.stone - price, merchantEvent: eventId };
+  if (choice === "production") return { ok: true, value: { ...paid, boostProdUntil: now + MERCHANT_PRODUCTION_MS } };
+  if (choice === "safe") return { ok: true, value: { ...paid, boostSafeUntil: now + MERCHANT_SAFE_MS } };
+  const ruins = state.ruins ?? {};
+  if (!Object.values(ruins).some((n) => (n ?? 0) > 0)) return { ok: false, error: "Tu n'as aucune ruine à rebâtir." };
+  const generators = { ...state.generators };
+  for (const [id, n] of Object.entries(ruins) as [GeneratorId, number][]) generators[id] = owned(state, id) + n;
+  return { ok: true, value: { ...paid, generators, ruins: {} } };
+}
+
+/** L'événement `kind` est-il en cours à `t` ? */
+export function eventActive(state: PlayerState, kind: EventKind, t: number): boolean {
+  return (state.eventMods ?? []).some((e) => e.kind === kind && t >= e.from && t < e.until);
 }
 
 export interface Curfew {
@@ -346,7 +395,10 @@ export function rateAt(state: PlayerState, world: WorldState, t: number, opts: A
   const elan = !opts.flatRate && t < (state.elanUntil ?? 0) && elanBonus(state) > 0 ? 1 + elanBonus(state) + stagePerk(stagesDoneAt(world, t), "elan") : 1;
   const frenzy = !opts.flatRate && t < (state.frenzyUntil ?? 0) ? VEIN_FRENZY_FACTOR : 1;
   const master = !opts.flatRate && masterActive(state, "production", t) ? 1 + MASTER_BONUSES.production.value : 1;
-  return (t < state.burnedUntil ? base * BURN_PRODUCTION_FACTOR : base) * elan * frenzy * master;
+  // V6 : la trêve des cloches profite à tous, seigneurs compris ; V15 : le bonus du marchand.
+  const truce = eventActive(state, "treve", t) ? 1 + TRUCE_PRODUCTION : 1;
+  const boost = !opts.flatRate && t < (state.boostProdUntil ?? 0) ? 1 + MERCHANT_PRODUCTION : 1;
+  return (t < state.burnedUntil ? base * BURN_PRODUCTION_FACTOR : base) * elan * frenzy * master * truce * boost;
 }
 
 /**
@@ -358,7 +410,7 @@ export function advance(state: PlayerState, now: number, world: WorldState, opts
   state = settleWounded(settleCurfew(settleResearch(state, now), now), now);
   if (now <= state.lastUpdate) return state;
   const start = Math.max(state.lastUpdate, now - OFFLINE_CAP_MS);
-  const events = [...world.stageCompletedAt, state.burnedUntil, state.elanUntil ?? 0, state.frenzyUntil ?? 0, state.masterBonus?.from ?? 0, state.masterBonus?.until ?? 0];
+  const events = [...world.stageCompletedAt, state.burnedUntil, state.elanUntil ?? 0, state.frenzyUntil ?? 0, state.masterBonus?.from ?? 0, state.masterBonus?.until ?? 0, state.boostProdUntil ?? 0, ...(state.eventMods ?? []).flatMap((e) => [e.from, e.until])];
   const breakpoints = events.filter((t) => t > start && t < now).sort((a, b) => a - b);
   let gain = 0;
   let tithed = 0;
@@ -385,14 +437,24 @@ export function generatorCost(state: PlayerState, id: GeneratorId, qty = 1): num
   const def = GENERATORS.find((g) => g.id === id)!;
   // Les ruines comptent : se faire détruire un bâtiment ne rend pas le suivant moins cher.
   const n = owned(state, id) + ruinsOf(state, id);
-  return Math.ceil((def.baseCost * Math.pow(COST_GROWTH, n) * (Math.pow(COST_GROWTH, qty) - 1)) / (COST_GROWTH - 1));
+  return Math.ceil((def.baseCost * Math.pow(COST_GROWTH, n) * (Math.pow(COST_GROWTH, qty) - 1) * fairFactor(state, FAIR_GENERATOR_FACTOR)) / (COST_GROWTH - 1));
+}
+
+/** V3 : remise de la foire, à l'heure de l'état (il est toujours avancé avant un achat). */
+function fairFactor(state: PlayerState, factor: number): number {
+  return eventActive(state, "foire", state.lastUpdate) ? factor : 1;
+}
+
+/** Prix d'une amélioration (savoir), foire comprise. */
+export function upgradeCost(state: PlayerState, u: UpgradeDef): number {
+  return Math.ceil(u.cost * fairFactor(state, FAIR_UPGRADE_FACTOR));
 }
 
 /** Nombre maximal de bâtiments achetables avec la pierre disponible. */
 export function maxAffordable(state: PlayerState, id: GeneratorId): number {
   const def = GENERATORS.find((g) => g.id === id)!;
   const n = owned(state, id) + ruinsOf(state, id);
-  const first = def.baseCost * Math.pow(COST_GROWTH, n);
+  const first = def.baseCost * Math.pow(COST_GROWTH, n) * fairFactor(state, FAIR_GENERATOR_FACTOR);
   if (state.stone < first) return 0;
   let qty = Math.floor(Math.log((state.stone * (COST_GROWTH - 1)) / first + 1) / Math.log(COST_GROWTH));
   while (qty > 0 && generatorCost(state, id, qty) > state.stone) qty--;
@@ -419,8 +481,9 @@ export function buyUpgrade(state: PlayerState, id: string): Result<PlayerState> 
   if (!u) return { ok: false, error: "Amélioration inconnue." };
   if (state.upgrades.includes(id)) return { ok: false, error: "Déjà achetée." };
   if (!upgradeUnlocked(state, u)) return { ok: false, error: "Pas encore débloquée." };
-  if (u.cost > state.stone) return { ok: false, error: "Pas assez de pierre." };
-  return { ok: true, value: { ...state, stone: state.stone - u.cost, upgrades: [...state.upgrades, id] } };
+  const cost = upgradeCost(state, u);
+  if (cost > state.stone) return { ok: false, error: "Pas assez de pierre." };
+  return { ok: true, value: { ...state, stone: state.stone - cost, upgrades: [...state.upgrades, id] } };
 }
 
 /**
@@ -514,7 +577,13 @@ export function setCurfew(state: PlayerState, start: number | null, now: number)
 /** Programme la prochaine veine d'or si la précédente est passée (le joueur doit être là pour la voir). */
 export function scheduleVein(state: PlayerState, now: number, rng: () => number = Math.random): PlayerState {
   if (state.veinAt > 0 && now <= state.veinAt + VEIN_VISIBLE_MS + VEIN_GRACE_MS) return state;
-  return { ...state, veinAt: now + VEIN_MIN_MS + Math.floor(rng() * (VEIN_MAX_MS - VEIN_MIN_MS)) };
+  return { ...state, veinAt: now + veinDelay(state, now, rng) };
+}
+
+/** Attente avant la prochaine veine ; V5 : trois fois plus courte pendant la pluie d'étoiles. */
+function veinDelay(state: PlayerState, now: number, rng: () => number): number {
+  const delay = VEIN_MIN_MS + Math.floor(rng() * (VEIN_MAX_MS - VEIN_MIN_MS));
+  return eventActive(state, "etoiles", now) ? Math.floor(delay / STARS_VEIN_FACTOR) : delay;
 }
 
 export type VeinOutcome = { kind: "frenzy"; until: number } | { kind: "rain"; stone: number };
@@ -524,7 +593,7 @@ export function catchVein(state: PlayerState, now: number, world: WorldState, rn
   if (!(state.veinAt > 0) || now < state.veinAt - VEIN_GRACE_MS || now > state.veinAt + VEIN_VISIBLE_MS + VEIN_GRACE_MS) {
     return { ok: false, error: "La veine s'est refermée." };
   }
-  const next = { ...state, veinAt: now + VEIN_MIN_MS + Math.floor(rng() * (VEIN_MAX_MS - VEIN_MIN_MS)) };
+  const next = { ...state, veinAt: now + veinDelay(state, now, rng) };
   if (rng() < VEIN_FRENZY_CHANCE) {
     const until = now + VEIN_FRENZY_MS;
     return { ok: true, value: { state: { ...next, frenzyUntil: until }, outcome: { kind: "frenzy", until } } };
@@ -819,8 +888,8 @@ export function buyArmy(state: PlayerState, kind: "unit" | "defense", id: string
  * Chez un joueur, les 2 dernières heures de production sont à l'abri, mais jamais plus de la moitié du stock.
  * Un seigneur n'a pas de stock à l'abri. Entre joueurs, le butin est plafonné à 2 h de production de l'attaquant.
  */
-export function lootOf(stone: number, rate: number, revenge: boolean, opts: { lord?: boolean; cap?: number; factor?: number; stagesDone?: number } = {}): number {
-  const securedSeconds = SECURED_SECONDS + stagePerk(opts.stagesDone ?? 0, "securedSeconds");
+export function lootOf(stone: number, rate: number, revenge: boolean, opts: { lord?: boolean; cap?: number; factor?: number; stagesDone?: number; extraSecured?: number } = {}): number {
+  const securedSeconds = SECURED_SECONDS + stagePerk(opts.stagesDone ?? 0, "securedSeconds") + (opts.extraSecured ?? 0);
   const secured = opts.lord ? 0 : Math.min(rate * securedSeconds, stone * (1 - MIN_EXPOSED_SHARE));
   const loot = Math.floor(Math.max(0, stone - secured) * (revenge ? REVENGE_LOOT_RATE : RAID_LOOT_RATE) * (opts.factor ?? 1));
   return opts.cap !== undefined ? Math.min(loot, Math.floor(opts.cap)) : loot;
@@ -918,6 +987,7 @@ export function raidBlocker(attacker: PlayerState, victim: PlayerState, ctx: Omi
   const revenge = hasRevenge(attacker, ctx.victimId, ctx.now);
   if (ctx.attackerId === ctx.victimId) return "On ne se pille pas soi-même.";
   if (ctx.allied) return "On ne pille pas un allié.";
+  if (eventActive(attacker, "treve", ctx.now) || eventActive(victim, "treve", ctx.now)) return "Trêve des cloches : aucune armée ne part.";
   if (inCurfew(attacker, ctx.now)) return "Tu es en couvre-feu : pas d'attaque pendant ta plage.";
   if (inCurfew(victim, ctx.now)) return "Ce domaine est en couvre-feu.";
   // En guerre, seuls les boucliers tombent ; le repos et la règle « pas deux fois la même cible » restent.
@@ -1010,6 +1080,7 @@ export function resolveRaid(
   const factor = playerVsPlayer ? fairness(ctx.relativeSize, revenge) : 1;
   const lootBonus = masterActive(attacker, "loot", now) ? 1 + MASTER_BONUSES.loot.value : 1;
   const stolen = lootOf(victim.stone, ctx.victimRate, revenge, {
+    extraSecured: extraSecured(victim, now),
     lord: !!ctx.defenderArmy,
     cap: playerVsPlayer && ctx.attackerRate !== undefined ? ctx.attackerRate * PVP_LOOT_CAP_SECONDS : undefined,
     factor: factor * lootBonus,

@@ -200,4 +200,17 @@ export const CHANGELOG: ChangeEntry[] = [
       "📍 Touche un domaine pour ouvrir sa fiche et voir à combien de cases il est. Bientôt, la distance comptera : les armées mettront du temps à arriver.",
     ],
   },
+  {
+    id: 26,
+    date: "10 novembre",
+    items: [
+      "🎲 Cinq nouveaux événements rejoignent la caravane et le colosse, tirés au sort toutes les 2 heures, jamais deux fois de suite le même :",
+      "🎪 La grande foire (2 h) : savoirs à −20 %, ateliers à −10 %.",
+      "🎉 La fête des bâtisseurs (2 h) : tes dons au chantier comptent double pour tes paliers et pour le lot de ton alliance.",
+      "🌠 La pluie d'étoiles (1 h) : les veines d'or apparaissent trois fois plus souvent.",
+      "🔔 La trêve des cloches (2 h) : aucune armée ne part, ni raid, ni renfort, ni assaut, et tout le monde produit 25 % de plus.",
+      "🧺 Le marchand ambulant (1 h) : pour 30 minutes de ta production, au choix +25 % de production pendant 4 h, toutes tes ruines rebâties, ou 2 h de stock à l'abri en plus pendant 24 h. Un achat par passage.",
+      "📣 Chaque événement est annoncé 15 minutes avant, dans le jeu et par notification.",
+    ],
+  },
 ];

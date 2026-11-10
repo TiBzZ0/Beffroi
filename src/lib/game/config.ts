@@ -621,3 +621,39 @@ export const LORD_POSITIONS: Record<LordKey, MapPos> = {
 export function mapDistance(a: MapPos, b: MapPos): number {
   return Math.hypot(a[0] - b[0], a[1] - b[1]);
 }
+
+// Événements sans carte (V3 à V6, V15). Un événement toutes les 2 heures, tiré au sort selon ces poids, jamais deux fois de suite le même.
+export type EventKind = "caravane" | "colosse" | "foire" | "fete" | "etoiles" | "treve" | "marchand";
+export const EVENT_WEIGHTS: Record<EventKind, number> = { caravane: 3, colosse: 2, foire: 2, fete: 2, etoiles: 2, treve: 1, marchand: 2 };
+export const EVENT_DURATIONS_MS: Record<EventKind, number> = {
+  caravane: 60 * 60 * 1000,
+  colosse: 6 * 60 * 60 * 1000,
+  foire: 2 * 60 * 60 * 1000,
+  fete: 2 * 60 * 60 * 1000,
+  etoiles: 60 * 60 * 1000,
+  treve: 2 * 60 * 60 * 1000,
+  marchand: 60 * 60 * 1000,
+};
+/** L'événement suivant est annoncé 15 minutes avant. */
+export const EVENT_NOTICE_MS = 15 * 60 * 1000;
+/** V3 : savoirs à −20 %, ateliers à −10 %. */
+export const FAIR_UPGRADE_FACTOR = 0.8;
+export const FAIR_GENERATOR_FACTOR = 0.9;
+/** V4 : les dons comptent double pour les paliers et les lots. */
+export const FEAST_GIFT_FACTOR = 2;
+/** V5 : les veines d'or apparaissent 3 fois plus souvent. */
+export const STARS_VEIN_FACTOR = 3;
+/** V6 : aucun départ d'armée, production +25 %. */
+export const TRUCE_PRODUCTION = 0.25;
+/** V15 : le marchand vend un bonus au choix pour 30 minutes de production, une fois par passage. */
+export const MERCHANT_PRICE_SECONDS = 30 * 60;
+export type MerchantChoice = "production" | "repair" | "safe";
+export const MERCHANT_OFFERS: Record<MerchantChoice, { icon: string; label: string }> = {
+  production: { icon: "⚒️", label: "+25 % de production pendant 4 heures" },
+  repair: { icon: "🧱", label: "Toutes tes ruines rebâties" },
+  safe: { icon: "🔒", label: "2 heures de stock à l'abri en plus pendant 24 heures" },
+};
+export const MERCHANT_PRODUCTION = 0.25;
+export const MERCHANT_PRODUCTION_MS = 4 * 60 * 60 * 1000;
+export const MERCHANT_SAFE_SECONDS = 2 * 60 * 60;
+export const MERCHANT_SAFE_MS = 24 * 60 * 60 * 1000;
