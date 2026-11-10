@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { battle, estimateChance, seededRng } from "./battle";
+import { armyForChance, battle, estimateChance, seededRng } from "./battle";
 import { academyCost, advance, applySabotage, buyAcademy, newPlayerState, researchCost, researchTime, sabotageBlocker, startResearch } from "./engine";
 
 const world = { stageCompletedAt: [] };
@@ -60,5 +60,15 @@ describe("améliorations militaires", () => {
     expect(strong).toBeGreaterThan(even);
     const fight = battle(army, army, seededRng(1), { defenderLevels: { piquier: 10, arbaletrier: 10 } });
     expect(Object.values(fight.attackerLost).reduce((a, b) => a + (b ?? 0), 0)).toBeGreaterThan(Object.values(fight.defenderLost).reduce((a, b) => a + (b ?? 0), 0));
+  });
+});
+
+describe("seigneurs attaquants", () => {
+  it("l'armée vise une chance d'environ un tiers contre la défense de la cible", () => {
+    const defense = { piquier: 300, arbaletrier: 200, tour: 50, palissade: 100, garde: 3 };
+    const army = armyForChance({ chevalier: 10, milicien: 30 }, defense, 1 / 3);
+    const chance = estimateChance(army, defense);
+    expect(chance).toBeGreaterThan(0.1);
+    expect(chance).toBeLessThan(0.6);
   });
 });

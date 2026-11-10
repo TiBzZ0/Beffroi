@@ -102,4 +102,11 @@ export const CHANGELOG: ChangeEntry[] = [
       "🎲 Hasard des combats : à chaque round, les dégâts de chaque camp varient de 15 % en plus ou en moins. Une bataille serrée n'est plus jouée d'avance.",
     ],
   },
+  {
+    id: 13,
+    date: "10 novembre",
+    items: [
+      "🏰 Seigneurs attaquants : leur armée est taillée sur ta défense, pour une chance de victoire d'environ un tiers. Si tu les repousses, tu récupères toutes tes pertes.",
+    ],
+  },
 ];

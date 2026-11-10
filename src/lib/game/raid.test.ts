@@ -84,6 +84,15 @@ describe("raids", () => {
     expect(fairness(0.25, true)).toBe(1);
   });
 
+  it("qui repousse un seigneur récupère toutes ses pertes", () => {
+    const victim = player({ troops: { piquier: 50 }, defenses: { palissade: 10 } });
+    const r = resolveRaid(player({ troops: {} }), victim, ctx({ attackerIsLord: true, attackerArmy: { milicien: 5 } }));
+    if (!r.ok) throw new Error(r.error);
+    expect(r.value.report.success).toBe(false);
+    expect(r.value.victim.troops).toEqual({ piquier: 50 });
+    expect(r.value.victim.defenses).toEqual({ palissade: 10 });
+  });
+
   it("une cible trop petite ne peut pas être attaquée, sauf en revanche ou en guerre", () => {
     const victim = player({ troops: {} });
     expect(resolveRaid(player(), victim, ctx({ relativeSize: 0.05 })).ok).toBe(false);

@@ -972,7 +972,9 @@ export function resolveRaid(
     shieldUntil: 0, // attaquer fait tomber son propre bouclier
     ...(revenge ? { revengeTarget: null, revengeUntil: 0 } : {}),
   };
-  const victimArmyAfter: PlayerState = ctx.defenderArmy
+  // A10 : qui repousse un seigneur récupère toutes ses pertes.
+  const repelledLord = !!ctx.attackerIsLord && !fight.success;
+  const victimArmyAfter: PlayerState = ctx.defenderArmy || repelledLord
     ? victim
     : { ...addWounded(victim, defenderWounded, now), troops: victimSplit!.troops, stationed: victimSplit!.stationed, defenses: withoutLosses(victim.defenses, defenderLost) };
   const base: RaidReport = {
@@ -982,9 +984,9 @@ export function resolveRaid(
     allyShares: {},
     destroyed: {},
     attackerLost: fight.attackerLost,
-    defenderLost: ctx.defenderArmy ? fight.defenderLost : defenderLost,
+    defenderLost: ctx.defenderArmy ? fight.defenderLost : repelledLord ? {} : defenderLost,
     attackerWounded,
-    defenderWounded,
+    defenderWounded: repelledLord ? {} : defenderWounded,
     ransom: 0,
     fairness: 1,
     revenge,

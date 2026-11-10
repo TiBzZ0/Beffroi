@@ -199,3 +199,23 @@ export function armyFromBudget(budget: number, shares: Partial<Record<CombatantI
   if (extra > 0) army[cheapest[0]] = (army[cheapest[0]] ?? 0) + extra;
   return army;
 }
+
+/**
+ * A10 : armée d'un raid de seigneur, de la composition donnée, dimensionnée sur la défense
+ * de la cible pour une chance de victoire d'environ `target` (un tiers).
+ */
+export function armyForChance(shape: Army, defender: Army, target: number, opts: BattleOptions = {}): Army {
+  const shares = Object.fromEntries(Object.entries(cleanArmy(shape)).map(([id, n]) => [id, (defOf(id)?.cost ?? 0) * (n ?? 0)])) as Partial<Record<CombatantId, number>>;
+  const total = Object.values(shares).reduce<number>((a, b) => a + (b ?? 0), 0);
+  if (total <= 0) return {};
+  for (const id of Object.keys(shares) as CombatantId[]) shares[id] = (shares[id] ?? 0) / total;
+  const base = Math.max(1, armyValue(defender));
+  let lo = 0.05;
+  let hi = 20;
+  for (let i = 0; i < 12; i++) {
+    const mid = Math.sqrt(lo * hi);
+    if (estimateChance(armyFromBudget(base * mid, shares), defender, opts) < target) lo = mid;
+    else hi = mid;
+  }
+  return armyFromBudget(base * Math.sqrt(lo * hi), shares);
+}

@@ -46,6 +46,7 @@ import {
   NEW_PLAYER_TITHE,
   DONOR_TIER_BONUS,
   QUESTS,
+  LORD_RAID_CHANCE,
   LOT_PRIME_SHARE,
   LOT_ECUS,
   MASTER_BONUSES,
@@ -143,7 +144,7 @@ import {
   type SeasonHall,
   type Standing,
 } from "./types";
-import { armyFromBudget, armySize, armyValue, battle, cleanArmy, estimateChance, seededRng, type Army, type Levels } from "./battle";
+import { armyForChance, armyFromBudget, armySize, armyValue, battle, cleanArmy, estimateChance, seededRng, type Army, type Levels } from "./battle";
 import { recordContribution, topContributors } from "@/lib/redis";
 import { notify } from "@/lib/push";
 
@@ -765,7 +766,10 @@ async function tickLords(admin: SupabaseClient, season: SeasonView, entities: Ma
       // Le plus riche le plus souvent, mais pas toujours.
       const pick = candidates.length > 0 ? candidates[Math.random() < 0.6 ? 0 : Math.floor(Math.random() * candidates.length)] : null;
       if (pick) {
-        const ctx = { now, attackerId: lord.id, victimId: pick.e.id, victimRate: pick.rate, attackerIsLord: true, allowRepeat: lord.retaliateOnly, attackerArmy: army.attack };
+        // A10 : l'armée du seigneur est taillée sur la défense de sa cible, pour une chance d'environ un tiers.
+        const shaped = raidArmies(state, pick.s, { now, victimId: pick.e.id, attackerArmy: army.attack });
+        const sized = armyForChance(army.attack, shaped.defense, LORD_RAID_CHANCE, shaped.opts);
+        const ctx = { now, attackerId: lord.id, victimId: pick.e.id, victimRate: pick.rate, attackerIsLord: true, allowRepeat: lord.retaliateOnly, attackerArmy: armySize(sized) > 0 ? sized : army.attack };
         const armiesNow = raidArmies(state, pick.s, ctx);
         const chance = estimateChance(armiesNow.attack, armiesNow.defense, armiesNow.opts);
         const r = resolveRaid(state, pick.s, { ...ctx, rng: Math.random });

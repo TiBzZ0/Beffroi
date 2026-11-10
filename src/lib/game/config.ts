@@ -542,6 +542,8 @@ export const RANSOM_SHARE = 0.3;
 export const FAIRNESS_SLOPE = 2;
 /** A11 : les dégâts de chaque camp sont multipliés à chaque round par un tirage entre 0,85 et 1,15. */
 export const BATTLE_SWING = 0.15;
+/** A10 : un seigneur attaquant vise une chance de victoire d'un tiers. */
+export const LORD_RAID_CHANCE = 1 / 3;
 export const INFIRMARY_MS = 30 * 60_000;
 export const WOUNDED_WINNER = 0.6;
 export const WOUNDED_ATTACKER_BEATEN = 0.3;
