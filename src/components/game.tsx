@@ -39,6 +39,7 @@ import {
 import {
   advance,
   inCurfew,
+  stagePerk,
   questProgress,
   armyWorth,
   clickValue,
@@ -367,7 +368,7 @@ function Hero({ snap, rate, clickGain, game }: { snap: GameSnapshot; rate: numbe
           {elanBonus(snap.state) > 0 && (
             <ElanGauge
               left={Math.min(ELAN_MAX_MS, Math.max(0, (snap.state.elanUntil ?? 0) - game.serverNow()) + game.pendingClicks() * ELAN_PER_CLICK_MS)}
-              bonus={elanBonus(snap.state)}
+              bonus={elanBonus(snap.state) + stagePerk(snap.worksite.stageCompletedAt.length, "elan")}
             />
           )}
           {(snap.state.lotBonusUntilStage ?? 0) > snap.worksite.stageCompletedAt.length && (
@@ -954,7 +955,7 @@ function Raids({ snap, live, now, run }: { snap: GameSnapshot; live: PlayerState
           <CurfewCard live={live} now={now} run={run} />
         </>
       )}
-      {view === "forge" && <Forge live={live} now={now} run={run} />}
+      {view === "forge" && <Forge live={live} now={now} run={run} stagesDone={stagesDoneAt(worldFrom(snap.worksite), now)} />}
       {view === "seigneurs" && (
         <>
           <div className="qty level-filter" role="group" aria-label="Difficulté">
@@ -1175,7 +1176,7 @@ function RivalRow({
 }
 
 /** Forge : académie militaire et améliorations des troupes et fortifications (une recherche à la fois). */
-function Forge({ live, now, run }: { live: PlayerState; now: number; run: ReturnType<typeof useGame>["run"] }) {
+function Forge({ live, now, run, stagesDone }: { live: PlayerState; now: number; run: ReturnType<typeof useGame>["run"]; stagesDone: number }) {
   // File de recherche : l'état local n'est pas encore « réglé », on ignore ce qui est déjà fini.
   const queue = live.research.filter((r) => r.endsAt > now);
   const full = queue.length >= RESEARCH_QUEUE_MAX;
@@ -1197,7 +1198,7 @@ function Forge({ live, now, run }: { live: PlayerState; now: number; run: Return
               <span className="badge">niv. {lv}</span>
             </div>
             <div className="row-desc num">
-              ⚔️ et ❤️ +{Math.round(lv * LEVEL_BONUS * 100)} % · niveau {next} en {duration(researchTime(live, id))}
+              ⚔️ et ❤️ +{Math.round(lv * LEVEL_BONUS * 100)} % · niveau {next} en {duration(researchTime(live, id, stagesDone))}
             </div>
           </div>
           <button className="btn btn-primary" disabled={full || cost > live.stone} onClick={() => void run({ type: "research", id: d.id })}>

@@ -138,4 +138,11 @@ export const CHANGELOG: ChangeEntry[] = [
       "🧱 Forteresse tenue : en plus des troupes postées par l'alliance, ses murs reviennent. Ils repartent à 25 % de leur valeur à la prise, puis gagnent 25 % toutes les 2 heures, jusqu'à 200 %.",
     ],
   },
+  {
+    id: 18,
+    date: "10 novembre",
+    items: [
+      "🎁 Bonus d'étape variés : Les gargouilles donnent aussi +20 % de points de vie en défense. Le grand bourdon porte l'élan à +75 % au lieu de doubler les coups. La flèche ajoute 1 heure de stock à l'abri. L'horloge rend les recherches 20 % plus rapides. Le beffroi légendaire verse 20 écus à chaque joueur qui a atteint un palier de don.",
+    ],
+  },
 ];

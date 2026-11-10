@@ -12,6 +12,7 @@ import {
   maxAffordable,
   newPlayerState,
   payTithe,
+  stagePerk,
   claimQuest,
   scheduleVein,
   catchVein,
@@ -352,6 +353,16 @@ describe("lots du chantier", () => {
   it("maître d'œuvre : +15 % de production pendant 24 h", () => {
     const s = { ...withGenerators({ tailleur: 10 }), masterBonus: { kind: "production" as const, from: T0 + 10_000, until: T0 + 20_000 } };
     expect(advance(s, T0 + 30_000, noWorld).stone).toBeCloseTo(300 + 10 * 10 * 0.15);
+  });
+});
+
+describe("bonus d'étape variés", () => {
+  it("se cumulent selon les étapes achevées", () => {
+    expect(stagePerk(3, "defenseHp")).toBe(0);
+    expect(stagePerk(4, "defenseHp")).toBeCloseTo(0.2);
+    expect(stagePerk(5, "elan")).toBeCloseTo(0.25);
+    expect(stagePerk(6, "securedSeconds")).toBe(3600);
+    expect(stagePerk(8, "researchSpeed")).toBeCloseTo(0.2);
   });
 });
 

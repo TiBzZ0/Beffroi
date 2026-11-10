@@ -557,6 +557,14 @@ function lotsView(lots: Lot[], me: Entity, entities: Map<string, Entity>, allian
     .sort((a, b) => b.stage - a.stage || Number(b.mine) - Number(a.mine) || b.progress / b.target - a.progress / a.target);
 }
 
+/** B6 : récompenses versées une fois quand une étape s'achève (écus du beffroi légendaire). */
+async function stageRewards(admin: SupabaseClient, seasonId: number, before: number, after: number) {
+  for (let i = before; i < Math.min(after, STAGES.length); i++) {
+    const ecus = STAGES[i].bonus.donorEcus ?? 0;
+    if (ecus > 0) await admin.rpc("reward_donors", { p_season: seasonId, p_amount: ecus });
+  }
+}
+
 /** Verse un don aux lots du joueur ; annonce un lot fini et le maître d'œuvre. */
 async function giveToLots(admin: SupabaseClient, seasonId: number, me: Entity, stage: number, amount: number, entities: Map<string, Entity>, allianceNames: Map<number, string>): Promise<string | null> {
   let message: string | null = null;
@@ -749,6 +757,8 @@ async function tickLords(admin: SupabaseClient, season: SeasonView, entities: Ma
       });
       if ((data as { ok?: boolean } | null)?.ok && r?.ok) {
         await addChronicle(admin, season.id, { kind: "gift", actor_id: lord.id, details: { amount } });
+        const after = (data as { worksite?: WorksiteRow }).worksite;
+        if (after) await stageRewards(admin, season.id, worksite.stage, Number(after.stage));
       }
       changed = true;
       continue; // une action par visite
@@ -764,7 +774,7 @@ async function tickLords(admin: SupabaseClient, season: SeasonView, entities: Ma
         .map((e) => {
           const s = advanceEntity(e, now, world, flat);
           const rate = currentRate(e, s, now, world, flat);
-          return { e, s, rate, loot: lootOf(s.stone, rate, false) };
+          return { e, s, rate, loot: lootOf(s.stone, rate, false, { stagesDone: stagesDoneAt(world, now) }) };
         })
         .filter((c) => !raidBlocker(state, c.s, { now, attackerId: lord.id, victimId: c.e.id, victimRate: c.rate, attackerIsLord: true, allowRepeat: lord.retaliateOnly, attackerArmy: army.attack }))
         .sort((a, b) => b.loot - a.loot);
@@ -772,9 +782,9 @@ async function tickLords(admin: SupabaseClient, season: SeasonView, entities: Ma
       const pick = candidates.length > 0 ? candidates[Math.random() < 0.6 ? 0 : Math.floor(Math.random() * candidates.length)] : null;
       if (pick) {
         // A10 : l'armée du seigneur est taillée sur la défense de sa cible, pour une chance d'environ un tiers.
-        const shaped = raidArmies(state, pick.s, { now, victimId: pick.e.id, attackerArmy: army.attack });
+        const shaped = raidArmies(state, pick.s, { now, victimId: pick.e.id, attackerArmy: army.attack, stagesDone: stagesDoneAt(world, now) });
         const sized = armyForChance(army.attack, shaped.defense, LORD_RAID_CHANCE, shaped.opts);
-        const ctx = { now, attackerId: lord.id, victimId: pick.e.id, victimRate: pick.rate, attackerIsLord: true, allowRepeat: lord.retaliateOnly, attackerArmy: armySize(sized) > 0 ? sized : army.attack };
+        const ctx = { now, attackerId: lord.id, victimId: pick.e.id, victimRate: pick.rate, attackerIsLord: true, allowRepeat: lord.retaliateOnly, attackerArmy: armySize(sized) > 0 ? sized : army.attack, stagesDone: stagesDoneAt(world, now) };
         const armiesNow = raidArmies(state, pick.s, ctx);
         const chance = estimateChance(armiesNow.attack, armiesNow.defense, armiesNow.opts);
         const r = resolveRaid(state, pick.s, { ...ctx, rng: Math.random });
@@ -1498,6 +1508,7 @@ function rivalsFor(
         attackerId: me.id,
         victimId: e.id,
         victimRate: rate,
+        stagesDone: stagesDoneAt(world, now),
         allied,
         atWar,
         defenderArmy: e.isLord ? armies.get(e.id)?.defense : undefined,
@@ -1508,7 +1519,7 @@ function rivalsFor(
       const intelUntil = intel.get(e.id) ?? 0;
       const seen = intelUntil > now || allied ? fight.defense : fuzzyArmy(fight.defense);
       const fair = e.isLord ? 1 : fairness(ctx.relativeSize, revenge);
-      const loot = lootOf(s.stone, rate, revenge, { lord: e.isLord, cap: e.isLord ? undefined : myRate * PVP_LOOT_CAP_SECONDS, factor: fair });
+      const loot = lootOf(s.stone, rate, revenge, { lord: e.isLord, cap: e.isLord ? undefined : myRate * PVP_LOOT_CAP_SECONDS, factor: fair, stagesDone: stagesDoneAt(world, now) });
       // Rançon attendue en cas de victoire : la défense qu'on voit, abattue.
       const ransom = e.isLord ? 0 : ransomOf(seen as Army, fair);
       return {
@@ -1658,7 +1669,7 @@ function applySimpleAction(state: PlayerState, action: GameAction, now: number, 
       return r.ok ? { ok: true, value: { state: r.value, log: { action: "army", details: { kind, id: action.id, qty: action.qty } } } } : r;
     }
     case "research": {
-      const r = startResearch(state, String(action.id), now);
+      const r = startResearch(state, String(action.id), now, stagesDoneAt(world, now));
       return r.ok ? { ok: true, value: { state: r.value, log: { action: "research", details: { id: action.id, level: queuedLevel(state, action.id as CombatantId) + 1 } } } } : r;
     }
     case "curfew": {
@@ -1845,6 +1856,7 @@ export async function runAction(admin: SupabaseClient, userId: string, action: G
           attackerId: me.id,
           victimId: victim.id,
           victimRate: currentRate(victim, victimState, now, world, flat),
+          stagesDone: stagesDoneAt(world, now),
           defenderArmy: victim.isLord ? lordArmies(entities, world, now, flat).get(victim.id)?.defense : undefined,
           allied: isAllied(me, victim),
           atWar: !!warBetween(conflicts.wars, me.allianceId, victim.allianceId, now),
@@ -1937,6 +1949,7 @@ export async function runAction(admin: SupabaseClient, userId: string, action: G
       const result = data as { ok: boolean; conflict?: boolean; worksite?: WorksiteRow };
       if (!result.ok && result.conflict) continue;
       if (result.worksite) worksite = worksiteFromRow(result.worksite);
+      await stageRewards(admin, season.id, stageAtLoad, worksite.stage);
       if (contribution > 0) await recordContribution(season.id, userId, finalState.totalContributed);
       if (contribution > 0) {
         // Le don compte aussi pour le lot du joueur, et pour celui de l'étape d'avant s'il est encore ouvert.

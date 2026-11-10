@@ -267,6 +267,13 @@ function stageMultiplier(stagesDone: number, key: "production" | "click"): numbe
   return m;
 }
 
+/** B6 : somme d'un bonus additif sur les étapes achevées. */
+export function stagePerk(stagesDone: number, key: "defenseHp" | "elan" | "securedSeconds" | "researchSpeed"): number {
+  let sum = 0;
+  for (let i = 0; i < Math.min(stagesDone, STAGES.length); i++) sum += STAGES[i].bonus[key] ?? 0;
+  return sum;
+}
+
 function ownedUpgrades(state: PlayerState): UpgradeDef[] {
   return state.upgrades.map((id) => UPGRADE_BY_ID.get(id)).filter((u): u is UpgradeDef => !!u);
 }
@@ -336,7 +343,7 @@ export interface AdvanceOptions {
 /** Production réelle à l'instant t (incendie compris). */
 export function rateAt(state: PlayerState, world: WorldState, t: number, opts: AdvanceOptions = {}): number {
   const base = opts.flatRate ?? productionPerSecond(state, world, stagesDoneAt(world, t));
-  const elan = !opts.flatRate && t < (state.elanUntil ?? 0) ? 1 + elanBonus(state) : 1;
+  const elan = !opts.flatRate && t < (state.elanUntil ?? 0) && elanBonus(state) > 0 ? 1 + elanBonus(state) + stagePerk(stagesDoneAt(world, t), "elan") : 1;
   const frenzy = !opts.flatRate && t < (state.frenzyUntil ?? 0) ? VEIN_FRENZY_FACTOR : 1;
   const master = !opts.flatRate && masterActive(state, "production", t) ? 1 + MASTER_BONUSES.production.value : 1;
   return (t < state.burnedUntil ? base * BURN_PRODUCTION_FACTOR : base) * elan * frenzy * master;
@@ -812,8 +819,9 @@ export function buyArmy(state: PlayerState, kind: "unit" | "defense", id: string
  * Chez un joueur, les 2 dernières heures de production sont à l'abri, mais jamais plus de la moitié du stock.
  * Un seigneur n'a pas de stock à l'abri. Entre joueurs, le butin est plafonné à 2 h de production de l'attaquant.
  */
-export function lootOf(stone: number, rate: number, revenge: boolean, opts: { lord?: boolean; cap?: number; factor?: number } = {}): number {
-  const secured = opts.lord ? 0 : Math.min(rate * SECURED_SECONDS, stone * (1 - MIN_EXPOSED_SHARE));
+export function lootOf(stone: number, rate: number, revenge: boolean, opts: { lord?: boolean; cap?: number; factor?: number; stagesDone?: number } = {}): number {
+  const securedSeconds = SECURED_SECONDS + stagePerk(opts.stagesDone ?? 0, "securedSeconds");
+  const secured = opts.lord ? 0 : Math.min(rate * securedSeconds, stone * (1 - MIN_EXPOSED_SHARE));
   const loot = Math.floor(Math.max(0, stone - secured) * (revenge ? REVENGE_LOOT_RATE : RAID_LOOT_RATE) * (opts.factor ?? 1));
   return opts.cap !== undefined ? Math.min(loot, Math.floor(opts.cap)) : loot;
 }
@@ -864,6 +872,8 @@ export interface RaidContext {
   attackerRate?: number;
   /** Taille relative de la cible (voir relativeSize) ; trop petite, on ne peut pas l'attaquer. */
   relativeSize?: number;
+  /** Étapes du chantier achevées (bonus d'étape : défense, stock à l'abri). */
+  stagesDone?: number;
   /** Tirages aléatoires entre 0 et 1 (fournis pour des tests reproductibles). */
   rng: () => number;
 }
@@ -888,9 +898,9 @@ export interface RaidReport {
   revenge: boolean;
 }
 
-export function raidArmies(attacker: PlayerState, victim: PlayerState, ctx: Pick<RaidContext, "attackerArmy" | "defenderArmy" | "victimId" | "now">) {
+export function raidArmies(attacker: PlayerState, victim: PlayerState, ctx: Pick<RaidContext, "attackerArmy" | "defenderArmy" | "victimId" | "now" | "stagesDone">) {
   // Le coup de pouce de la victime rend ses défenseurs plus durs à abattre.
-  const sturdy = masterActive(victim, "defense", ctx.now) ? 1 + MASTER_BONUSES.defense.value : 1;
+  const sturdy = (masterActive(victim, "defense", ctx.now) ? 1 + MASTER_BONUSES.defense.value : 1) * (ctx.defenderArmy ? 1 : 1 + stagePerk(ctx.stagesDone ?? 0, "defenseHp"));
   const attackBonus = (hasRevenge(attacker, ctx.victimId, ctx.now) ? REVENGE_ATTACK_BONUS : 1) / (1 + (victim.catchUp ?? 0)) / sturdy;
   const opts: BattleOptions = { attackBonus, attackerLevels: attacker.levels, defenderLevels: victim.levels };
   return {
@@ -1000,6 +1010,7 @@ export function resolveRaid(
     lord: !!ctx.defenderArmy,
     cap: playerVsPlayer && ctx.attackerRate !== undefined ? ctx.attackerRate * PVP_LOOT_CAP_SECONDS : undefined,
     factor: factor * lootBonus,
+    stagesDone: ctx.stagesDone,
   });
   // Rançon : pierre créée par le jeu (pas prise à la victime), sur les défenseurs abattus avant soins et réparations.
   const ransom = playerVsPlayer ? ransomOf(fight.defenderLost, factor) : 0;
@@ -1103,15 +1114,15 @@ export function researchCost(state: PlayerState, id: CombatantId): number {
   return Math.ceil((def?.cost ?? 0) * RESEARCH_COST_FACTOR * RESEARCH_COST_GROWTH ** queuedLevel(state, id));
 }
 
-export function researchTime(state: PlayerState, id: CombatantId): number {
-  return Math.ceil((RESEARCH_BASE_MS * RESEARCH_TIME_GROWTH ** queuedLevel(state, id)) / (1 + ACADEMY_SPEED * (state.academy ?? 0)));
+export function researchTime(state: PlayerState, id: CombatantId, stagesDone = 0): number {
+  return Math.ceil((RESEARCH_BASE_MS * RESEARCH_TIME_GROWTH ** queuedLevel(state, id)) / (1 + ACADEMY_SPEED * (state.academy ?? 0)) / (1 + stagePerk(stagesDone, "researchSpeed")));
 }
 
 /** Types qu'on peut améliorer : troupes et fortifications (pas les gardes). */
 export const RESEARCHABLE: readonly CombatantId[] = [...UNIT_IDS, ...DEFENSE_IDS];
 
 /** Ajoute une recherche en bout de file : elle commence quand la précédente se termine. */
-export function startResearch(state: PlayerState, id: string, now: number): Result<PlayerState> {
+export function startResearch(state: PlayerState, id: string, now: number, stagesDone = 0): Result<PlayerState> {
   if (!RESEARCHABLE.includes(id as CombatantId)) return { ok: false, error: "Amélioration inconnue." };
   const s = settleResearch(state, now);
   const queue = s.research ?? [];
@@ -1119,7 +1130,7 @@ export function startResearch(state: PlayerState, id: string, now: number): Resu
   const cost = researchCost(s, id as CombatantId);
   if (cost > s.stone) return { ok: false, error: "Pas assez de pierre." };
   const start = Math.max(now, queue[queue.length - 1]?.endsAt ?? now);
-  return { ok: true, value: { ...s, stone: s.stone - cost, research: [...queue, { id: id as CombatantId, endsAt: start + researchTime(s, id as CombatantId) }] } };
+  return { ok: true, value: { ...s, stone: s.stone - cost, research: [...queue, { id: id as CombatantId, endsAt: start + researchTime(s, id as CombatantId, stagesDone) }] } };
 }
 
 export function academyCost(state: PlayerState): number {

@@ -145,7 +145,17 @@ export interface StageDef {
   /** Pierre à verser par joueur actif (taille = base × joueurs actifs sur 7 jours). */
   basePerPlayer: number;
   bonusLabel: string;
-  bonus: { production?: number; click?: number };
+  bonus: {
+    production?: number;
+    click?: number;
+    /** B6 : bonus variés, cumulés sur les étapes achevées. */
+    defenseHp?: number;
+    elan?: number;
+    securedSeconds?: number;
+    researchSpeed?: number;
+    /** Écus versés à l'achèvement à chaque joueur qui a atteint au moins un palier de don. */
+    donorEcus?: number;
+  };
 }
 
 /** Le chantier commun : 8 étapes, chacune débloque un bonus permanent pour la saison. */
@@ -153,11 +163,11 @@ export const STAGES: readonly StageDef[] = [
   { name: "Les fondations", description: "Creuser et poser les assises du beffroi.", basePerPlayer: 50_000, bonusLabel: "Production +10 % pour tous", bonus: { production: 1.1 } },
   { name: "La tour de guet", description: "Monter les murs de pierre jusqu'au chemin de ronde.", basePerPlayer: 5_000_000, bonusLabel: "Coups de marteau ×2 pour tous", bonus: { click: 2 } },
   { name: "La chambre des cloches", description: "Couronner la tour et hisser les cloches.", basePerPlayer: 500_000_000, bonusLabel: "Production +25 % pour tous", bonus: { production: 1.25 } },
-  { name: "Les gargouilles", description: "Sculpter les gardiens de pierre aux quatre coins.", basePerPlayer: 20_000_000_000, bonusLabel: "Production +10 % pour tous", bonus: { production: 1.1 } },
-  { name: "Le grand bourdon", description: "Fondre la plus grosse cloche du royaume.", basePerPlayer: 150_000_000_000, bonusLabel: "Coups de marteau ×2 pour tous", bonus: { click: 2 } },
-  { name: "La flèche", description: "Élancer la flèche au-dessus des nuages.", basePerPlayer: 1_000_000_000_000, bonusLabel: "Production +15 % pour tous", bonus: { production: 1.15 } },
-  { name: "L'horloge astronomique", description: "Une horloge qui suit le soleil, la lune et les saisons.", basePerPlayer: 7_000_000_000_000, bonusLabel: "Production +20 % pour tous", bonus: { production: 1.2 } },
-  { name: "Le beffroi légendaire", description: "On en parlera dans tout le royaume pendant des siècles.", basePerPlayer: 50_000_000_000_000, bonusLabel: "Production +25 % pour tous", bonus: { production: 1.25 } },
+  { name: "Les gargouilles", description: "Sculpter les gardiens de pierre aux quatre coins.", basePerPlayer: 20_000_000_000, bonusLabel: "Production +10 % et points de vie en défense +20 % pour tous", bonus: { production: 1.1, defenseHp: 0.2 } },
+  { name: "Le grand bourdon", description: "Fondre la plus grosse cloche du royaume.", basePerPlayer: 150_000_000_000, bonusLabel: "Élan à +75 % au lieu de +50 % pour tous", bonus: { elan: 0.25 } },
+  { name: "La flèche", description: "Élancer la flèche au-dessus des nuages.", basePerPlayer: 1_000_000_000_000, bonusLabel: "Production +15 % et 1 h de stock à l'abri en plus pour tous", bonus: { production: 1.15, securedSeconds: 3600 } },
+  { name: "L'horloge astronomique", description: "Une horloge qui suit le soleil, la lune et les saisons.", basePerPlayer: 7_000_000_000_000, bonusLabel: "Production +20 % et recherches 20 % plus rapides pour tous", bonus: { production: 1.2, researchSpeed: 0.2 } },
+  { name: "Le beffroi légendaire", description: "On en parlera dans tout le royaume pendant des siècles.", basePerPlayer: 50_000_000_000_000, bonusLabel: "Production +25 % pour tous, et 20 écus à chaque joueur qui a atteint un palier de don", bonus: { production: 1.25, donorEcus: 20 } },
 ];
 /** Un seigneur bâtisseur ne verse jamais plus que cette part de l'étape en cours d'un coup. */
 export const LORD_GIFT_MAX_SHARE = 0.25;
