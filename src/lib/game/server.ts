@@ -1080,6 +1080,7 @@ function rivalsFor(
         shieldUntil: s.shieldUntil,
         burnedUntil: s.burnedUntil,
         totalPlundered: s.totalPlundered,
+        lastSeen: e.isLord ? undefined : e.lastSeen,
         revenge,
         blocker: raidBlocker(myState, s, ctx),
       };

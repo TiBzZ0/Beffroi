@@ -46,6 +46,8 @@ export interface RivalView {
   shieldUntil: number;
   burnedUntil: number;
   totalPlundered: number;
+  /** Joueurs : dernière activité (heure serveur). Les seigneurs n'en ont pas. */
+  lastSeen?: number;
   revenge: boolean;
   /** Raison pour laquelle on ne peut pas le raider maintenant, ou null. */
   blocker: string | null;

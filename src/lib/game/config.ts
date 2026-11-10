@@ -420,3 +420,6 @@ export const COLOSSUS_POWER = 0.6;
 export const COLOSSUS_ARMY: Partial<Record<CombatantId, number>> = { chevalier: 0.35, piquier: 0.3, arbaletrier: 0.35 };
 /** Prime partagée au prorata des dégâts : valeur de son armée × ce facteur. */
 export const COLOSSUS_BOUNTY = 1;
+
+/** Un joueur est « en ligne » s'il a été actif il y a moins de ce délai (sa page se synchronise chaque minute). */
+export const ONLINE_MS = 2.5 * 60 * 1000;

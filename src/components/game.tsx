@@ -5,6 +5,7 @@ import { signOut } from "@/app/(auth)/actions";
 import {
   CATEGORY_LABELS,
   MAX_ALLIANCE_SIZE,
+  ONLINE_MS,
   DIFFICULTY_LABELS,
   COMBATANTS,
   DEFENSES,
@@ -551,7 +552,7 @@ function AllianceTab({ snap, live, now, run }: { snap: GameSnapshot; live: Playe
           <h3 className="section-title">Alliés</h3>
           <div className="list">
             {allies.map((r) => (
-              <AllyRow key={r.id} r={r} live={live} run={run} />
+              <AllyRow key={r.id} r={r} live={live} now={now} run={run} />
             ))}
           </div>
         </>
@@ -614,6 +615,7 @@ function RivalRow({
           {r.revenge && <span className="badge badge-revenge">revanche !</span>}
           {r.allianceName && <span className="badge">🤝 {r.allianceName}</span>}
           {r.atWar && <span className="badge badge-revenge">⚔️ en guerre</span>}
+          <Presence lastSeen={r.lastSeen} now={now} />
         </div>
         <div className="row-desc num">
           {r.temper ? `${r.temper} · ` : ""}
@@ -896,7 +898,21 @@ function Fortress({ snap, live, now, run }: { snap: GameSnapshot; live: PlayerSt
 }
 
 /** Un allié : son armée exacte et l'envoi de renforts. */
-function AllyRow({ r, live, run }: { r: RivalView; live: PlayerState; run: ReturnType<typeof useGame>["run"] }) {
+/** Pastille de présence : en ligne, ou depuis quand le joueur n'a pas été vu. */
+function Presence({ lastSeen, now }: { lastSeen?: number; now: number }) {
+  if (lastSeen === undefined) return null;
+  const away = now - lastSeen;
+  if (away < ONLINE_MS) return <span className="badge badge-online">● en ligne</span>;
+  const m = Math.floor(away / 60_000);
+  const label = m < 60 ? `${m} min` : m < 1440 ? `${Math.floor(m / 60)} h` : `${Math.floor(m / 1440)} j`;
+  return (
+    <span className="badge badge-offline" title={new Date(lastSeen).toLocaleString("fr-FR")}>
+      vu il y a {label}
+    </span>
+  );
+}
+
+function AllyRow({ r, live, now, run }: { r: RivalView; live: PlayerState; now: number; run: ReturnType<typeof useGame>["run"] }) {
   const available = UNITS.filter((u) => (live.troops[u.id] ?? 0) > 0);
   const [unit, setUnit] = useState<string>("");
   const [qty, setQty] = useState(1);
@@ -915,7 +931,10 @@ function AllyRow({ r, live, run }: { r: RivalView; live: PlayerState; run: Retur
         🤝
       </div>
       <div>
-        <div className="row-title">{r.name}</div>
+        <div className="row-title">
+          {r.name}
+          <Presence lastSeen={r.lastSeen} now={now} />
+        </div>
         <div className="row-desc army-line num">{armyIcons(r.army)}</div>
         {chosen ? (
           <div className="reinforce">

@@ -225,6 +225,7 @@ export function useGame() {
                     shieldUntil: Date.parse(row.shield_until as string),
                     burnedUntil: Date.parse(row.burned_until as string),
                     totalPlundered: Number(row.total_plundered),
+                    lastSeen: r.isLord || !row.last_seen ? r.lastSeen : Date.parse(row.last_seen as string),
                   }
                 : r,
             );
