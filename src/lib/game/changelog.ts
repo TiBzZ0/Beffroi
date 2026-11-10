@@ -259,4 +259,13 @@ export const CHANGELOG: ChangeEntry[] = [
       "💰 Nouvel événement, le trésor enfoui (90 min) : une case est révélée. Les armées qui y arrivent se battent dans l'ordre d'arrivée, et celle qui tient la case à la fin emporte 2 heures de la production médiane. Pas de trésor en couvre-feu.",
     ],
   },
+  {
+    id: 32,
+    date: "10 novembre",
+    items: [
+      "👑 Nouvel événement, le convoi royal (90 min) : il traverse la carte et tombe dans une embuscade à mi-chemin, face à 50 % des armées réunies des joueurs actifs. Poste des troupes au point d'embuscade avant : si le convoi passe, chaque escorte reçoit 45 minutes de sa production. Les pertes reviennent à 60 % de l'infirmerie.",
+      "🏰 Nouvel événement, le siège du beffroi (3 h) : une armée valant 80 % des armées réunies frappe le beffroi à la fin. Poste des défenseurs au centre : victoire, 1 heure de production chacun ; défaite, l'étape en cours perd 10 % de sa pierre.",
+      "🏆 Nouvel événement, le tournoi (1 h) : compose une armée avec le budget fourni, sans toucher à tes troupes. Tableau à élimination à la fin, sans pertes : 2 h, 1 h et 30 min de production pour le podium.",
+    ],
+  },
 ];

@@ -248,6 +248,7 @@ export type GameAction =
   | { type: "research"; id: string }
   | { type: "merchant"; choice: MerchantChoice }
   | { type: "march_recall"; id: string }
+  | { type: "tournament_join"; troops: Record<string, number> }
   | { type: "academy" }
   | { type: "tithe"; percent: number }
   | { type: "curfew"; start: number | null }
@@ -269,6 +270,19 @@ export interface EventView {
   /** V7 : camps de bandits (le mien d'abord), V8 : qui tient le trésor. */
   camps?: { id: string; pos: [number, number]; army: Record<string, number>; winner: string | null; mine: boolean }[];
   holder?: string | null;
+  /** V10 à V12 : heure du combat commun, s'il est réglé et son issue. */
+  battleAt?: number;
+  resolved?: boolean;
+  outcome?: "won" | "lost" | null;
+  /** V10, V11 : nombre de joueurs postés, si j'y suis, et l'armée commune des défenseurs. */
+  posters?: number;
+  myPosted?: boolean;
+  defense?: Record<string, number>;
+  /** V12 : budget commun, inscrits, mon armée, podium. */
+  budget?: number;
+  entries?: number;
+  myEntry?: Record<string, number> | null;
+  podium?: string[];
   /** Actif : fin de l'événement. Sinon : arrivée du prochain. */
   active: boolean;
   startsAt: number;

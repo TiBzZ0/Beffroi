@@ -623,8 +623,8 @@ export function mapDistance(a: MapPos, b: MapPos): number {
 }
 
 // Événements sans carte (V3 à V6, V15). Un événement toutes les 2 heures, tiré au sort selon ces poids, jamais deux fois de suite le même.
-export type EventKind = "caravane" | "colosse" | "foire" | "fete" | "etoiles" | "treve" | "marchand" | "lune" | "brouillard" | "filon" | "bandits" | "tresor";
-export const EVENT_WEIGHTS: Record<EventKind, number> = { caravane: 3, colosse: 2, foire: 2, fete: 2, etoiles: 2, treve: 1, marchand: 2, lune: 1, brouillard: 1, filon: 2, bandits: 3, tresor: 2 };
+export type EventKind = "caravane" | "colosse" | "foire" | "fete" | "etoiles" | "treve" | "marchand" | "lune" | "brouillard" | "filon" | "bandits" | "tresor" | "convoi" | "siege" | "tournoi";
+export const EVENT_WEIGHTS: Record<EventKind, number> = { caravane: 3, colosse: 2, foire: 2, fete: 2, etoiles: 2, treve: 1, marchand: 2, lune: 1, brouillard: 1, filon: 2, bandits: 3, tresor: 2, convoi: 2, siege: 1, tournoi: 1 };
 export const EVENT_DURATIONS_MS: Record<EventKind, number> = {
   caravane: 60 * 60 * 1000,
   colosse: 6 * 60 * 60 * 1000,
@@ -638,7 +638,21 @@ export const EVENT_DURATIONS_MS: Record<EventKind, number> = {
   filon: 2 * 60 * 60 * 1000,
   bandits: 3 * 60 * 60 * 1000,
   tresor: 90 * 60 * 1000,
+  convoi: 90 * 60 * 1000,
+  siege: 3 * 60 * 60 * 1000,
+  tournoi: 60 * 60 * 1000,
 };
+/** V10 : le convoi est attaqué à mi-chemin par 50 % des armées réunies des joueurs actifs ; 45 minutes de production pour chaque escorte s'il passe. */
+export const CONVOY_ATTACK_SHARE = 0.5;
+export const CONVOY_PRIZE_SECONDS = 45 * 60;
+/** Toutes les troupes perdues à l'escorte du convoi passent par l'infirmerie à 60 %. */
+export const CONVOY_WOUNDED = 0.6;
+/** V11 : 80 % des armées réunies marchent sur le beffroi ; victoire 1 h de production par défenseur, défaite −10 % de l'étape. */
+export const SIEGE_ATTACK_SHARE = 0.8;
+export const SIEGE_PRIZE_SECONDS = 60 * 60;
+export const SIEGE_STAGE_LOSS = 0.1;
+/** V12 : tournoi, même budget pour tous (armée médiane), sans pertes ; podium 2 h, 1 h, 30 min de production. */
+export const TOURNEY_PRIZES_SECONDS = [2 * 60 * 60, 60 * 60, 30 * 60] as const;
 /** V9 : filon géant, 3 minutes de production par tranche de 10 minutes sur place, 30 minutes au plus. */
 export const MINE_SECONDS_PER_SLICE = 3 * 60;
 export const MINE_SLICE_MS = 10 * 60 * 1000;

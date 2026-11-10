@@ -1998,12 +1998,72 @@ function eventAttackText(c: ChronicleEntry, me: string): string {
 }
 
 /** Événement en cours (ou le prochain) en tête de l'onglet Raids, avec ses derniers assauts. */
-const EVENT_ICONS: Record<EventView["kind"], string> = { caravane: "🐪", colosse: "🗿", foire: "🎪", fete: "🎉", etoiles: "🌠", treve: "🔔", marchand: "🧺", lune: "🌕", brouillard: "🌫️", filon: "⛏️", bandits: "🏕️", tresor: "💰" };
-const isLocalEvent = (e: EventView | null | undefined) => !!e && (e.kind === "filon" || e.kind === "bandits" || e.kind === "tresor");
+const EVENT_ICONS: Record<EventView["kind"], string> = { caravane: "🐪", colosse: "🗿", foire: "🎪", fete: "🎉", etoiles: "🌠", treve: "🔔", marchand: "🧺", lune: "🌕", brouillard: "🌫️", filon: "⛏️", bandits: "🏕️", tresor: "💰", convoi: "👑", siege: "🏰", tournoi: "🏆" };
+const isLocalEvent = (e: EventView | null | undefined) => !!e && (e.kind === "filon" || e.kind === "bandits" || e.kind === "tresor" || e.kind === "convoi" || e.kind === "siege" || e.kind === "tournoi");
 const isCombatEvent = (e: EventView | null | undefined) => !!e && (e.kind === "caravane" || e.kind === "colosse");
 
 /** V7 à V9 : filon, camps de bandits, trésor. On y envoie une armée composée comme pour un raid. */
-function LocalEventCard({ e, live, now, run }: { e: EventView; live: PlayerState; now: number; run: ReturnType<typeof useGame>["run"] }) {
+function LocalEventCard(props: { e: EventView; live: PlayerState; now: number; run: ReturnType<typeof useGame>["run"] }) {
+  return props.e.kind === "tournoi" ? <TourneyCard {...props} /> : <PlaceEventCard {...props} />;
+}
+
+/** V12 : composer une armée de tournoi avec le budget commun. */
+function TourneyCard({ e, now, run }: { e: EventView; live: PlayerState; now: number; run: ReturnType<typeof useGame>["run"] }) {
+  const [chosen, setChosen] = useState<Record<string, number> | null>(null);
+  const [busy, setBusy] = useState(false);
+  const army = chosen ?? e.myEntry ?? {};
+  const budget = e.budget ?? 0;
+  const spent = UNITS.reduce((sum, u) => sum + (army[u.id] ?? 0) * u.cost, 0);
+  const open = !e.resolved && (e.battleAt ?? e.endsAt) > now;
+  const join = async () => {
+    setBusy(true);
+    await run({ type: "tournament_join", troops: army });
+    setBusy(false);
+    setChosen(null);
+  };
+  return (
+    <div className="row event-card">
+      <div className="row-icon" aria-hidden>
+        🏆
+      </div>
+      <div>
+        <div className="row-title">
+          {e.name}
+          <span className="badge badge-level-3">{open ? `encore ${duration(Math.max(0, e.endsAt - now))}` : "terminé"}</span>
+        </div>
+        <div className="row-desc">{e.description}</div>
+        <div className="row-desc">
+          {e.entries ?? 0} inscrit{(e.entries ?? 0) > 1 ? "s" : ""}
+          {e.myEntry ? ` · ton armée : ${armyIcons(e.myEntry)}` : ""}
+        </div>
+        {e.resolved && <div className="row-desc">{(e.podium ?? []).length ? `Podium : ${(e.podium ?? []).map((n, i) => `${["🥇", "🥈", "🥉"][i]} ${n}`).join(" · ")}` : "Pas assez d'inscrits."}</div>}
+        {open && (
+          <div className="simulator send-army">
+            {UNITS.map((u) => (
+              <label key={u.id} className="send-line">
+                <span>
+                  {u.icon} {u.name} <span className="num">({formatNumber(u.cost)} 🪨)</span>
+                </span>
+                <input type="number" min={0} value={army[u.id] ?? 0} onChange={(ev) => setChosen({ ...army, [u.id]: Math.max(0, Math.floor(Number(ev.target.value) || 0)) })} />
+              </label>
+            ))}
+            <div className="qty">
+              <span className={spent > budget ? "num warn" : "num"}>
+                {formatNumber(spent)} / {formatNumber(budget)} 🪨
+              </span>
+              <button className="btn btn-primary" disabled={busy || spent === 0 || spent > budget} onClick={() => void join()}>
+                {e.myEntry ? "Modifier mon armée" : "S'inscrire"}
+              </button>
+            </div>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+/** Filon, camps de bandits, trésor, convoi et siège : on y envoie une armée composée comme pour un raid. */
+function PlaceEventCard({ e, live, now, run }: { e: EventView; live: PlayerState; now: number; run: ReturnType<typeof useGame>["run"] }) {
   const [target, setTarget] = useState<string | null>(null);
   const [chosen, setChosen] = useState<Record<string, number> | null>(null);
   const [busy, setBusy] = useState(false);
@@ -2049,6 +2109,15 @@ function LocalEventCard({ e, live, now, run }: { e: EventView; live: PlayerState
           <span className="badge badge-level-3">encore {duration(Math.max(0, e.endsAt - now))}</span>
         </div>
         <div className="row-desc">{e.description}</div>
+        {(e.kind === "convoi" || e.kind === "siege") && (
+          <div className="row-desc">
+            {e.resolved
+              ? e.outcome === "won"
+                ? e.kind === "convoi" ? "👑 Le convoi est passé." : "🏰 Le beffroi a tenu."
+                : e.kind === "convoi" ? "👑 Le convoi est tombé dans l'embuscade." : "🏰 Le beffroi est tombé : l'étape a perdu 10 % de sa pierre."
+              : `${e.kind === "convoi" ? "Embuscade" : "Assaut"} dans ${duration(Math.max(0, (e.battleAt ?? e.endsAt) - now))} · ennemis : ${armyIcons(e.army)} · ${e.posters ?? 0} joueur${(e.posters ?? 0) > 1 ? "s" : ""} posté${(e.posters ?? 0) > 1 ? "s" : ""}${(e.posters ?? 0) > 0 ? ` (${Math.round(e.chance * 100)} % de tenir)` : ""}`}
+          </div>
+        )}
         {e.kind === "tresor" && <div className="row-desc">{e.holder ? `💰 La case est tenue par ${e.holder}.` : "💰 Personne ne tient encore la case."}</div>}
         {e.kind === "bandits" && (
           <ul className="marches">
@@ -2070,9 +2139,9 @@ function LocalEventCard({ e, live, now, run }: { e: EventView; live: PlayerState
         {e.kind === "bandits" && target && composer(target)}
         {e.kind !== "bandits" && (target ? composer() : null)}
       </div>
-      {e.kind !== "bandits" && !target && (
+      {e.kind !== "bandits" && !target && !e.resolved && !e.myPosted && (e.battleAt ?? e.endsAt) > now && (
         <button className="btn btn-primary" onClick={() => setTarget("go")}>
-          {e.kind === "filon" ? "Poster une armée" : "Prendre la case"}
+          {e.kind === "filon" ? "Poster une armée" : e.kind === "convoi" ? "Escorter le convoi" : e.kind === "siege" ? "Défendre le beffroi" : "Prendre la case"}
         </button>
       )}
     </div>
@@ -2342,7 +2411,9 @@ function KingdomMap({ snap, live, now, run }: { snap: GameSnapshot; live: Player
               const target =
                 m.target === "fortress"
                   ? map.fortress
-                  : m.target.startsWith("event:") || m.target.startsWith("mine:") || m.target.startsWith("treasure:")
+                  : m.target.startsWith("convoy:") || m.target.startsWith("siege:")
+                    ? ev?.pos
+                    : m.target.startsWith("event:") || m.target.startsWith("mine:") || m.target.startsWith("treasure:")
                     ? evPos
                     : camp
                       ? camp.pos

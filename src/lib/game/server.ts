@@ -30,6 +30,14 @@ import {
   BANDIT_PRIZE_SECONDS,
   MINE_SLICE_MS,
   TREASURE_PRIZE_SECONDS,
+  CONVOY_ATTACK_SHARE,
+  CONVOY_PRIZE_SECONDS,
+  CONVOY_WOUNDED,
+  SIEGE_ATTACK_SHARE,
+  SIEGE_PRIZE_SECONDS,
+  SIEGE_STAGE_LOSS,
+  TOURNEY_PRIZES_SECONDS,
+  UNITS,
   RED_MOON_RANSOM,
   WOUNDED_DEFENDER_BEATEN,
   MAX_MARCHES,
@@ -94,7 +102,7 @@ import {
   type MapPos,
 } from "./config";
 import { banditSpot, caravanPath, caravanPos, colossusPos, fixedPlaces, pickSpawn } from "./map";
-import { pickNextEvent } from "./events";
+import { pickNextEvent, tourneyPodium } from "./events";
 import {
   advance,
   applyClicks,
@@ -1241,8 +1249,26 @@ interface EventData {
   pos?: [number, number];
   camps?: BanditCamp[];
   holder?: { owner: string; march: string } | null;
+  /** V10, V11 : armée qui attaque le convoi ou le beffroi, chemin du convoi, issue du combat commun. */
+  enemy?: Army;
+  path?: { from: [number, number]; to: [number, number] };
+  resolved?: boolean;
+  outcome?: "won" | "lost";
+  /** V12 : budget commun, armées inscrites, podium. */
+  budget?: number;
+  entries?: Record<string, Army>;
+  podium?: string[];
 }
-const LOCAL_EVENTS: readonly EventKind[] = ["filon", "bandits", "tresor"];
+const LOCAL_EVENTS: readonly EventKind[] = ["filon", "bandits", "tresor", "convoi", "siege"];
+/** V10 à V12 : événements qui se règlent d'un seul coup pour tout le monde. */
+const GROUP_EVENTS: readonly EventKind[] = ["convoi", "siege", "tournoi"];
+
+/** Moment du combat commun : mi-parcours pour le convoi, fin de l'événement sinon. */
+function battleAt(e: EventRow): number {
+  const start = ms(e.starts_at);
+  const end = ms(e.ends_at);
+  return e.kind === "convoi" ? start + (end - start) / 2 : end;
+}
 
 const EVENT_INFO: Record<EventKind, { name: string; description: string }> = {
   foire: { name: "La grande foire", description: "Les marchands envahissent la place : les savoirs coûtent 20 % de moins et les ateliers 10 % de moins pendant 2 heures." },
@@ -1263,6 +1289,9 @@ const EVENT_INFO: Record<EventKind, { name: string; description: string }> = {
     name: "Le Colosse de Grisemont",
     description: "Une armée immense qui ne se reforme pas. Chaque assaut rapporte 2 fois la valeur des pertes infligées ; s'il tombe, chaque joueur qui l'a touché reçoit 15 minutes de sa production.",
   },
+  convoi: { name: "Le convoi royal", description: "Un convoi traverse la carte et tombera dans une embuscade à mi-chemin. Poste des troupes au point d'embuscade avant : si le convoi passe, chaque escorte reçoit 45 minutes de sa production. Les troupes perdues reviennent à 60 % de l'infirmerie." },
+  siege: { name: "Le siège du beffroi", description: "Une armée marche sur le beffroi et frappe dans 3 heures. Poste des troupes au centre de la carte : victoire, 1 heure de production par défenseur ; défaite, l'étape en cours perd 10 % de sa pierre." },
+  tournoi: { name: "Le tournoi", description: "Compose une armée avec le budget fourni, sans toucher à tes troupes. Tableau à élimination à la fin de l'heure, sans pertes : 2 h, 1 h et 30 min de production pour le podium." },
 };
 
 interface EventState {
@@ -1303,6 +1332,9 @@ const EVENT_NOTICES: Record<EventKind, { title: string; body: string }> = {
   bandits: { title: "🏕️ Des bandits campent près de chez vous !", body: "Un camp par joueur actif. Le premier à le vider emporte le butin." },
   tresor: { title: "💰 Un trésor enfoui est révélé !", body: "90 minutes pour tenir la case. Les armées s'y battent dans l'ordre d'arrivée." },
   marchand: { title: "🧺 Le marchand ambulant est là", body: "Un bonus au choix pour 30 minutes de ta production, pendant 1 heure." },
+  convoi: { title: "👑 Le convoi royal se met en route !", body: "Poste des troupes au point d'embuscade avant qu'il n'y arrive." },
+  siege: { title: "🏰 Une armée marche sur le beffroi !", body: "Trois heures pour poster des défenseurs au centre de la carte." },
+  tournoi: { title: "🏆 Le tournoi est ouvert !", body: "Une heure pour s'inscrire avec le budget fourni. Pas de pertes." },
 };
 
 /** Annonce l'événement suivant 15 minutes avant ; la table garantit qu'une seule requête prévient tout le monde. */
@@ -1329,7 +1361,8 @@ async function loadEventInner(admin: SupabaseClient, seasonId: number, now: numb
   const { data: open } = await admin.from("events").select("*").eq("season_id", seasonId).eq("settled", false);
   for (const raw of open ?? []) {
     const e = eventRow(raw);
-    const finished = ms(e.ends_at) <= now || (e.kind === "colosse" && armySize(e.army) === 0);
+    // V10 à V12 : l'événement reste ouvert tant que le combat commun n'est pas réglé.
+    const finished = (ms(e.ends_at) <= now || (e.kind === "colosse" && armySize(e.army) === 0)) && !(GROUP_EVENTS.includes(e.kind) && !e.data.resolved);
     const next = pickNextEvent(e.kind, e.id * 7919 + seasonId);
     if (!finished) return { active: e, levels: medianLevels(entities), nextAt: ms(e.ends_at) + EVENT_GAP_MS, nextKind: next };
     if (COMBAT_EVENTS.includes(e.kind)) await admin.rpc("settle_event_v2", { p_event: e.id, p_bonus: killBonus(e, entities, now, world, flat) });
@@ -1355,12 +1388,18 @@ async function loadEventInner(admin: SupabaseClient, seasonId: number, now: numb
   }
   // L'index unique empêche deux événements simultanés si deux joueurs arrivent en même temps.
   // A14, A15 : plus de chargement ni de prime communs (pool 0) ; `prize` n'est plus qu'une indication.
-  let data: EventData = {};
+  let data: EventData = nextKind === "tournoi" ? { budget: Math.floor(troopBudget(entities)), entries: {} } : {};
   if (LOCAL_EVENTS.includes(nextKind)) {
     const positions = await loadPositions(admin, seasonId, entities);
     const players = [...positions.entries()].filter(([id]) => !LORDS.some((l) => l.id === id)).map(([, p]) => p);
     const seed = Math.floor(now / 1000);
-    if (nextKind === "bandits") {
+    const activeTotal = activeHumans(entities, now).reduce((sum, e) => sum + armyValue(attackArmy(advance(e.state, now, world))), 0);
+    if (nextKind === "convoi") {
+      const path = caravanPath(seed);
+      data = { path: { from: [path.from[0], path.from[1]], to: [path.to[0], path.to[1]] }, pos: [Math.round((path.from[0] + path.to[0]) / 2), Math.round((path.from[1] + path.to[1]) / 2)], enemy: armyFromBudget(Math.max(activeTotal * CONVOY_ATTACK_SHARE, 1), CARAVAN_ESCORT) };
+    } else if (nextKind === "siege") {
+      data = { pos: [BELFRY_POS[0], BELFRY_POS[1]], enemy: armyFromBudget(Math.max(activeTotal * SIEGE_ATTACK_SHARE, 1), COLOSSUS_ARMY) };
+    } else if (nextKind === "bandits") {
       const taken: MapPos[] = [...fixedPlaces(), ...positions.values()];
       const camps: BanditCamp[] = [];
       for (const e of activeHumans(entities, now)) {
@@ -1499,9 +1538,32 @@ async function runEventAttack(admin: SupabaseClient, seasonId: number, me: Entit
   return { state: after, message, settle: finished ? e.id : undefined };
 }
 
-function eventView(meId: string, state: PlayerState, ev: EventState, now: number, rate: number, positions?: Map<string, MapPos>, names?: Map<string, string>): EventView | null {
+function eventView(meId: string, state: PlayerState, ev: EventState, now: number, rate: number, positions?: Map<string, MapPos>, names?: Map<string, string>, entities?: Map<string, Entity>): EventView | null {
   const view = eventViewInner(meId, state, ev, now, rate);
   const e = ev.active;
+  if (view && e && GROUP_EVENTS.includes(e.kind)) {
+    const nameOf = (id: string) => (id === meId ? "toi" : (names?.get(id) ?? "un joueur"));
+    if (e.kind === "tournoi") {
+      const entries = e.data.entries ?? {};
+      return { ...view, battleAt: battleAt(e), resolved: !!e.data.resolved, budget: e.data.budget ?? 0, entries: Object.keys(entries).length, myEntry: (entries[meId] as Record<string, number> | undefined) ?? null, podium: (e.data.podium ?? []).map(nameOf) };
+    }
+    const posted = entities ? postedOn(e, entities) : [];
+    const defenders = sumArmies(posted.map((p) => p.m.troops));
+    const enemy = e.data.enemy ?? {};
+    return {
+      ...view,
+      ...(e.data.pos ? { pos: e.data.pos } : {}),
+      ...(e.data.path ? { path: e.data.path } : {}),
+      army: enemy as Record<string, number>,
+      battleAt: battleAt(e),
+      resolved: !!e.data.resolved,
+      outcome: e.data.outcome ?? null,
+      posters: new Set(posted.map((p) => p.e.id)).size,
+      myPosted: (state.marches ?? []).some((m) => m.target === groupTarget(e) && m.status !== "back"),
+      defense: defenders as Record<string, number>,
+      chance: armySize(defenders) > 0 ? 1 - estimateChance(enemy, defenders, { attackerLevels: ev.levels, defenderLevels: ev.levels }) : 0,
+    };
+  }
   if (view && e && LOCAL_EVENTS.includes(e.kind)) {
     const nameOf = (id: string) => (id === meId ? "toi" : (names?.get(id) ?? "un joueur"));
     return {
@@ -2079,6 +2141,20 @@ export async function runAction(admin: SupabaseClient, userId: string, action: G
         entities = await loadEntities(admin, season.id, userId);
       }
       events = await loadEvent(admin, season.id, now, entities, world, flat);
+    } else if (action.type === "tournament_join") {
+      // V12 : l'armée du tournoi est fictive ; mes troupes ne bougent pas.
+      const e = events.active;
+      const entry = e ? tourneyEntry(e, action.troops, now) : { error: "Aucun tournoi en cours." };
+      if ("error" in entry) error = entry.error;
+      else if (e) {
+        const again = !!e.data.entries?.[me.id];
+        const { error: rpcError } = await admin.rpc("apply_event_data", { p_season: season.id, p_states: [toJson(me, current, {})], p_event: e.id, p_version: e.version, p_data: { ...e.data, entries: { ...(e.data.entries ?? {}), [me.id]: entry.army } }, p_attackers: null });
+        if (rpcError?.message.includes("beffroi_conflict")) continue;
+        if (rpcError) throw new Error(`Inscription impossible : ${rpcError.message}`);
+        message = again ? "🏆 Ton armée de tournoi est modifiée." : "🏆 Tu es inscrit au tournoi. Résultats à la fin de l'heure.";
+        entities = await loadEntities(admin, season.id, userId);
+        events = await loadEvent(admin, season.id, now, entities, world, flat);
+      }
     } else if (CONFLICT_ACTIONS.has(action.type)) {
       const r = await runConflictAction(admin, season.id, me, current, entities, conflicts, allianceNames, action as Parameters<typeof runConflictAction>[7], now);
       if (r === "conflict") continue;
@@ -2330,7 +2406,7 @@ export async function runAction(admin: SupabaseClient, userId: string, action: G
       ...info,
       alliances: [...allianceNames].map(([id, name]) => ({ id, name, size: [...entities.values()].filter((e) => e.allianceId === id).length })),
       war: warView(meNow, conflicts.wars, allianceNames),
-      event: eventView(userId, finalState, events, now, currentRate(meNow, finalState, now, worldFrom(worksite), flat), positions, new Map([...entities.values()].map((x) => [x.id, x.name]))),
+      event: eventView(userId, finalState, events, now, currentRate(meNow, finalState, now, worldFrom(worksite), flat), positions, new Map([...entities.values()].map((x) => [x.id, x.name])), entities),
       fortress: fortressView(meNow, finalState, conflicts.fortress, entities, allianceNames, now, intel.get(FORTRESS_INTEL) ?? null),
       chronicle,
       map: mapView(positions),
@@ -2389,6 +2465,8 @@ async function settleMarches(
   names: Map<number, string>,
   events: EventState,
 ): Promise<"none" | "changed" | "conflict"> {
+  const group = await resolveGroupEvent(admin, seasonId, entities, world, flat, events, now);
+  if (group !== "none") return group;
   const due = [...entities.values()]
     .flatMap((e) => (e.state.marches ?? []).map((m) => ({ e, m, at: marchDue(m) })))
     .filter((d) => d.at <= now)
@@ -2455,6 +2533,11 @@ async function settleMarches(
     };
     const survivorsOf = (army: Army, lost: Army) => cleanArmy(Object.fromEntries((Object.entries(army) as [string, number][]).map(([id, n]) => [id, n - ((lost as Record<string, number>)[id] ?? 0)])) as Army);
     const aState = advanceEntity(owner, at, world, flat);
+    if (what === "convoy" || what === "siege") {
+      // V10, V11 : l'armée attend le combat commun sur place.
+      if (ev.data.resolved || at >= battleAt(ev)) return turned();
+      return commit(owner, replace(owner.state, { ...m, status: "camp", returnAt: battleAt(ev) + 6 * 3_600_000 }));
+    }
     if (what === "mine") {
       // V9 : l'armée s'installe sur le filon jusqu'à la fin, sans combattre.
       return commit(owner, replace(owner.state, { ...m, status: "camp", returnAt: endsAt }));
@@ -2654,8 +2737,111 @@ function marchId(): string {
   return `${Date.now().toString(36)}${Math.floor(Math.random() * 1e6).toString(36)}`;
 }
 
-const EVENT_ICON: Partial<Record<EventKind, string>> = { caravane: "🐪", colosse: "🗿", filon: "⛏️", bandits: "🏕️", tresor: "💰" };
-const EVENT_PLACE: Partial<Record<EventKind, string>> = { caravane: "la caravane", colosse: "le colosse", filon: "le filon", bandits: "le camp de bandits", tresor: "le trésor" };
+const EVENT_ICON: Partial<Record<EventKind, string>> = { caravane: "🐪", colosse: "🗿", filon: "⛏️", bandits: "🏕️", tresor: "💰", convoi: "👑", siege: "🏰" };
+const EVENT_PLACE: Partial<Record<EventKind, string>> = { caravane: "la caravane", colosse: "le colosse", filon: "le filon", bandits: "le camp de bandits", tresor: "le trésor", convoi: "le point d'embuscade", siege: "le beffroi" };
+
+/** V10, V11 : cible des armées postées sur le convoi ou au beffroi. */
+function groupTarget(e: EventRow): string {
+  return `${e.kind === "convoi" ? "convoy" : "siege"}:${e.id}`;
+}
+
+/** Armées postées sur le convoi ou au beffroi, avec leur propriétaire. */
+function postedOn(e: EventRow, entities: Map<string, Entity>): { e: Entity; m: March }[] {
+  const target = groupTarget(e);
+  return [...entities.values()].flatMap((x) => (x.state.marches ?? []).filter((m) => m.target === target && m.status === "camp").map((m) => ({ e: x, m })));
+}
+
+function sumArmies(armies: Army[]): Army {
+  const out: Record<string, number> = {};
+  for (const a of armies) for (const [id, n] of Object.entries(a) as [string, number][]) out[id] = (out[id] ?? 0) + n;
+  return cleanArmy(out as Army);
+}
+
+/** V12 : inscription au tournoi, armée composée avec le budget commun. */
+function tourneyEntry(e: EventRow, wanted: unknown, now: number): { army: Army } | { error: string } {
+  if (e.kind !== "tournoi") return { error: "Aucun tournoi en cours." };
+  if (e.data.resolved || now >= battleAt(e)) return { error: "Le tournoi est terminé." };
+  const army: Record<string, number> = {};
+  for (const u of UNITS) {
+    const n = Math.floor(Number((wanted as Record<string, unknown> | null)?.[u.id] ?? 0));
+    if (n > 0) army[u.id] = n;
+  }
+  if (armySize(army as Army) === 0) return { error: "Compose une armée pour t'inscrire." };
+  if (armyValue(army as Army) > (e.data.budget ?? 0)) return { error: "Ton armée dépasse le budget du tournoi." };
+  return { army: army as Army };
+}
+
+/** V10 à V12 : le combat commun se joue une fois, à son heure ; les gains suivent les armées. */
+async function resolveGroupEvent(
+  admin: SupabaseClient,
+  seasonId: number,
+  entities: Map<string, Entity>,
+  world: WorldState,
+  flat: Map<string, number>,
+  events: EventState,
+  now: number,
+): Promise<"none" | "changed" | "conflict"> {
+  const ev = events.active;
+  if (!ev || !GROUP_EVENTS.includes(ev.kind) || ev.data.resolved || now < battleAt(ev)) return "none";
+  const at = battleAt(ev);
+  const write = async (states: { e: Entity; state: PlayerState }[], data: EventData) => {
+    const { error } = await admin.rpc("apply_event_data", { p_season: seasonId, p_states: states.map((x) => toJson(x.e, x.state)), p_event: ev.id, p_version: ev.version, p_data: data, p_attackers: null });
+    if (error?.message.includes("beffroi_conflict")) return "conflict" as const;
+    if (error) throw new Error(`Événement : ${error.message}`);
+    ev.data = data;
+    ev.version++;
+    return "changed" as const;
+  };
+  const rateOf = (x: Entity, s: PlayerState) => currentRate(x, s, at, world, flat);
+
+  if (ev.kind === "tournoi") {
+    const entries = ev.data.entries ?? {};
+    const podium = Object.keys(entries).length >= 2 ? tourneyPodium(entries, ev.id * 31 + seasonId) : [];
+    const states = podium.flatMap((id, i) => {
+      const x = entities.get(id);
+      if (!x) return [];
+      const s = advanceEntity(x, at, world, flat);
+      return [{ e: x, state: { ...s, stone: s.stone + Math.floor(rateOf(x, s) * TOURNEY_PRIZES_SECONDS[i]) } }];
+    });
+    const r = await write(states, { ...ev.data, resolved: true, podium });
+    if (r === "changed") {
+      const names = podium.map((id) => entities.get(id)?.name ?? "?");
+      if (podium.length) notify(admin, Object.keys(entries), { title: `🏆 ${names[0]} remporte le tournoi !`, body: names.length > 1 ? `Podium : ${names.join(", ")}.` : "", tag: "event" });
+      else if (Object.keys(entries).length) notify(admin, Object.keys(entries), { title: "🏆 Tournoi annulé", body: "Pas assez d'inscrits cette fois.", tag: "event" });
+    }
+    return r;
+  }
+
+  const posted = postedOn(ev, entities);
+  const defenders = sumArmies(posted.map((p) => p.m.troops));
+  const fight = armySize(defenders) > 0 ? battle(ev.data.enemy ?? {}, defenders, Math.random, { attackerLevels: events.levels, defenderLevels: events.levels }) : null;
+  const won = !!fight && !fight.success;
+  const pseudo = { troops: {}, stationed: Object.fromEntries(posted.map((p) => [p.m.id, { ...p.m.troops }])) } as unknown as PlayerState;
+  const lostBy = fight ? splitTroopLosses(pseudo, fight.defenderLost).byOwner : {};
+  const share = ev.kind === "convoi" ? CONVOY_WOUNDED : won ? WOUNDED_WINNER : WOUNDED_DEFENDER_BEATEN;
+  const prizeSeconds = ev.kind === "convoi" ? CONVOY_PRIZE_SECONDS : SIEGE_PRIZE_SECONDS;
+  const byEntity = new Map<string, { e: Entity; state: PlayerState }>();
+  for (const { e: x, m } of posted) {
+    const cur = byEntity.get(x.id)?.state ?? advanceEntity(x, at, world, flat);
+    const lost = lostBy[m.id] ?? {};
+    const survivors = cleanArmy(Object.fromEntries((Object.entries(m.troops) as [string, number][]).map(([id, n]) => [id, n - ((lost as Record<string, number>)[id] ?? 0)])) as Army);
+    const prize = won ? Math.floor(rateOf(x, cur) * prizeSeconds) : 0;
+    const back: March = { ...m, troops: survivors, status: "back", returnAt: at + (m.arriveAt - m.departAt), loot: m.loot + prize, outcome: won ? "won" : "lost" };
+    const healed = addWounded(cur, woundedOf(lost, share), at);
+    const keep = armySize(survivors) > 0 || prize > 0;
+    byEntity.set(x.id, { e: x, state: { ...healed, marches: (healed.marches ?? []).flatMap((y) => (y.id === m.id ? (keep ? [back] : []) : [y])) } });
+  }
+  const r = await write([...byEntity.values()], { ...ev.data, resolved: true, outcome: won ? "won" : "lost" });
+  if (r !== "changed") return r;
+  if (ev.kind === "siege" && !won) await admin.rpc("siege_damage", { p_season: seasonId, p_share: SIEGE_STAGE_LOSS });
+  const ids = [...byEntity.keys()];
+  if (ev.kind === "convoi") {
+    if (ids.length) notify(admin, ids, won ? { title: "👑 Le convoi est passé !", body: "Ton escorte rentre avec 45 minutes de ta production.", tag: "event" } : { title: "👑 Le convoi est tombé", body: "L'embuscade a eu raison de l'escorte. Tes blessés passent par l'infirmerie.", tag: "event" });
+  } else {
+    notify(admin, won ? ids : "all", won ? { title: "🏰 Le beffroi a tenu !", body: "Tes défenseurs rentrent avec 1 heure de ta production.", tag: "event" } : { title: "🏰 Le beffroi a souffert du siège", body: "L'étape en cours perd 10 % de sa pierre.", tag: "event" });
+  }
+  return r;
+}
 
 /** V7 à V9 : où va l'armée envoyée sur un événement posé sur la carte. */
 function localTarget(e: EventRow, camp: string, meId: string, state: PlayerState, now: number): { target: string; pos: MapPos } | { error: string } {
@@ -2664,6 +2850,11 @@ function localTarget(e: EventRow, camp: string, meId: string, state: PlayerState
     if (!c) return { error: "Aucun camp de bandits à attaquer." };
     if (c.winner) return { error: "Ce camp a déjà été vidé." };
     return { target: `camp:${e.id}:${c.id}`, pos: c.pos };
+  }
+  if (e.kind === "convoi" || e.kind === "siege") {
+    if (e.data.resolved || now >= battleAt(e)) return { error: e.kind === "convoi" ? "Le convoi est déjà passé." : "Le siège est terminé." };
+    if (!e.data.pos) return { error: "Événement introuvable sur la carte." };
+    return { target: groupTarget(e), pos: e.data.pos };
   }
   if (e.kind === "tresor" && inCurfew(state, now)) return { error: "Tu es en couvre-feu : pas de combat pour le trésor." };
   if (!e.data.pos) return { error: "Événement introuvable sur la carte." };

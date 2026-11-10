@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { EVENT_WEIGHTS, MERCHANT_PRICE_SECONDS, type EventKind } from "./config";
-import { pickNextEvent } from "./events";
+import { pickNextEvent, tourneyPodium } from "./events";
 import { advance, buyFromMerchant, buyUpgrade, catchVein, eventActive, generatorCost, newPlayerState, rateAt, raidBlocker, scheduleVein, type PlayerState } from "./engine";
 import { UPGRADES } from "./config";
 
@@ -54,5 +54,22 @@ describe("événements sans combat", () => {
     expect(r.value.boostProdUntil).toBeGreaterThan(T);
     expect(buyFromMerchant(r.value, "safe", 42, T, world).ok).toBe(false);
     expect(buyFromMerchant(m, "repair", 42, T, world).ok).toBe(false);
+  });
+});
+
+describe("tourneyPodium", () => {
+  it("classe le plus fort premier et ne donne pas de podium à un inscrit seul", () => {
+    const strong = { chevalier: 10 };
+    const weak = { milicien: 2 };
+    const p = tourneyPodium({ a: strong, b: weak, c: weak, d: weak }, 7);
+    expect(p[0]).toBe("a");
+    expect(p).toHaveLength(3);
+    expect(new Set(p).size).toBe(3);
+    expect(tourneyPodium({ a: strong }, 1)).toEqual(["a"]);
+    expect(tourneyPodium({ a: strong, b: weak }, 3)).toEqual(["a", "b"]);
+  });
+  it("est déterministe", () => {
+    const e = { a: { piquier: 5 }, b: { piquier: 5 }, c: { piquier: 5 }, d: { piquier: 5 }, e: { piquier: 5 } };
+    expect(tourneyPodium(e, 42)).toEqual(tourneyPodium(e, 42));
   });
 });

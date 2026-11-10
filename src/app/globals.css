@@ -1252,3 +1252,4 @@ a {
   stroke-width: 1;
   stroke-dasharray: 2 3;
 }
+.num.warn { color: var(--accent); font-weight: 600; }
