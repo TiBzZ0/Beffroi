@@ -85,11 +85,15 @@ export function useGame() {
     try {
       const before = snapRef.current?.state.clickPausedUntil ?? 0;
       const r = await post({ type: "click", count: n });
-      if (r.snapshot) receive(r.snapshot);
-      if (r.snapshot && r.snapshot.state.clickPausedUntil > before && r.snapshot.state.clickPausedUntil > r.snapshot.serverNow) {
+      if (!r.snapshot) {
+        pending.current += n; // réseau coupé : on réessaiera
+        return;
+      }
+      receive(r.snapshot);
+      // Un lot accepté n'est jamais renvoyé (sinon il grossit à chaque envoi et finit en confiscation).
+      if (r.snapshot.state.clickPausedUntil > before && r.snapshot.state.clickPausedUntil > r.snapshot.serverNow) {
         showToast("🔨 Trop rapide pour un humain ! Ton marteau est confisqué 2 minutes.");
       }
-      else pending.current += n; // réseau coupé : on réessaiera
     } finally {
       inflight.current = 0;
     }
