@@ -892,3 +892,9 @@ a {
   display: grid;
   gap: 2px;
 }
+
+.push-note {
+  font-size: 0.75rem;
+  max-width: 160px;
+  color: var(--ink-soft);
+}

@@ -351,3 +351,70 @@ function applyLocal(state: PlayerState, action: GameAction): PlayerState | null 
               : null;
   return r && r.ok ? r.value : null;
 }
+
+export type PushState = "loading" | "unsupported" | "denied" | "off" | "on";
+
+function base64ToBytes(b64: string): Uint8Array<ArrayBuffer> {
+  const pad = "=".repeat((4 - (b64.length % 4)) % 4);
+  const raw = atob((b64 + pad).replace(/-/g, "+").replace(/_/g, "/"));
+  const out = new Uint8Array(new ArrayBuffer(raw.length));
+  for (let i = 0; i < raw.length; i++) out[i] = raw.charCodeAt(i);
+  return out;
+}
+
+/** Notifications du téléphone ou de l'ordinateur, même jeu fermé. */
+export function usePush() {
+  const [state, setState] = useState<PushState>("loading");
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      if (typeof window === "undefined" || !("serviceWorker" in navigator) || !("PushManager" in window) || !("Notification" in window)) {
+        if (!cancelled) setState("unsupported");
+        return;
+      }
+      if (Notification.permission === "denied") {
+        if (!cancelled) setState("denied");
+        return;
+      }
+      const reg = await navigator.serviceWorker.getRegistration("/sw.js");
+      const sub = reg ? await reg.pushManager.getSubscription() : null;
+      if (!cancelled) setState(sub ? "on" : "off");
+    })().catch(() => !cancelled && setState("unsupported"));
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  const enable = useCallback(async (): Promise<string | null> => {
+    try {
+      const perm = await Notification.requestPermission();
+      if (perm !== "granted") {
+        setState(perm === "denied" ? "denied" : "off");
+        return "Notifications refusées par le navigateur.";
+      }
+      const reg = await navigator.serviceWorker.register("/sw.js");
+      await navigator.serviceWorker.ready;
+      const res = await fetch("/api/push", { cache: "no-store" });
+      const { publicKey } = (await res.json()) as { publicKey: string };
+      const sub = (await reg.pushManager.getSubscription()) ?? (await reg.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: base64ToBytes(publicKey) }));
+      const saved = await fetch("/api/push", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(sub.toJSON()) });
+      if (!saved.ok) return "Abonnement impossible, réessaie.";
+      setState("on");
+      return null;
+    } catch {
+      return "Ce navigateur ne permet pas les notifications (sur iPhone : ajoute d'abord le jeu à l'écran d'accueil).";
+    }
+  }, []);
+
+  const disable = useCallback(async () => {
+    const reg = await navigator.serviceWorker.getRegistration("/sw.js");
+    const sub = reg ? await reg.pushManager.getSubscription() : null;
+    if (sub) {
+      await fetch("/api/push", { method: "DELETE", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ endpoint: sub.endpoint }) });
+      await sub.unsubscribe();
+    }
+    setState("off");
+  }, []);
+
+  return { state, enable, disable };
+}

@@ -48,7 +48,7 @@ import {
 } from "@/lib/game/engine";
 import { formatNumber, formatRate } from "@/lib/game/format";
 import { worldFrom, type AllianceSummary, type ChronicleEntry, type EventView, type GameSnapshot, type RivalView } from "@/lib/game/types";
-import { useGame, useLeaderboard, useTick } from "./use-game";
+import { useGame, useLeaderboard, usePush, useTick } from "./use-game";
 
 type Tab = "ateliers" | "ameliorations" | "chantier" | "raids" | "alliance" | "classement";
 type Qty = 1 | 10 | "max";
@@ -109,6 +109,29 @@ export function Game({ userId }: { userId: string }) {
   );
 }
 
+/** Cloche : active ou coupe les notifications (raids, sabotages, forteresse, événements). */
+function PushButton() {
+  const push = usePush();
+  const [note, setNote] = useState<string | null>(null);
+  if (push.state === "loading" || push.state === "unsupported") return null;
+  const on = push.state === "on";
+  const label = on ? "Couper les notifications" : push.state === "denied" ? "Notifications bloquées dans les réglages du navigateur" : "Recevoir une notification quand on t'attaque ou qu'un événement commence";
+  return (
+    <>
+      <button
+        className="btn btn-ghost"
+        title={note ?? label}
+        aria-label={label}
+        disabled={push.state === "denied"}
+        onClick={async () => setNote(on ? (await push.disable(), null) : await push.enable())}
+      >
+        {on ? "🔔" : "🔕"}
+      </button>
+      {note && <span className="push-note">{note}</span>}
+    </>
+  );
+}
+
 function TopBar({ snap, now }: { snap: GameSnapshot; now: number }) {
   const day = Math.min(14, Math.floor((now - snap.season.startsAt) / DAY_MS) + 1);
   const left = Math.max(0, snap.season.endsAt - now);
@@ -130,6 +153,7 @@ function TopBar({ snap, now }: { snap: GameSnapshot; now: number }) {
           <br />
           fin dans {days} j {hours} h
         </div>
+        <PushButton />
         <form action={signOut}>
           <button className="btn btn-ghost" title="Se déconnecter" aria-label="Se déconnecter">
             🚪

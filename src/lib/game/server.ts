@@ -105,6 +105,7 @@ import {
 } from "./types";
 import { armyFromBudget, armySize, armyValue, battle, cleanArmy, estimateChance, seededRng, type Army, type Levels } from "./battle";
 import { recordContribution, topContributors } from "@/lib/redis";
+import { notify } from "@/lib/push";
 
 // Toute la logique qui fait foi : charger l'état, le recalculer, appliquer l'intention
 // du joueur, puis enregistrer (verrouillage optimiste, avec quelques nouvelles tentatives).
@@ -486,6 +487,9 @@ async function tickLords(admin: SupabaseClient, season: SeasonView, entities: Ma
             p_attacker_touch: false,
             p_chronicle: chronicleDetails(r.value.report, chance),
           });
+          notify(admin, [pick.e.id], r.value.report.success
+            ? { title: `${lord.blazon} ${lord.name} t'a pillé !`, body: `${Math.floor(r.value.report.stolen).toLocaleString("fr-FR")} pierres envolées.`, tag: "raid" }
+            : { title: "🛡️ Raid repoussé", body: `Tes défenses ont repoussé ${lord.name}.`, tag: "raid" });
           changed = true;
           continue;
         }
@@ -689,6 +693,11 @@ async function runConflictAction(
         .single();
       if (error || !data) throw new Error(`Guerre impossible : ${error?.message}`);
       await addChronicle(admin, seasonId, { kind: "war", actor_id: me.id, details: { phase: "start", war: data.id, a: me.allianceId, b: target } });
+      notify(admin, [...entities.values()].filter((e) => !e.isLord && e.allianceId === target).map((e) => e.id), {
+        title: "⚔️ Guerre déclarée !",
+        body: `${allianceNames.get(me.allianceId) ?? "Une alliance"} vous déclare la guerre pour 24 h.`,
+        tag: "war",
+      });
       return { message: `⚔️ Guerre déclarée à ${allianceNames.get(target)} pour 24 h ! Ni pause ni bouclier entre vous.` };
     }
     case "fortress_attack": {
@@ -704,6 +713,12 @@ async function runConflictAction(
       const details = { success: fight.success, chance, rounds: fight.rounds, alliance: me.allianceId, attackerLost: fight.attackerLost, defenderLost: fight.defenderLost };
       const r = await writeFortress(after, fight.success ? me.allianceId : f.holder, fight.success ? {} : theirs.stationed, fight.success, "fortress_attack", details);
       if (r === "conflict") return "conflict";
+      if (f.holder !== null) {
+        const defenders = [...entities.values()].filter((e) => !e.isLord && e.allianceId === f.holder).map((e) => e.id);
+        notify(admin, defenders, fight.success
+          ? { title: "🏰 La forteresse est tombée !", body: `${me.name} l'a prise pour ${allianceNames.get(me.allianceId!) ?? "son alliance"}.`, tag: "fortress" }
+          : { title: "🏰 La forteresse a tenu", body: `${me.name} s'est brisé sur vos murs.`, tag: "fortress" });
+      }
       return {
         state: after,
         message: fight.success
@@ -831,7 +846,13 @@ async function loadEvent(admin: SupabaseClient, seasonId: number, now: number, e
     duration = COLOSSUS_MS;
   }
   // L'index unique empêche deux événements simultanés si deux joueurs arrivent en même temps.
-  await admin.from("events").insert({ season_id: seasonId, kind: nextKind, ends_at: iso(now + duration), army, army_start: army, pool: prize, prize });
+  const { error: insertError } = await admin.from("events").insert({ season_id: seasonId, kind: nextKind, ends_at: iso(now + duration), army, army_start: army, pool: prize, prize });
+  // Seul celui qui a vraiment créé l'événement prévient tout le monde.
+  if (!insertError) {
+    notify(admin, "all", nextKind === "caravane"
+      ? { title: "🐪 Une caravane marchande arrive !", body: "Une heure pour la piller, un assaut par joueur.", tag: "event" }
+      : { title: "🗿 Le Colosse de Grisemont est apparu !", body: "Six heures pour l'abattre à plusieurs.", tag: "event" });
+  }
   const { data: created } = await admin.from("events").select("*").eq("season_id", seasonId).eq("settled", false).maybeSingle();
   if (!created) return { active: null, levels: {}, nextAt: now + EVENT_GAP_MS, nextKind };
   const e = eventRow(created);
@@ -1311,6 +1332,9 @@ export async function runAction(admin: SupabaseClient, userId: string, action: G
         if ((await writeStates(admin, season.id, list, "sabotage", { target: target.id, cost, success })) === "conflict") continue;
         finalState = mine;
         await addChronicle(admin, season.id, { kind: "sabotage", actor_id: me.id, target_id: target.id, details: { success } });
+        notify(admin, [target.id], success
+          ? { title: "🧨 Ton académie a été sabotée", body: "Un niveau perdu et ta recherche prend du retard.", tag: "sabotage" }
+          : { title: "🧨 Saboteur arrêté", body: `${me.name} a été pris en train de saboter ton académie.`, tag: "sabotage" });
         message = success
           ? `🧨 Sabotage réussi : l'académie de ${target.name} perd un niveau et sa recherche prend du retard.`
           : `🧨 Ton saboteur a été pris dans le domaine de ${target.name}.`;
@@ -1402,6 +1426,11 @@ export async function runAction(admin: SupabaseClient, userId: string, action: G
           me.version = (data as { version: number }).version;
           finalState = r.value.attacker;
           const rep = r.value.report;
+          if (!victim.isLord) {
+            notify(admin, [victim.id], rep.success
+              ? { title: "⚔️ Tu as été pillé !", body: `${me.name} t'a volé ${Math.floor(rep.stolen).toLocaleString("fr-FR")} pierres.`, tag: "raid" }
+              : { title: "🛡️ Raid repoussé", body: `Tes défenses ont repoussé ${me.name}.`, tag: "raid" });
+          }
           const lost = Object.values(rep.destroyed).reduce((a, b) => a + (b ?? 0), 0);
           const fallen = describeArmy(rep.attackerLost);
           const shared = Object.entries(rep.allyShares)
