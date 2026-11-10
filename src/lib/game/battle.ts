@@ -61,11 +61,16 @@ export function canFight(army: Army): boolean {
 
 /** Part maximale des coups qu'encaissent les obstacles (palissades, murailles) quand d'autres ripostent derrière. */
 const MAX_OBSTACLE_SHARE = 0.5;
+/** A12 : les palissades seules n'encaissent jamais plus d'un quart des coups. */
+const MAX_PALISADE_SHARE = 0.25;
+/** A12 : les béliers réduisent la part des obstacles, jamais sous 20 % de sa valeur. */
+const MIN_BREACH_FACTOR = 0.2;
 
 /**
  * Dégâts infligés par `shooters` à chaque type de `targets`.
  * Les coups se répartissent selon les points de vie, mais les obstacles qui ne ripostent pas
- * n'en absorbent jamais plus de la moitié. Les engins de siège visent d'abord les fortifications.
+ * n'en absorbent jamais plus de la moitié (un quart pour les palissades). Les béliers visent
+ * d'abord les obstacles et réduisent la part qu'ils absorbent pour les autres.
  */
 function damageOn(shooters: Army, targets: Army, mult: number, shooterLv?: Levels, targetLv?: Levels): Map<CombatantId, number> {
   const out = new Map<CombatantId, number>();
@@ -75,19 +80,39 @@ function damageOn(shooters: Army, targets: Army, mult: number, shooterLv?: Level
   const sumHp = (list: [CombatantId, number][]) => list.reduce((s, [id, m]) => s + hpOf(id, m), 0);
   const armed = pool((t) => t.attack > 0);
   const obstacles = pool((t) => t.attack <= 0);
+  const palisades = obstacles.filter(([id]) => id === "palissade");
+  const walls = obstacles.filter(([id]) => id !== "palissade");
   const forts = pool((t) => t.category === "fortification");
   const armedHp = sumHp(armed);
   const obstacleHp = sumHp(obstacles);
-  if (armedHp + obstacleHp <= 0) return out;
-  const obstacleShare = armedHp > 0 ? Math.min(MAX_OBSTACLE_SHARE, obstacleHp / (armedHp + obstacleHp)) : 1;
+  const totalHp = armedHp + obstacleHp;
+  if (totalHp <= 0) return out;
+
+  // Brèche : la valeur des béliers face à celle des obstacles réduit la part que ceux-ci encaissent.
+  const ramValue = armyValue({ belier: shooters.belier ?? 0 });
+  const obstacleValue = armyValue(Object.fromEntries(obstacles) as Army);
+  const breach = obstacleValue > 0 ? Math.max(MIN_BREACH_FACTOR, 1 - ramValue / obstacleValue) : 1;
+  let palShare = 1;
+  let wallShare = 0;
+  if (armedHp > 0) {
+    palShare = Math.min(MAX_PALISADE_SHARE, sumHp(palisades) / totalHp);
+    wallShare = Math.min(MAX_OBSTACLE_SHARE - palShare, sumHp(walls) / totalHp);
+    palShare *= breach;
+    wallShare *= breach;
+  } else {
+    const ph = sumHp(palisades);
+    palShare = obstacleHp > 0 ? ph / obstacleHp : 0;
+    wallShare = 1 - palShare;
+  }
 
   // Répartition d'une volée : [cible, part des coups].
   const spread = (list: [CombatantId, number][], share: number): [CombatantId, number][] => {
     const hp = sumHp(list);
-    return hp > 0 ? list.map(([id, m]) => [id, (share * hpOf(id, m)) / hp]) : [];
+    return hp > 0 && share > 0 ? list.map(([id, m]) => [id, (share * hpOf(id, m)) / hp]) : [];
   };
-  const normal = [...spread(armed, 1 - obstacleShare), ...spread(obstacles, obstacleShare)];
-  const siege = forts.length > 0 ? spread(forts, 1) : normal;
+  const normal = [...spread(armed, 1 - palShare - wallShare), ...spread(palisades, palShare), ...spread(walls, wallShare)];
+  // Les engins de siège visent d'abord les obstacles, puis les autres fortifications.
+  const siege = obstacles.length > 0 ? spread(obstacles, 1) : forts.length > 0 ? spread(forts, 1) : normal;
 
   for (const [sid, n] of Object.entries(shooters) as [CombatantId, number][]) {
     const s = defOf(sid);

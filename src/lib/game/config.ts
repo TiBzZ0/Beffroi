@@ -350,15 +350,15 @@ export interface CombatantDef<Id extends string = CombatantId> {
 }
 
 export const UNITS: readonly CombatantDef<UnitId>[] = [
-  { id: "milicien", name: "Milicien", plural: "Miliciens", icon: "🗡️", description: "Pas cher, pas bien solide.", cost: 200, attack: 2, hp: 10, category: "infanterie" },
+  { id: "milicien", name: "Milicien", plural: "Miliciens", icon: "🗡️", description: "Pas cher, pas bien solide, mais il met le feu aux engins de siège.", cost: 200, attack: 2, hp: 10, category: "infanterie", bonus: { siege: 4 } },
   { id: "piquier", name: "Piquier", plural: "Piquiers", icon: "🔱", description: "Sa pique arrête net les chevaux.", cost: 400, attack: 3, hp: 25, category: "infanterie", bonus: { cavalerie: 4 } },
   { id: "arbaletrier", name: "Arbalétrier", plural: "Arbalétriers", icon: "🏹", description: "Fauche l'infanterie, fragile au contact.", cost: 500, attack: 8, hp: 15, category: "tir", bonus: { infanterie: 2.5 } },
   { id: "chevalier", name: "Chevalier", plural: "Chevaliers", icon: "🐎", description: "Charge les tireurs, redoute les piques.", cost: 2_000, attack: 25, hp: 80, category: "cavalerie", bonus: { tir: 3 } },
-  { id: "belier", name: "Bélier", plural: "Béliers", icon: "🪓", description: "Inutile en rase campagne, terrible contre les murs.", cost: 3_000, attack: 5, hp: 150, category: "siege", bonus: { fortification: 20 } },
+  { id: "belier", name: "Bélier", plural: "Béliers", icon: "🪓", description: "Vise d'abord palissades et murailles, et ouvre une brèche pour les autres.", cost: 3_000, attack: 5, hp: 150, category: "siege", bonus: { fortification: 20 } },
 ];
 
 export const DEFENSES: readonly CombatantDef<DefenseId>[] = [
-  { id: "palissade", name: "Palissade", plural: "Palissades", icon: "🪵", description: "Encaisse les coups, ne riposte pas.", cost: 150, attack: 0, hp: 40, category: "fortification" },
+  { id: "palissade", name: "Palissade", plural: "Palissades", icon: "🪵", description: "Encaisse les coups (un quart au plus), ne riposte pas.", cost: 150, attack: 0, hp: 120, category: "fortification" },
   { id: "tour", name: "Tour d'archers", plural: "Tours d'archers", icon: "🗼", description: "Arrose l'infanterie qui approche.", cost: 1_000, attack: 8, hp: 60, category: "fortification", bonus: { infanterie: 2 } },
   { id: "baliste", name: "Baliste", plural: "Balistes", icon: "🎯", description: "Transperce chevaliers et béliers.", cost: 3_000, attack: 30, hp: 120, category: "fortification", bonus: { cavalerie: 3, siege: 3 } },
   { id: "muraille", name: "Muraille", plural: "Murailles", icon: "🧱", description: "Un mur immense qui absorbe l'assaut.", cost: 5_000, attack: 0, hp: 1_500, category: "fortification" },

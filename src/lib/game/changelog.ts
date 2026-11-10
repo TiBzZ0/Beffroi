@@ -109,4 +109,11 @@ export const CHANGELOG: ChangeEntry[] = [
       "🏰 Seigneurs attaquants : leur armée est taillée sur ta défense, pour une chance de victoire d'environ un tiers. Si tu les repousses, tu récupères toutes tes pertes.",
     ],
   },
+  {
+    id: 14,
+    date: "10 novembre",
+    items: [
+      "🗡️ Unités : le milicien frappe 4 fois plus fort les engins de siège. La palissade a 120 points de vie au lieu de 40, mais les palissades n'encaissent jamais plus d'un quart des coups (la muraille garde la moitié). Le bélier vise d'abord palissades et murailles, et chaque bélier ouvre une brèche : les obstacles encaissent moins de coups pour le reste de l'armée.",
+    ],
+  },
 ];
