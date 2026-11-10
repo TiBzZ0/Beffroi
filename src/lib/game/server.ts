@@ -151,7 +151,7 @@ import {
 } from "./types";
 import { armyForChance, armyFromBudget, armySize, armyValue, battle, cleanArmy, estimateChance, seededRng, type Army, type Levels } from "./battle";
 import { recordContribution, topContributors } from "@/lib/redis";
-import { notify } from "@/lib/push";
+import { notify, notifyEach, type PushMessage } from "@/lib/push";
 
 // Toute la logique qui fait foi : charger l'état, le recalculer, appliquer l'intention
 // du joueur, puis enregistrer (verrouillage optimiste, avec quelques nouvelles tentatives).
@@ -563,6 +563,50 @@ async function stageRewards(admin: SupabaseClient, seasonId: number, before: num
     const ecus = STAGES[i].bonus.donorEcus ?? 0;
     if (ecus > 0) await admin.rpc("reward_donors", { p_season: seasonId, p_amount: ecus });
   }
+}
+
+/** B10 : heure (UTC) à partir de laquelle part le résumé quotidien. */
+const DAILY_SUMMARY_HOUR_UTC = 18;
+let dailyChecked = "";
+
+/**
+ * B10 : résumé quotidien, envoyé une fois par jour aux joueurs qui ont activé les notifications.
+ * La première requête après 18 h UTC le réserve (une seule y parvient) puis l'envoie après la réponse.
+ */
+async function maybeDailySummary(admin: SupabaseClient, seasonId: number, entities: Map<string, Entity>, worksite: WorksiteView, now: number) {
+  if (new Date(now).getUTCHours() < DAILY_SUMMARY_HOUR_UTC) return;
+  const today = new Date(now).toISOString().slice(0, 10);
+  // Chaque serveur ne tente sa chance qu'une fois par jour.
+  if (dailyChecked === today) return;
+  dailyChecked = today;
+  await admin.from("app_secrets").upsert({ key: "daily_summary", value: "" }, { onConflict: "key", ignoreDuplicates: true });
+  const { data: claimed } = await admin.from("app_secrets").update({ value: today }).eq("key", "daily_summary").lt("value", today).select("key");
+  if (!claimed || claimed.length === 0) return;
+  const [{ data: subs }, { data: raids }] = await Promise.all([
+    admin.from("push_subscriptions").select("user_id"),
+    admin.from("chronicle").select("actor_id, target_id, details").eq("season_id", seasonId).eq("kind", "raid").gt("created_at", iso(now - 86_400_000)),
+  ]);
+  const ids = new Set((subs ?? []).map((r) => r.user_id as string));
+  const lots = lotsOf.get(entities) ?? [];
+  const stagePct = worksite.stage < STAGES.length ? Math.floor((worksite.progress / Math.max(1, worksite.target)) * 100) : 100;
+  const messages = new Map<string, PushMessage>();
+  for (const id of ids) {
+    const e = entities.get(id);
+    if (!e || e.isLord) continue;
+    const mine = (raids ?? []).filter((r) => r.target_id === id);
+    const lost = mine.filter((r) => (r.details as { success?: boolean }).success);
+    const stolen = lost.reduce((a, r) => a + Number((r.details as { stolen?: number }).stolen ?? 0), 0);
+    const won = (raids ?? []).filter((r) => r.actor_id === id && (r.details as { success?: boolean }).success).length;
+    const lot = lots.find((l) => l.stage === worksite.stage && l.members[id]);
+    const parts = [
+      lost.length ? `${lost.length} raid${lost.length > 1 ? "s" : ""} subi${lost.length > 1 ? "s" : ""} (${Math.floor(stolen).toLocaleString("fr-FR")} pierres)` : "aucun raid réussi contre toi",
+      mine.length - lost.length > 0 ? `${mine.length - lost.length} repoussé${mine.length - lost.length > 1 ? "s" : ""}` : null,
+      won ? `${won} pillage${won > 1 ? "s" : ""} réussi${won > 1 ? "s" : ""}` : null,
+      worksite.stage < STAGES.length ? `chantier à ${stagePct} %${lot ? `, ton lot à ${Math.floor((lot.progress / Math.max(1, lot.target)) * 100)} %` : ""}` : "beffroi achevé",
+    ].filter(Boolean);
+    messages.set(id, { title: "📜 Ta journée à Beffroi", body: `Dernières 24 h : ${parts.join(", ")}.`, tag: "daily" });
+  }
+  notifyEach(admin, messages);
 }
 
 /** Verse un don aux lots du joueur ; annonce un lot fini et le maître d'œuvre. */
@@ -1708,6 +1752,7 @@ export async function runAction(admin: SupabaseClient, userId: string, action: G
 
   for (let attempt = 0; attempt < MAX_ATTEMPTS; attempt++) {
     let [worksite, entities] = await Promise.all([loadWorksite(admin, season.id), loadEntities(admin, season.id, userId)]);
+    if (action.type === "sync" && attempt === 0) await maybeDailySummary(admin, season.id, entities, worksite, Date.now()).catch((e) => console.error("résumé", e));
     if (action.type === "sync" && attempt === 0 && (await tickLords(admin, season, entities, worksite, Date.now()))) {
       [worksite, entities] = await Promise.all([loadWorksite(admin, season.id), loadEntities(admin, season.id, userId)]);
     }

@@ -40,6 +40,7 @@ import {
   advance,
   inCurfew,
   stagePerk,
+  productionPerSecond,
   questProgress,
   armyWorth,
   clickValue,
@@ -99,6 +100,7 @@ export function Game({ userId }: { userId: string }) {
       <WhatsNew />
       {game.away && <AwayModal away={game.away} event={snap.event} onClose={game.dismissAway} />}
       <TopBar snap={snap} now={now} />
+      <PushPrompt raided={(snap.chronicle ?? []).some((c) => c.kind === "raid" && c.targetId === snap.userId) || (game.away?.raidsLost.length ?? 0) > 0} />
       <div className="layout">
         <Hero snap={snap} rate={rate} clickGain={clickValue(live, world, stagesDone)} game={game} />
         <section className="panel">
@@ -120,6 +122,7 @@ export function Game({ userId }: { userId: string }) {
           </div>
         </section>
       </div>
+      <NumberLegend />
       {game.toast && (
         <div className="toast" role="status">
           {game.toast}
@@ -268,6 +271,60 @@ function PushButton() {
       </button>
       {note && <span className="push-note">{note}</span>}
     </>
+  );
+}
+
+/** B10 : après un premier raid subi, on propose les notifications (une seule fois). */
+function PushPrompt({ raided }: { raided: boolean }) {
+  const push = usePush();
+  const [hidden, setHidden] = useState<boolean>(() => {
+    try {
+      return localStorage.getItem("beffroi.pushPrompt") === "1";
+    } catch {
+      return false;
+    }
+  });
+  const [note, setNote] = useState<string | null>(null);
+  if (hidden || !raided || push.state !== "off") return note ? <p className="notice notice-info push-prompt">{note}</p> : null;
+  const close = () => {
+    try {
+      localStorage.setItem("beffroi.pushPrompt", "1");
+    } catch {
+      // pas de stockage : le bandeau reviendra
+    }
+    setHidden(true);
+  };
+  return (
+    <div className="notice notice-info push-prompt">
+      <strong>On vient de te piller.</strong> Active les notifications pour être prévenu des prochains raids, même quand le jeu est fermé.
+      <div className="row-actions">
+        <button
+          className="btn btn-primary"
+          onClick={async () => {
+            setNote(await push.enable());
+            close();
+          }}
+        >
+          Activer
+        </button>
+        <button className="btn btn-ghost" onClick={close}>
+          Plus tard
+        </button>
+      </div>
+    </div>
+  );
+}
+
+/** B13 : légende des suffixes des grands nombres. */
+function NumberLegend() {
+  return (
+    <details className="legend note">
+      <summary>Lire les grands nombres</summary>
+      <p>
+        k = mille · M = million · Md = milliard · Bn = billion (mille milliards) · Bd = billiard (mille billions) · Tn = trillion · Td = trilliard · Qn =
+        quadrillion. Chaque suffixe vaut mille fois le précédent : 2,5 Md = 2 500 M.
+      </p>
+    </details>
   );
 }
 
@@ -423,6 +480,12 @@ function Generators({ live, stagesDone, snap, run }: { live: PlayerState; stages
   // On montre les bâtiments possédés, plus le prochain à découvrir.
   const visibleCount = Math.min(GENERATORS.length, Math.max(1, GENERATORS.findIndex((g) => owned(live, g.id) === 0 && live.totalProduced < g.baseCost * 0.5) + 1 || GENERATORS.length));
 
+  // B9 : l'achat le plus rentable (production gagnée par pierre dépensée) parmi les bâtiments connus.
+  const rate = productionPerSecond(live, world, stagesDone);
+  const best = GENERATORS.slice(0, visibleCount)
+    .filter((g) => owned(live, g.id) > 0 || live.totalProduced >= g.baseCost * 0.5)
+    .map((g) => ({ id: g.id, value: (generatorRate(live, g.id) * mult) / generatorCost(live, g.id, 1) }))
+    .sort((a, b) => b.value - a.value)[0]?.id;
   // L'achat s'affiche tout de suite (voir useGame) : pas besoin de bloquer le bouton.
   const buy = (id: GeneratorId, n: number) => void run({ type: "buy", generator: id, qty: n });
   const rebuild = async (id: GeneratorId) => {
@@ -456,9 +519,11 @@ function Generators({ live, stagesDone, snap, run }: { live: PlayerState; stages
                 <div className="row-title">
                   {hidden ? "???" : g.name}
                   {n > 0 && <span className="row-count num">{n}</span>}
+                  {!hidden && g.id === best && <span className="badge badge-best" title="La meilleure production gagnée par pierre dépensée">⭐ le plus rentable</span>}
                 </div>
                 <div className="row-desc num">
                   {hidden ? "Continue de bâtir pour le découvrir." : `${g.description} ${formatRate(each)}/s chacun${n > 0 ? ` · total ${formatRate(each * n)}/s` : ""}`}
+                  {!hidden && cost > live.stone && rate > 0 ? ` · à toi dans ${duration(((cost - live.stone) / rate) * 1000)}` : ""}
                 </div>
               </div>
               <button className="btn btn-primary" disabled={hidden || cost > live.stone} onClick={() => buy(g.id, count)}>

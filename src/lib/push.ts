@@ -76,3 +76,15 @@ export function notify(admin: SupabaseClient, userIds: string[] | "all", msg: Pu
     void task();
   }
 }
+
+/** Envoie à chacun son propre message (résumé quotidien), après la réponse. */
+export function notifyEach(admin: SupabaseClient, messages: Map<string, PushMessage>): void {
+  const task = async () => {
+    for (const [id, msg] of messages) await send(admin, [id], msg).catch((e) => console.error("push", e));
+  };
+  try {
+    after(task);
+  } catch {
+    void task();
+  }
+}

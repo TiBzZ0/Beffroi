@@ -145,4 +145,13 @@ export const CHANGELOG: ChangeEntry[] = [
       "🎁 Bonus d'étape variés : Les gargouilles donnent aussi +20 % de points de vie en défense. Le grand bourdon porte l'élan à +75 % au lieu de doubler les coups. La flèche ajoute 1 heure de stock à l'abri. L'horloge rend les recherches 20 % plus rapides. Le beffroi légendaire verse 20 écus à chaque joueur qui a atteint un palier de don.",
     ],
   },
+  {
+    id: 19,
+    date: "10 novembre",
+    items: [
+      "⭐ Conseil d'achat : le bâtiment le plus rentable est marqué, et chaque bâtiment trop cher indique dans combien de temps tu pourras te l'offrir.",
+      "🔔 Après un raid subi, le jeu te propose d'activer les notifications. Ceux qui les ont activées reçoivent chaque soir un résumé de leur journée.",
+      "🔢 Une légende des grands nombres (k, M, Md, Bn…) est en bas de la page.",
+    ],
+  },
 ];
