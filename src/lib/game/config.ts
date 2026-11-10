@@ -163,6 +163,10 @@ export const STAGES: readonly StageDef[] = [
 export const LORD_GIFT_MAX_SHARE = 0.25;
 
 export const STAGE_BASES = STAGES.map((s) => s.basePerPlayer);
+/** Taille d'une étape à son ouverture : tant d'heures de la production cumulée des joueurs actifs. */
+export const STAGE_SIZE_HOURS = 4;
+/** Taille minimale d'une étape, pour un chantier sans joueur actif. */
+export const STAGE_MIN_SIZE = 50_000;
 
 /** Fenêtre pendant laquelle un joueur compte comme actif pour dimensionner le chantier. */
 export const ACTIVE_WINDOW_DAYS = 7;

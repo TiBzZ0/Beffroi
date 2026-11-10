@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { CLICK_PAUSE_MS, OFFLINE_CAP_MS, STAGES } from "./config";
+import { CLICK_PAUSE_MS, OFFLINE_CAP_MS, STAGE_MIN_SIZE } from "./config";
 import {
   advance,
   applyClicks,
@@ -12,7 +12,7 @@ import {
   maxAffordable,
   newPlayerState,
   productionPerSecond,
-  stageTarget,
+  stageSize,
   type PlayerState,
   type WorldState,
 } from "./engine";
@@ -197,10 +197,10 @@ describe("chantier commun", () => {
     expect(contribute(withGenerators({}, 50), 0).ok).toBe(false);
   });
 
-  it("la taille d'une étape suit le nombre de joueurs actifs", () => {
-    expect(stageTarget(0, 3)).toBe(STAGES[0].basePerPlayer * 3);
-    expect(stageTarget(0, 0)).toBe(STAGES[0].basePerPlayer);
-    expect(stageTarget(1, 10)).toBe(STAGES[1].basePerPlayer * 10);
+  it("une étape vaut 4 h de la production cumulée des joueurs actifs", () => {
+    expect(stageSize([1000, 500])).toBe(1500 * 4 * 3600);
+    expect(stageSize([])).toBe(STAGE_MIN_SIZE);
+    expect(stageSize([Number.NaN, -3, 1])).toBe(STAGE_MIN_SIZE);
   });
 });
 

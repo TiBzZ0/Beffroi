@@ -71,6 +71,8 @@ import {
   type GeneratorId,
   type UnitId,
   type UpgradeDef,
+  STAGE_MIN_SIZE,
+  STAGE_SIZE_HOURS,
 } from "./config";
 import { armySize, armyValue, battle, cleanArmy, type Army, type BattleOptions, type Levels } from "./battle";
 
@@ -370,10 +372,10 @@ export function contribute(state: PlayerState, amount: number): Result<PlayerSta
   };
 }
 
-/** Taille de l'étape en cours, selon le nombre de joueurs actifs. */
-export function stageTarget(stage: number, activePlayers: number): number {
-  const def = STAGES[Math.min(stage, STAGES.length - 1)];
-  return def.basePerPlayer * Math.max(1, activePlayers);
+/** Taille d'une étape à son ouverture : 4 h de la production cumulée des joueurs actifs. */
+export function stageSize(activeRates: number[]): number {
+  const sum = activeRates.reduce((a, r) => a + (Number.isFinite(r) && r > 0 ? r : 0), 0);
+  return Math.max(STAGE_MIN_SIZE, Math.ceil(sum * STAGE_SIZE_HOURS * 3600));
 }
 
 // ---------------------------------------------------------------------------

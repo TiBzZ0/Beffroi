@@ -41,7 +41,7 @@ import {
   GUARDS_PER_DOMAIN,
   COMBATANTS,
   SEASON_DAYS,
-  STAGE_BASES,
+  STAGE_MIN_SIZE,
   STAGES,
   DEFENSE_IDS,
   UNIT_IDS,
@@ -84,6 +84,7 @@ import {
   RESEARCHABLE,
   rebuildRuin,
   resolveRaid,
+  stageSize,
   stagesDoneAt,
   type PlayerState,
   type RaidReport,
@@ -289,7 +290,7 @@ let seasonCache: { season: SeasonView; until: number } | null = null;
 export async function getActiveSeason(admin: SupabaseClient): Promise<SeasonView> {
   const now = Date.now();
   if (seasonCache && seasonCache.until > now) return seasonCache.season;
-  const { data, error } = await admin.rpc("ensure_active_season", { p_days: SEASON_DAYS, p_first_stage_base: STAGE_BASES[0] });
+  const { data, error } = await admin.rpc("ensure_active_season", { p_days: SEASON_DAYS, p_first_stage_base: STAGE_MIN_SIZE });
   if (error || !data) throw new Error(`Saison introuvable : ${error?.message}`);
   const season = toSeason(Array.isArray(data) ? data[0] : data);
   seasonCache = { season, until: Math.min(now + 30_000, season.endsAt) };
@@ -354,11 +355,20 @@ function sizeOf(state: PlayerState, rate: number): { army: number; rate: number 
   return { army: armyValue(cleanArmy({ ...troopsHere(state), ...state.defenses })), rate };
 }
 
+/** Taille des étapes passée au chantier : seule compte celle de l'étape qui s'ouvre (audit A9). */
+let stageSizes: number[] = STAGES.map(() => STAGE_MIN_SIZE);
+
+function activeHumans(entities: Map<string, Entity>, now: number): Entity[] {
+  return [...entities.values()].filter((e) => !e.isLord && now - e.lastSeen < ACTIVE_WINDOW_DAYS * 86_400_000);
+}
+
 /** Production de base d'un seigneur : médiane des vrais joueurs × son caractère. */
 function lordRates(entities: Map<string, Entity>, world: WorldState, now: number): Map<string, number> {
   // Joueurs actifs : vus dans la fenêtre d'activité du chantier.
-  const active = [...entities.values()].filter((e) => !e.isLord && now - e.lastSeen < ACTIVE_WINDOW_DAYS * 86_400_000);
-  const rates = active.map((e) => productionPerSecond(e.state, world, stagesDoneAt(world, now))).sort((a, b) => a - b);
+  const rates = activeHumans(entities, now).map((e) => productionPerSecond(e.state, world, stagesDoneAt(world, now))).sort((a, b) => a - b);
+  // Au passage, on retient la taille d'une étape qui s'ouvrirait maintenant.
+  const size = stageSize(rates);
+  stageSizes = STAGES.map(() => size);
   const mid = median(rates);
   // Les seigneurs faciles suivent le quart le plus faible des joueurs, pour que les petits aient une cible.
   const low = rates.length === 0 ? 0 : rates[Math.floor((rates.length - 1) * 0.25)];
@@ -464,7 +474,7 @@ async function tickLords(admin: SupabaseClient, season: SeasonView, entities: Ma
         next_raid_at: lord.raidEveryHours ? iso(now + jitter(lord.raidEveryHours)) : iso(now + 365 * 86_400_000),
         next_contrib_at: lord.contribution ? iso(now + jitter(lord.contribution.everyHours)) : iso(now + 365 * 86_400_000),
       };
-      await admin.rpc("commit_state", { p_season: season.id, p_state: toJson(me, state, extra), p_touch: false, p_contribution: 0, p_stage_bases: STAGE_BASES, p_active_window_days: ACTIVE_WINDOW_DAYS, p_action: null, p_details: null });
+      await admin.rpc("commit_state", { p_season: season.id, p_state: toJson(me, state, extra), p_touch: false, p_contribution: 0, p_stage_bases: stageSizes, p_active_window_days: ACTIVE_WINDOW_DAYS, p_action: null, p_details: null });
       changed = true;
       continue;
     }
@@ -481,7 +491,7 @@ async function tickLords(admin: SupabaseClient, season: SeasonView, entities: Ma
         p_state: toJson(me, next, { next_contrib_at: iso(now + jitter(lord.contribution.everyHours)) }),
         p_touch: false,
         p_contribution: r?.ok ? amount : 0,
-        p_stage_bases: STAGE_BASES,
+        p_stage_bases: stageSizes,
         p_active_window_days: ACTIVE_WINDOW_DAYS,
         p_action: r?.ok ? "contribute" : null,
         p_details: r?.ok ? { amount } : null,
@@ -529,7 +539,7 @@ async function tickLords(admin: SupabaseClient, season: SeasonView, entities: Ma
           continue;
         }
       }
-      await admin.rpc("commit_state", { p_season: season.id, p_state: toJson(me, state, nextRaid), p_touch: false, p_contribution: 0, p_stage_bases: STAGE_BASES, p_active_window_days: ACTIVE_WINDOW_DAYS, p_action: null, p_details: null });
+      await admin.rpc("commit_state", { p_season: season.id, p_state: toJson(me, state, nextRaid), p_touch: false, p_contribution: 0, p_stage_bases: stageSizes, p_active_window_days: ACTIVE_WINDOW_DAYS, p_action: null, p_details: null });
       changed = true;
     }
   }
@@ -1388,7 +1398,7 @@ export async function runAction(admin: SupabaseClient, userId: string, action: G
           ? `🧨 Sabotage réussi : l'académie de ${target.name} perd un niveau et sa recherche prend du retard.`
           : `🧨 Ton saboteur a été pris dans le domaine de ${target.name}.`;
       } else {
-        const { data } = await admin.rpc("commit_state", { p_season: season.id, p_state: toJson(me, current, {}), p_touch: true, p_contribution: 0, p_stage_bases: STAGE_BASES, p_active_window_days: ACTIVE_WINDOW_DAYS, p_action: null, p_details: null });
+        const { data } = await admin.rpc("commit_state", { p_season: season.id, p_state: toJson(me, current, {}), p_touch: true, p_contribution: 0, p_stage_bases: stageSizes, p_active_window_days: ACTIVE_WINDOW_DAYS, p_action: null, p_details: null });
         if ((data as { conflict?: boolean } | null)?.conflict) continue;
       }
     } else if (action.type === "spy") {
@@ -1404,7 +1414,7 @@ export async function runAction(admin: SupabaseClient, userId: string, action: G
         p_state: toJson(me, next, {}),
         p_touch: true,
         p_contribution: 0,
-        p_stage_bases: STAGE_BASES,
+        p_stage_bases: stageSizes,
         p_active_window_days: ACTIVE_WINDOW_DAYS,
         p_action: error ? null : "spy",
         p_details: error ? null : { target: onFortress ? FORTRESS_INTEL : target!.id, cost },
@@ -1495,7 +1505,7 @@ export async function runAction(admin: SupabaseClient, userId: string, action: G
       }
       if (error) {
         // Raid refusé : on enregistre quand même l'avancement de la production.
-        const { data } = await admin.rpc("commit_state", { p_season: season.id, p_state: toJson(me, current, {}), p_touch: true, p_contribution: 0, p_stage_bases: STAGE_BASES, p_active_window_days: ACTIVE_WINDOW_DAYS, p_action: null, p_details: null });
+        const { data } = await admin.rpc("commit_state", { p_season: season.id, p_state: toJson(me, current, {}), p_touch: true, p_contribution: 0, p_stage_bases: stageSizes, p_active_window_days: ACTIVE_WINDOW_DAYS, p_action: null, p_details: null });
         if ((data as { conflict?: boolean } | null)?.conflict) continue;
       }
     } else {
@@ -1508,7 +1518,7 @@ export async function runAction(admin: SupabaseClient, userId: string, action: G
         p_state: toJson(me, finalState, {}),
         p_touch: true,
         p_contribution: contribution,
-        p_stage_bases: STAGE_BASES,
+        p_stage_bases: stageSizes,
         p_active_window_days: ACTIVE_WINDOW_DAYS,
         p_action: outcome.ok ? (outcome.value.log?.action ?? null) : null,
         p_details: outcome.ok ? (outcome.value.log?.details ?? null) : null,

@@ -21,4 +21,11 @@ export const CHANGELOG: ChangeEntry[] = [
       "⚡ Élan : les deux marteaux ne rapportent plus un pourcentage de ta production par coup. À la place, chaque coup ajoute 1 seconde d'élan (30 secondes au plus), et tant qu'il en reste ta production est augmentée de 20 % (50 % avec le Marteau runique).",
     ],
   },
+  {
+    id: 2,
+    date: "10 novembre",
+    items: [
+      "🏗️ Chantier : la taille d'une étape est fixée à son ouverture, à 4 heures de la production de tous les joueurs actifs, et ne bouge plus ensuite. L'étape en cours a été redimensionnée, la pierre déjà versée est gardée.",
+    ],
+  },
 ];
