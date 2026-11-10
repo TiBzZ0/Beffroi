@@ -102,6 +102,12 @@ import {
   DONOR_TIER_ECUS,
   DONOR_TIER_BONUS,
   FAIR_GENERATOR_FACTOR,
+  MAX_MARCHES,
+  TRAVEL_BASE_MIN,
+  TRAVEL_MAX_MIN,
+  TRAVEL_MIN_MIN,
+  TRAVEL_PER_CELL_MIN,
+  UNIT_SPEED,
   FAIR_UPGRADE_FACTOR,
   MERCHANT_OFFERS,
   MERCHANT_PRICE_SECONDS,
@@ -190,6 +196,8 @@ export interface PlayerState {
   catchUp?: number;
   /** Derniers événements du royaume (en cours et récents), pour leurs effets. Fixé par le serveur, jamais enregistré. */
   eventMods?: { kind: EventKind; from: number; until: number }[];
+  /** T3 : armées en route (aller ou retour). Les troupes en route ne défendent plus le domaine. */
+  marches?: March[];
   /** V15 : bonus achetés au marchand, et passage du marchand où l'on a déjà acheté. */
   boostProdUntil?: number;
   boostSafeUntil?: number;
@@ -221,6 +229,80 @@ export function buyFromMerchant(state: PlayerState, choice: string, eventId: num
   const generators = { ...state.generators };
   for (const [id, n] of Object.entries(ruins) as [GeneratorId, number][]) generators[id] = owned(state, id) + n;
   return { ok: true, value: { ...paid, generators, ruins: {} } };
+}
+
+export interface March {
+  id: string;
+  kind: "raid";
+  target: string;
+  troops: Army;
+  departAt: number;
+  arriveAt: number;
+  /** Aller : "out". Retour (après le combat, un demi-tour ou un rappel) : "back", jusqu'à `returnAt`. */
+  status: "out" | "back";
+  returnAt: number;
+  /** T5 : le défenseur verra le nom de l'attaquant (tirage fait au départ). */
+  revealed: boolean;
+  /** Prévenu à mi-chemin (notification envoyée). */
+  warned: boolean;
+  /** Butin et rançon rapportés, crédités au retour. */
+  loot: number;
+  ransom: number;
+  /** Ce qui s'est passé à l'arrivée, pour l'affichage. */
+  outcome?: "won" | "lost" | "turned" | "recalled";
+}
+
+/** T2 : durée de l'aller, en millisecondes, au pas de l'unité la plus lente. */
+export function travelMs(army: Army, distance: number): number {
+  const speeds = (Object.entries(army) as [string, number][]).filter(([, n]) => n > 0).map(([id]) => UNIT_SPEED[id] ?? 1);
+  const speed = speeds.length ? Math.min(...speeds) : 1;
+  const minutes = Math.min(TRAVEL_MAX_MIN, Math.max(TRAVEL_MIN_MIN, TRAVEL_BASE_MIN + (TRAVEL_PER_CELL_MIN * distance) / speed));
+  return Math.round(minutes * 60_000);
+}
+
+/** T3 : vérifie et retire du domaine les troupes envoyées. */
+export function sendTroops(state: PlayerState, wanted: Army): Result<{ state: PlayerState; sent: Army }> {
+  const sent: Army = {};
+  for (const [id, raw] of Object.entries(wanted) as [CombatantId, number][]) {
+    const n = Math.floor(Number(raw));
+    if (!Number.isFinite(n) || n <= 0) continue;
+    if (!(UNIT_IDS as string[]).includes(id)) return { ok: false, error: "Seules les troupes partent : fortifications et gardes restent au domaine." };
+    const have = (state.troops as Record<string, number>)[id] ?? 0;
+    if (n > have) return { ok: false, error: "Tu n'as pas autant de troupes." };
+    sent[id] = n;
+  }
+  if (armySize(sent) === 0) return { ok: false, error: "Choisis au moins une troupe à envoyer." };
+  if ((state.marches ?? []).length >= MAX_MARCHES) return { ok: false, error: `${MAX_MARCHES} armées en route au plus.` };
+  const troops = { ...state.troops } as Record<string, number>;
+  for (const [id, n] of Object.entries(sent) as [string, number][]) {
+    troops[id] -= n;
+    if (troops[id] <= 0) delete troops[id];
+  }
+  return { ok: true, value: { state: { ...state, troops: troops as PlayerState["troops"] }, sent } };
+}
+
+/** T4 : rappel d'une armée à l'aller ; elle rentre en autant de temps qu'elle a marché. */
+export function recallMarch(state: PlayerState, id: string, now: number): Result<PlayerState> {
+  const m = (state.marches ?? []).find((x) => x.id === id);
+  if (!m) return { ok: false, error: "Armée introuvable." };
+  if (m.status !== "out" || now >= m.arriveAt) return { ok: false, error: "Elle est déjà arrivée." };
+  return { ok: true, value: { ...state, marches: (state.marches ?? []).map((x) => (x.id === id ? { ...x, status: "back", returnAt: now + (now - x.departAt), outcome: "recalled" } : x)) } };
+}
+
+/** T4 : armée rentrée, survivants et butin rendus au domaine. */
+export function landMarch(state: PlayerState, id: string): PlayerState {
+  const m = (state.marches ?? []).find((x) => x.id === id);
+  if (!m) return state;
+  const troops = { ...state.troops } as Record<string, number>;
+  for (const [u, n] of Object.entries(m.troops) as [string, number][]) if (n > 0) troops[u] = (troops[u] ?? 0) + n;
+  const gain = m.loot + m.ransom;
+  return {
+    ...state,
+    troops: troops as PlayerState["troops"],
+    stone: state.stone + gain,
+    totalPlundered: state.totalPlundered + m.loot,
+    marches: (state.marches ?? []).filter((x) => x.id !== id),
+  };
 }
 
 /** L'événement `kind` est-il en cours à `t` ? */
@@ -943,6 +1025,8 @@ export interface RaidContext {
   relativeSize?: number;
   /** Étapes du chantier achevées (bonus d'étape : défense, stock à l'abri). */
   stagesDone?: number;
+  /** T3 : armée envoyée sur la route ; pas de repos, pertes et butin réglés sur l'armée elle-même. */
+  marching?: boolean;
   /** Tirages aléatoires entre 0 et 1 (fournis pour des tests reproductibles). */
   rng: () => number;
 }
@@ -994,7 +1078,7 @@ export function raidBlocker(attacker: PlayerState, victim: PlayerState, ctx: Omi
   const free = revenge;
   if (!ctx.atWar && victim.shieldUntil > ctx.now) return "Cette cible est sous bouclier.";
   if (!free && !ctx.allowRepeat && attacker.lastRaidTarget === ctx.victimId) return "Pas deux raids de suite contre la même cible.";
-  if (!free && !ctx.attackerIsLord && ctx.now - attacker.lastRaidAt < RAID_COOLDOWN_MS) return "Tes troupes se reposent encore.";
+  if (!free && !ctx.attackerIsLord && !ctx.marching && ctx.now - attacker.lastRaidAt < RAID_COOLDOWN_MS) return "Tes troupes se reposent encore.";
   if (!free && !ctx.atWar && !ctx.attackerIsLord && !ctx.defenderArmy && ctx.relativeSize !== undefined && ctx.relativeSize < MIN_TARGET_SIZE) return "Ce domaine est trop petit pour toi.";
   if (armySize(ctx.attackerArmy ?? attackArmy(attacker)) === 0) return "Il te faut des troupes pour lancer un raid.";
   return null;
@@ -1043,7 +1127,8 @@ export function resolveRaid(
   const attackerSplit = ctx.attackerArmy ? null : splitTroopLosses(attacker, fight.attackerLost);
   const victimSplit = ctx.defenderArmy ? null : splitTroopLosses(victim, defenderLost);
   // Infirmerie : une part de ses propres troupes tombées revient dans 30 minutes.
-  const attackerWounded = attackerSplit ? woundedOf(attackerSplit.byOwner[""] ?? {}, fight.success ? WOUNDED_WINNER : WOUNDED_ATTACKER_BEATEN) : {};
+  const ownLost = attackerSplit ? (attackerSplit.byOwner[""] ?? {}) : ctx.marching ? fight.attackerLost : {};
+  const attackerWounded = woundedOf(ownLost, fight.success ? WOUNDED_WINNER : WOUNDED_ATTACKER_BEATEN);
   const defenderWounded = victimSplit ? woundedOf(victimSplit.byOwner[""] ?? {}, fight.success ? WOUNDED_DEFENDER_BEATEN : WOUNDED_WINNER) : {};
 
   const attackerAfter: PlayerState = {
@@ -1112,7 +1197,8 @@ export function resolveRaid(
   return {
     ok: true,
     value: {
-      attacker: { ...attackerAfter, stone: attacker.stone + stolen - allyTotal + ransom, totalPlundered: attacker.totalPlundered + stolen - allyTotal },
+      // T4 : une armée en route rapporte son butin au retour (voir landMarch).
+      attacker: ctx.marching ? attackerAfter : { ...attackerAfter, stone: attacker.stone + stolen - allyTotal + ransom, totalPlundered: attacker.totalPlundered + stolen - allyTotal },
       victim: {
         ...victimArmyAfter,
         stone: victim.stone - stolen,

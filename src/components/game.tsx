@@ -37,6 +37,8 @@ import {
   type GeneratorId,
   type HallUnit,
   REVENGE_ATTACK_BONUS,
+  MAP_SPAWN_RADIUS,
+  MAX_MARCHES,
   MERCHANT_OFFERS,
   type MerchantChoice,
   mapDistance,
@@ -69,10 +71,11 @@ import {
   upgradeCost,
   upgradeUnlocked,
   attackArmy,
+  travelMs,
   type PlayerState,
 } from "@/lib/game/engine";
 import { formatNumber, formatRate } from "@/lib/game/format";
-import { battle, seededRng, type Army } from "@/lib/game/battle";
+import { battle, estimateChance, seededRng, type Army } from "@/lib/game/battle";
 import { worldFrom, type AwaySummary, type LotView, type AllianceSummary, type ChronicleEntry, type EventView, type GameSnapshot, type RivalView } from "@/lib/game/types";
 import { useChat, useGame, useLeaderboard, usePush, useTick } from "./use-game";
 import { CHAT_MAX_LENGTH, CHAT_REACTIONS, type ChatChannel } from "@/lib/game/chat-config";
@@ -566,6 +569,7 @@ function Hero({ snap, rate, clickGain, game }: { snap: GameSnapshot; rate: numbe
           ))}
         </div>
       </div>
+      <Incoming snap={snap} now={game.serverNow()} />
       <EventBanner e={snap.event} now={game.serverNow()} stone={snap.state.stone} run={game.run} />
       <Status state={snap.state} now={game.serverNow()} />
       <div className="mini-site">
@@ -1098,6 +1102,7 @@ function Army({ snap, live, now, run }: { snap: GameSnapshot; live: PlayerState;
             de la cible. Chaque unité a ses forces et ses faiblesses, compose ton armée selon ce que tu vois en face. Tu gagnes si plus personne ne
             riposte en face. Une partie des troupes perdues revient de l&apos;infirmerie au bout de 30 minutes.
           </p>
+          <Marches snap={snap} now={now} run={run} />
           <Garrison live={live} run={run} />
           <CurfewCard live={live} now={now} run={run} />
         </>
@@ -1111,7 +1116,6 @@ function Raids({ snap, live, now, run }: { snap: GameSnapshot; live: PlayerState
   const [view, setView] = useState<RaidView>("seigneurs");
   const [level, setLevel] = useState<number | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
-  const cooldown = live.lastRaidAt + RAID_COOLDOWN_MS - now;
   const spyPrice = spyCost(live, worldFrom(snap.worksite), now);
   const act = async (target: string, action: Parameters<typeof run>[0]) => {
     setBusy(target);
@@ -1119,12 +1123,14 @@ function Raids({ snap, live, now, run }: { snap: GameSnapshot; live: PlayerState
     setBusy(null);
   };
   const spy = (target: string) => act(target, { type: "spy", target });
-  const raid = (target: string) => act(target, { type: "raid", target });
+  const raid = (target: string, troops?: Record<string, number>) => act(target, { type: "raid", target, troops });
+  const mine = snap.map?.places[snap.userId];
+  const distanceTo = (id: string) => (mine && snap.map?.places[id] ? mapDistance(mine, snap.map.places[id]) : undefined);
   const players = snap.rivals.filter((r) => !r.isLord && !r.allied);
   const lords = snap.rivals.filter((r) => r.isLord && (level === null || r.difficulty === level));
   const sabotage = (target: string) => act(target, { type: "sabotage", target });
   const row = (r: RivalView) => (
-    <RivalRow key={r.id} r={r} now={now} busy={busy} onRaid={raid} onSpy={spy} spyPrice={spyPrice} stone={live.stone} onSabotage={sabotage} stagesDone={stagesDoneAt(worldFrom(snap.worksite), now)} me={live} />
+    <RivalRow key={r.id} r={r} now={now} busy={busy} onRaid={raid} onSpy={spy} spyPrice={spyPrice} stone={live.stone} onSabotage={sabotage} stagesDone={stagesDoneAt(worldFrom(snap.worksite), now)} me={live} distance={distanceTo(r.id)} />
   );
   const views: [RaidView, string][] = [
     ["seigneurs", `Seigneurs (${snap.rivals.filter((r) => r.isLord).length})`],
@@ -1150,9 +1156,7 @@ function Raids({ snap, live, now, run }: { snap: GameSnapshot; live: PlayerState
           me={snap.userId}
         />}
       {inCurfew(live, now) && <p className="raid-state">🌙 Tu es en couvre-feu : ni attaque ni sabotage, dans un sens comme dans l&apos;autre.</p>}
-      <p className="raid-state">
-        {cooldown > 0 ? `⏳ Tes troupes se reposent encore ${duration(cooldown)}.` : "⚔️ Tes troupes sont prêtes."}
-      </p>
+      <Marches snap={snap} now={now} run={run} />
       {view === "seigneurs" && (
         <p className="note raid-intro">
           Un raid réussi vole 25 % (40 % en revanche) de la pierre non sécurisée (les 2 dernières heures de production sont à l&apos;abri, mais jamais plus
@@ -1294,19 +1298,23 @@ function RivalRow({
   onSabotage,
   stagesDone = 0,
   me,
+  distance,
 }: {
   r: RivalView;
   now: number;
   busy: string | null;
-  onRaid: (id: string) => void;
+  onRaid: (id: string, troops?: Record<string, number>) => void;
   onSpy: (id: string) => void;
   spyPrice: number;
   stone: number;
   onSabotage: (id: string) => void;
   stagesDone?: number;
   me?: PlayerState;
+  distance?: number;
 }) {
   const [sim, setSim] = useState<number | null>(null);
+  const [composing, setComposing] = useState(false);
+  const [chosen, setChosen] = useState<Record<string, number> | null>(null);
   const sabotagePrice = r.sabotageCost ?? 0;
   const intel = r.intelUntil > now;
   // La pierre du rival progresse en direct entre deux nouvelles du serveur.
@@ -1356,10 +1364,26 @@ function RivalRow({
               .filter(Boolean)
               .join(" · ")}
         </div>
-        {sim !== null && me && <Simulator me={me} r={r} intel={intel} seed={sim} onReplay={() => setSim(sim + 1)} onClose={() => setSim(null)} />}
+        {composing && me && (
+          <SendArmy
+            me={me}
+            r={r}
+            intel={intel}
+            distance={distance ?? MAP_SPAWN_RADIUS}
+            chosen={chosen ?? (me.troops as Record<string, number>)}
+            setChosen={setChosen}
+            busy={busy !== null}
+            onSend={(troops) => {
+              setComposing(false);
+              onRaid(r.id, troops);
+            }}
+            onClose={() => setComposing(false)}
+          />
+        )}
+        {sim !== null && me && <Simulator me={me} army={(chosen ?? me.troops) as Army} r={r} intel={intel} seed={sim} onReplay={() => setSim(sim + 1)} onClose={() => setSim(null)} />}
       </div>
       <div className="row-actions">
-        <button className="btn btn-primary" disabled={blocked || busy !== null} onClick={() => onRaid(r.id)}>
+        <button className="btn btn-primary" disabled={blocked || busy !== null} onClick={() => (me ? setComposing(!composing) : onRaid(r.id))}>
           Raider
           <span className="cost num">
             {intel ? "" : "~"}
@@ -1393,9 +1417,120 @@ function RivalRow({
   );
 }
 
+/** T3 : composer l'armée envoyée, type par type ; trajet et chance portent sur ce choix. */
+function SendArmy({
+  me,
+  r,
+  intel,
+  distance,
+  chosen,
+  setChosen,
+  busy,
+  onSend,
+  onClose,
+}: {
+  me: PlayerState;
+  r: RivalView;
+  intel: boolean;
+  distance: number;
+  chosen: Record<string, number>;
+  setChosen: (a: Record<string, number>) => void;
+  busy: boolean;
+  onSend: (troops: Record<string, number>) => void;
+  onClose: () => void;
+}) {
+  const have = me.troops as Record<string, number>;
+  const army = Object.fromEntries(UNITS.map((u) => [u.id, Math.min(have[u.id] ?? 0, Math.max(0, Math.floor(chosen[u.id] ?? 0)))]).filter(([, n]) => (n as number) > 0)) as Record<string, number>;
+  const out = travelMs(army as Army, distance);
+  const chance = estimateChance(army as Army, r.army as Army, { attackBonus: r.revenge ? REVENGE_ATTACK_BONUS : 1, attackerLevels: me.levels });
+  const away = (me.marches ?? []).length;
+  return (
+    <div className="simulator send-army">
+      <p>
+        <strong>Composer l&apos;armée</strong> · {distance.toLocaleString("fr-FR", { maximumFractionDigits: 1 })} cases · aller {duration(out)}, retour autant
+      </p>
+      {UNITS.filter((u) => (have[u.id] ?? 0) > 0).map((u) => (
+        <label key={u.id} className="send-line">
+          <span>
+            {u.icon} {u.name} <span className="num">({formatNumber(have[u.id] ?? 0)})</span>
+          </span>
+          <input
+            type="number"
+            min={0}
+            max={have[u.id] ?? 0}
+            value={army[u.id] ?? 0}
+            onChange={(e) => setChosen({ ...army, [u.id]: Math.max(0, Math.min(have[u.id] ?? 0, Math.floor(Number(e.target.value) || 0))) })}
+          />
+        </label>
+      ))}
+      {UNITS.every((u) => (have[u.id] ?? 0) === 0) && <p className="note">Toutes tes troupes sont en route ou à l&apos;infirmerie.</p>}
+      <p className="note">
+        Chance estimée {intel ? "" : "(sans espion, sur une estimation) "}: {Math.round(chance * 100)} %. Les troupes envoyées ne défendent plus ton domaine pendant le trajet.
+        {away > 0 ? ` Armées déjà en route : ${away}/${MAX_MARCHES}.` : ""}
+      </p>
+      <div className="qty">
+        <button className="btn" onClick={() => setChosen({ ...have })}>
+          Tout envoyer
+        </button>
+        <button className="btn btn-primary" disabled={busy || Object.keys(army).length === 0 || away >= MAX_MARCHES} onClick={() => onSend(army)}>
+          🏇 Envoyer
+        </button>
+        <button className="btn btn-ghost" onClick={onClose}>
+          Annuler
+        </button>
+      </div>
+    </div>
+  );
+}
+
+/** T3, T4 : mes armées en route, avec le rappel. */
+function Marches({ snap, now, run }: { snap: GameSnapshot; now: number; run: ReturnType<typeof useGame>["run"] }) {
+  const list = snap.state.marches ?? [];
+  if (list.length === 0) return null;
+  const nameOf = (id: string) => snap.rivals.find((r) => r.id === id)?.name ?? "une cible";
+  return (
+    <ul className="marches">
+      {list.map((m) => {
+        const back = m.status === "back";
+        const left = Math.max(0, (back ? m.returnAt : m.arriveAt) - now);
+        const verdict = m.outcome === "won" ? "victoire" : m.outcome === "lost" ? "repoussée" : m.outcome === "turned" ? "demi-tour, cible protégée" : m.outcome === "recalled" ? "rappelée" : "";
+        return (
+          <li key={m.id}>
+            <span>
+              {back ? "↩️" : "🏇"} {armyIcons(m.troops, "plus personne")} {back ? `rentre de ${nameOf(m.target)}` : `vers ${nameOf(m.target)}`}
+              {verdict ? ` (${verdict})` : ""} · {left > 0 ? duration(left) : "imminent"}
+              {back && m.loot + m.ransom > 0 ? ` · rapporte ${formatNumber(m.loot + m.ransom)} 🪨` : ""}
+            </span>
+            {!back && left > 0 && (
+              <button className="btn btn-ghost" onClick={() => void run({ type: "march_recall", id: m.id })}>
+                Rappeler
+              </button>
+            )}
+          </li>
+        );
+      })}
+    </ul>
+  );
+}
+
+/** T5 : une armée approche de mon domaine. */
+function Incoming({ snap, now }: { snap: GameSnapshot; now: number }) {
+  const list = (snap.incoming ?? []).filter((i) => i.arriveAt > now);
+  if (list.length === 0) return null;
+  return (
+    <div className="event-banner incoming">
+      {list.map((i) => (
+        <div key={i.id}>
+          ⚠️ Une armée {i.from ? `de ${i.from} ` : ""}approche : arrivée dans {duration(i.arriveAt - now)}. Renforce tes défenses ou rappelle tes troupes !
+        </div>
+      ))}
+    </div>
+  );
+}
+
 /** B7 : simulateur avant l'attaque, une bataille pour de faux contre l'armée vue en face (rien n'est perdu). */
-function Simulator({ me, r, intel, seed, onReplay, onClose }: { me: PlayerState; r: RivalView; intel: boolean; seed: number; onReplay: () => void; onClose: () => void }) {
-  const attack = attackArmy(me);
+function Simulator({ me, army, r, intel, seed, onReplay, onClose }: { me: PlayerState; army: Army; r: RivalView; intel: boolean; seed: number; onReplay: () => void; onClose: () => void }) {
+  const attack = army;
   const opts = { attackBonus: r.revenge ? REVENGE_ATTACK_BONUS : 1, attackerLevels: me.levels };
   const fight = battle(attack, r.army as Army, seededRng(seed * 7919), opts);
   return (
@@ -2081,6 +2216,23 @@ function KingdomMap({ snap, live, now, run }: { snap: GameSnapshot; live: Player
           <text {...(({ cx, cy }) => ({ x: cx, y: cy }))(at(map.fortress))} className="map-icon" onClick={() => setPicked(null)}>
             🏰
           </text>
+          {mine &&
+            (snap.state.marches ?? []).map((m) => {
+              const target = map.places[m.target];
+              if (!target) return null;
+              const a = at(mine);
+              const b = at(target);
+              // Position sur la route : 0 au domaine, 1 à la cible.
+              const f = m.status === "out"
+                ? Math.min(1, Math.max(0, (now - m.departAt) / Math.max(1, m.arriveAt - m.departAt)))
+                : Math.min(1, Math.max(0, (m.returnAt - now) / Math.max(1, m.arriveAt - m.departAt)));
+              return (
+                <g key={m.id} className="map-march">
+                  <line x1={a.cx} y1={a.cy} x2={b.cx} y2={b.cy} />
+                  <circle cx={a.cx + (b.cx - a.cx) * f} cy={a.cy + (b.cy - a.cy) * f} r={4} />
+                </g>
+              );
+            })}
           {Object.entries(map.places).map(([id, p]) => {
             const { cx, cy } = at(p);
             const me = id === snap.userId;
@@ -2104,6 +2256,7 @@ function KingdomMap({ snap, live, now, run }: { snap: GameSnapshot; live: Player
           })}
         </svg>
       </div>
+      <Marches snap={snap} now={now} run={run} />
       {rival ? (
         <>
           <p className="raid-state">
@@ -2117,7 +2270,8 @@ function KingdomMap({ snap, live, now, run }: { snap: GameSnapshot; live: Player
                 r={rival}
                 now={now}
                 busy={busy}
-                onRaid={(t) => act(t, { type: "raid", target: t })}
+                onRaid={(t, troops) => act(t, { type: "raid", target: t, troops })}
+                distance={placeDistance(map.places[rival.id]) ?? undefined}
                 onSpy={(t) => act(t, { type: "spy", target: t })}
                 spyPrice={spyPrice}
                 stone={live.stone}

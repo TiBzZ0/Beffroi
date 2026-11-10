@@ -657,3 +657,17 @@ export const MERCHANT_PRODUCTION = 0.25;
 export const MERCHANT_PRODUCTION_MS = 4 * 60 * 60 * 1000;
 export const MERCHANT_SAFE_SECONDS = 2 * 60 * 60;
 export const MERCHANT_SAFE_MS = 24 * 60 * 60 * 1000;
+
+// T2 à T5 : trajets des armées.
+/** Vitesse en cases par minute « de base » : l'armée avance au pas de son unité la plus lente. */
+export const UNIT_SPEED: Record<string, number> = { milicien: 1, piquier: 1, arbaletrier: 1, chevalier: 1.5, belier: 0.6 };
+export const TRAVEL_BASE_MIN = 2;
+/** Le seul réglage à toucher : minutes par case à vitesse 1 (à calibrer en jeu). */
+export const TRAVEL_PER_CELL_MIN = 1;
+export const TRAVEL_MIN_MIN = 3;
+export const TRAVEL_MAX_MIN = 20;
+/** Trois armées en route au plus par joueur. */
+export const MAX_MARCHES = 3;
+/** T5 : chaque tour d'archers donne 5 % de chance de voir le nom de l'attaquant, 90 % au plus. */
+export const TOWER_REVEAL_CHANCE = 0.05;
+export const TOWER_REVEAL_MAX = 0.9;

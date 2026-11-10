@@ -146,6 +146,13 @@ export interface ChronicleEntry {
   };
 }
 
+/** T5 : une armée approche (on ne voit l'attaquant que si les tours l'ont repéré). */
+export interface IncomingView {
+  id: string;
+  arriveAt: number;
+  from: string | null;
+}
+
 /** T1 : carte du royaume. Positions en cases (1 à size), par id de joueur ou de seigneur. */
 export interface MapView {
   size: number;
@@ -183,6 +190,7 @@ export interface GameSnapshot {
   /** Fournie lors des synchronisations et des raids ; sinon le client garde la précédente. */
   chronicle?: ChronicleEntry[];
   map?: MapView;
+  incoming?: IncomingView[];
 }
 
 export interface LeaderboardRow {
@@ -221,7 +229,7 @@ export type GameAction =
   | { type: "buy"; generator: string; qty: number }
   | { type: "upgrade"; upgrade: string }
   | { type: "contribute"; amount: number }
-  | { type: "raid"; target: string }
+  | { type: "raid"; target: string; troops?: Record<string, number> }
   | { type: "rebuild"; generator: string }
   | { type: "army"; kind: "unit" | "defense"; id: string; qty: number }
   | { type: "spy"; target: string }
@@ -239,6 +247,7 @@ export type GameAction =
   | { type: "event_attack" }
   | { type: "research"; id: string }
   | { type: "merchant"; choice: MerchantChoice }
+  | { type: "march_recall"; id: string }
   | { type: "academy" }
   | { type: "tithe"; percent: number }
   | { type: "curfew"; start: number | null }

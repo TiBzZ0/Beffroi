@@ -213,4 +213,16 @@ export const CHANGELOG: ChangeEntry[] = [
       "📣 Chaque événement est annoncé 15 minutes avant, dans le jeu et par notification.",
     ],
   },
+  {
+    id: 27,
+    date: "10 novembre",
+    items: [
+      "🏇 Les raids ne sont plus instantanés : tu choisis les troupes envoyées (ou « Tout envoyer »), puis elles marchent jusqu'à la cible. L'aller prend de 3 à 20 minutes selon la distance sur la carte et l'unité la plus lente (chevaliers rapides, béliers lents). Le retour dure autant.",
+      "🛡️ Les troupes en route ne défendent plus ton domaine : attaquer, c'est découvrir sa défense. Trois armées en route au plus. Le repos de 5 minutes entre deux raids disparaît.",
+      "⚔️ Le combat se joue à l'arrivée, contre la défense présente. Si la cible est alors sous bouclier, en couvre-feu ou trop petite, ton armée fait demi-tour sans combattre. Le butin et la rançon ne sont crédités qu'au retour.",
+      "🏳️ Tu peux rappeler une armée tant qu'elle n'est pas arrivée : elle rentre en autant de temps qu'elle a marché.",
+      "⚠️ À mi-chemin, le défenseur est prévenu (bandeau et notification) de l'heure d'arrivée, sans savoir qui arrive. Chaque tour d'archers donne 5 % de chance de voir le nom de l'attaquant.",
+      "🗺️ Tes armées en route s'affichent sur la carte.",
+    ],
+  },
 ];
