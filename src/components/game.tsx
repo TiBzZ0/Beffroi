@@ -1386,12 +1386,9 @@ function RivalRow({
       <div className="row-actions">
         <button className="btn btn-primary" disabled={blocked || busy !== null} onClick={() => (me ? setComposing(!composing) : onRaid(r.id))}>
           Raider
-          <span className="cost num">
-            {intel ? "" : "~"}
-            {pct} % de succès
-          </span>
+          <span className="cost num">{r.chance < 0 ? "chance cachée 🌫️" : `${intel ? "" : "~"}${pct} % de succès`}</span>
         </button>
-        {me && sim === null && (
+        {me && sim === null && r.chance >= 0 && (
           <button className="btn" onClick={() => setSim(1)} title="Joue une bataille pour de faux avec ton armée contre celle que tu vois en face.">
             🎲 Simuler
           </button>
@@ -1466,7 +1463,7 @@ function SendArmy({
       ))}
       {UNITS.every((u) => (have[u.id] ?? 0) === 0) && <p className="note">Toutes tes troupes sont en route ou à l&apos;infirmerie.</p>}
       <p className="note">
-        Chance estimée {intel ? "" : "(sans espion, sur une estimation) "}: {Math.round(chance * 100)} %. Les troupes envoyées ne défendent plus ton domaine pendant le trajet.
+        {r.chance < 0 ? "Chance cachée par le brouillard : envoie un espion." : `Chance estimée ${intel ? "" : "(sans espion, sur une estimation) "}: ${Math.round(chance * 100)} %.`} Les troupes envoyées ne défendent plus ton domaine pendant le trajet.
         {away > 0 ? ` Armées déjà en route : ${away}/${MAX_MARCHES}.` : ""}
       </p>
       <div className="qty">
@@ -1987,7 +1984,7 @@ function eventAttackText(c: ChronicleEntry, me: string): string {
 }
 
 /** Événement en cours (ou le prochain) en tête de l'onglet Raids, avec ses derniers assauts. */
-const EVENT_ICONS: Record<EventView["kind"], string> = { caravane: "🐪", colosse: "🗿", foire: "🎪", fete: "🎉", etoiles: "🌠", treve: "🔔", marchand: "🧺" };
+const EVENT_ICONS: Record<EventView["kind"], string> = { caravane: "🐪", colosse: "🗿", foire: "🎪", fete: "🎉", etoiles: "🌠", treve: "🔔", marchand: "🧺", lune: "🌕", brouillard: "🌫️" };
 const isCombatEvent = (e: EventView | null | undefined) => !!e && (e.kind === "caravane" || e.kind === "colosse");
 
 /** Événements sans combat (foire, fête, étoiles, trêve, marchand) : un bandeau sous le compteur, et les achats du marchand. */

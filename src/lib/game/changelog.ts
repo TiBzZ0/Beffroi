@@ -242,4 +242,12 @@ export const CHANGELOG: ChangeEntry[] = [
       "🐪 La caravane traverse la carte d'un bord à l'autre en une heure, et 🗿 le colosse apparaît sur une case loin des joueurs. Pour les attaquer, ton armée marche jusqu'à eux ; la prime rentre avec elle.",
     ],
   },
+  {
+    id: 30,
+    date: "10 novembre",
+    items: [
+      "🌕 Nouvel événement, la lune rouge (2 h) : tous les seigneurs pillards lancent un raid en même temps. Chaque raid de seigneur repoussé te rapporte une rançon de 30 % de la valeur de son armée.",
+      "🌫️ Nouvel événement, le brouillard (2 h) : aucune alerte d'approche, les chances sont masquées sans espion, et l'espion coûte moitié prix.",
+    ],
+  },
 ];

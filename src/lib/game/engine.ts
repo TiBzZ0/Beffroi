@@ -102,6 +102,7 @@ import {
   DONOR_TIER_ECUS,
   DONOR_TIER_BONUS,
   FAIR_GENERATOR_FACTOR,
+  FOG_SPY_FACTOR,
   MAX_MARCHES,
   TRAVEL_BASE_MIN,
   TRAVEL_MAX_MIN,
@@ -246,6 +247,8 @@ export interface March {
   revealed: boolean;
   /** Prévenu à mi-chemin (notification envoyée). */
   warned: boolean;
+  /** V14 : passé à mi-chemin dans le brouillard, le défenseur ne voit rien venir. */
+  hidden?: boolean;
   /** Butin et rançon rapportés, crédités au retour. */
   loot: number;
   ransom: number;
@@ -1221,7 +1224,8 @@ export function resolveRaid(
 // ---------------------------------------------------------------------------
 
 export function spyCost(state: PlayerState, world: WorldState, now: number): number {
-  return Math.max(SPY_MIN_COST, Math.ceil(rateAt(state, world, now) * SPY_COST_SECONDS));
+  const fog = eventActive(state, "brouillard", now) ? FOG_SPY_FACTOR : 1;
+  return Math.max(SPY_MIN_COST, Math.ceil(rateAt(state, world, now) * SPY_COST_SECONDS * fog));
 }
 
 /** Risque que l'espion soit repéré, selon les tours d'archers de la cible. */

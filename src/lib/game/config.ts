@@ -623,8 +623,8 @@ export function mapDistance(a: MapPos, b: MapPos): number {
 }
 
 // Événements sans carte (V3 à V6, V15). Un événement toutes les 2 heures, tiré au sort selon ces poids, jamais deux fois de suite le même.
-export type EventKind = "caravane" | "colosse" | "foire" | "fete" | "etoiles" | "treve" | "marchand";
-export const EVENT_WEIGHTS: Record<EventKind, number> = { caravane: 3, colosse: 2, foire: 2, fete: 2, etoiles: 2, treve: 1, marchand: 2 };
+export type EventKind = "caravane" | "colosse" | "foire" | "fete" | "etoiles" | "treve" | "marchand" | "lune" | "brouillard";
+export const EVENT_WEIGHTS: Record<EventKind, number> = { caravane: 3, colosse: 2, foire: 2, fete: 2, etoiles: 2, treve: 1, marchand: 2, lune: 1, brouillard: 1 };
 export const EVENT_DURATIONS_MS: Record<EventKind, number> = {
   caravane: 60 * 60 * 1000,
   colosse: 6 * 60 * 60 * 1000,
@@ -633,7 +633,13 @@ export const EVENT_DURATIONS_MS: Record<EventKind, number> = {
   etoiles: 60 * 60 * 1000,
   treve: 2 * 60 * 60 * 1000,
   marchand: 60 * 60 * 1000,
+  lune: 2 * 60 * 60 * 1000,
+  brouillard: 2 * 60 * 60 * 1000,
 };
+/** V13 : un raid de seigneur repoussé pendant la lune rouge rapporte 30 % de la valeur de son armée. */
+export const RED_MOON_RANSOM = 0.3;
+/** V14 : l'espion coûte moitié prix dans le brouillard. */
+export const FOG_SPY_FACTOR = 0.5;
 /** L'événement suivant est annoncé 15 minutes avant. */
 export const EVENT_NOTICE_MS = 15 * 60 * 1000;
 /** V3 : savoirs à −20 %, ateliers à −10 %. */

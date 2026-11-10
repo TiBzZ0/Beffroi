@@ -26,6 +26,7 @@ import {
   EVENT_NOTICE_MS,
   EVENT_WEIGHTS,
   MERCHANT_PRICE_SECONDS,
+  RED_MOON_RANSOM,
   MAX_MARCHES,
   LORD_TARGET_RADIUS,
   TOWER_REVEAL_CHANCE,
@@ -1226,6 +1227,8 @@ const EVENT_INFO: Record<EventKind, { name: string; description: string }> = {
   fete: { name: "Fête des bâtisseurs", description: "Pendant 2 heures, chaque pierre versée au chantier compte double pour tes paliers de don et pour le lot de ton alliance." },
   etoiles: { name: "Pluie d'étoiles", description: "Pendant 1 heure, les veines d'or apparaissent trois fois plus souvent. Garde l'œil ouvert !" },
   treve: { name: "Trêve des cloches", description: "Les cloches sonnent la paix : aucune armée ne part pendant 2 heures (raids, renforts, forteresse), et tout le monde produit 25 % de plus." },
+  lune: { name: "La lune rouge", description: "Tous les seigneurs pillards lancent un raid en même temps. Chaque raid repoussé te rapporte une rançon de 30 % de la valeur de l'armée du seigneur." },
+  brouillard: { name: "Le brouillard", description: "Pendant 2 heures, aucune alerte d'approche, les chances sont masquées sans espion, et l'espion coûte moitié prix." },
   marchand: { name: "Le marchand ambulant", description: "Pendant 1 heure, il vend un bonus au choix pour 30 minutes de ta production. Un seul achat par passage." },
   caravane: {
     name: "Caravane marchande",
@@ -1268,6 +1271,8 @@ const EVENT_NOTICES: Record<EventKind, { title: string; body: string }> = {
   fete: { title: "🎉 Fête des bâtisseurs !", body: "Tes dons comptent double pour les paliers et les lots pendant 2 heures." },
   etoiles: { title: "🌠 Pluie d'étoiles !", body: "Les veines d'or apparaissent trois fois plus souvent pendant 1 heure." },
   treve: { title: "🔔 Trêve des cloches", body: "Aucune armée ne part pendant 2 heures, et tout le monde produit 25 % de plus." },
+  lune: { title: "🌕 La lune rouge se lève !", body: "Tous les seigneurs pillards attaquent en même temps. Chaque raid repoussé rapporte une rançon." },
+  brouillard: { title: "🌫️ Le brouillard tombe", body: "Pas d'alerte d'approche, chances masquées sans espion, espion à moitié prix pendant 2 heures." },
   marchand: { title: "🧺 Le marchand ambulant est là", body: "Un bonus au choix pour 30 minutes de ta production, pendant 1 heure." },
 };
 
@@ -1323,7 +1328,14 @@ async function loadEventInner(admin: SupabaseClient, seasonId: number, now: numb
   // A14, A15 : plus de chargement ni de prime communs (pool 0) ; `prize` n'est plus qu'une indication.
   const { error: insertError } = await admin.from("events").insert({ season_id: seasonId, kind: nextKind, ends_at: iso(now + duration), army, army_start: army, pool: 0, prize });
   // Seul celui qui a vraiment créé l'événement prévient tout le monde.
-  if (!insertError) notify(admin, "all", { ...EVENT_NOTICES[nextKind], tag: "event" });
+  if (!insertError) {
+    notify(admin, "all", { ...EVENT_NOTICES[nextKind], tag: "event" });
+    // V13 : tous les seigneurs pillards se mettent en route maintenant.
+    if (nextKind === "lune") {
+      const raiders = [...entities.values()].filter((e) => e.lord?.raidEveryHours && !e.lord.retaliateOnly).map((e) => e.id);
+      if (raiders.length) await admin.from("player_states").update({ next_raid_at: iso(now) }).eq("season_id", seasonId).in("user_id", raiders);
+    }
+  }
   const { data: created } = await admin.from("events").select("*").eq("season_id", seasonId).eq("settled", false).maybeSingle();
   if (!created) return { active: null, levels: {}, nextAt: now + EVENT_GAP_MS, nextKind };
   const e = eventRow(created);
@@ -1740,7 +1752,8 @@ function rivalsFor(
         atWar,
         allianceName: e.allianceId !== null ? (allianceNames.get(e.allianceId) ?? null) : null,
         army: seen as Record<string, number>,
-        chance: vagueChance(estimateChance(fight.attack, fight.defense, fight.opts), intelUntil > now || allied),
+        // V14 : dans le brouillard, pas de chance affichée sans espion (-1).
+        chance: !(intelUntil > now || allied) && eventActive(myState, "brouillard", now) ? -1 : vagueChance(estimateChance(fight.attack, fight.defense, fight.opts), intelUntil > now || allied),
         shieldUntil: s.shieldUntil,
         burnedUntil: s.burnedUntil,
         totalPlundered: s.totalPlundered,
@@ -2271,6 +2284,7 @@ function cleanMarches(raw: unknown): March[] {
       returnAt: Number(m.returnAt) || 0,
       revealed: m.revealed === true,
       warned: m.warned === true,
+      ...(m.hidden === true ? { hidden: true } : {}),
       loot: Math.max(0, Number(m.loot) || 0),
       ransom: Math.max(0, Number(m.ransom) || 0),
       ...(["won", "lost", "turned", "recalled"].includes(m.outcome) ? { outcome: m.outcome } : {}),
@@ -2408,9 +2422,10 @@ async function settleMarches(
   }
 
   if (!m.warned) {
-    // T5 : alerte à mi-chemin.
-    const r = await commit(owner, replace(owner.state, { ...m, warned: true }));
-    if (r === "changed" && victim && !victim.isLord) {
+    // T5 : alerte à mi-chemin ; V14 : pas d'alerte dans le brouillard.
+    const fog = eventActive(owner.state, "brouillard", at);
+    const r = await commit(owner, replace(owner.state, { ...m, warned: true, ...(fog ? { revealed: false, hidden: true } : {}) }));
+    if (r === "changed" && victim && !victim.isLord && !fog) {
       const from = m.revealed ? ` de ${owner.name}` : "";
       notify(admin, [victim.id], { title: "⚠️ Une armée approche !", body: `Une armée${from} arrive vers ${new Date(m.arriveAt).toLocaleTimeString("fr-FR", { hour: "2-digit", minute: "2-digit", timeZone: "Europe/Paris" })}.`, tag: "march" });
     }
@@ -2445,6 +2460,9 @@ async function settleMarches(
   const fight = resolveRaid(aState, vState, { ...ctx, rng: Math.random });
   if (!fight.ok) return commit(owner, replace(owner.state, turn("turned")));
   const rep = fight.value.report;
+  // V13 : un seigneur repoussé sous la lune rouge laisse une rançon au défenseur.
+  const moonRansom = owner.isLord && !rep.success && eventActive(vState, "lune", at) ? Math.floor(armyValue(m.troops) * RED_MOON_RANSOM) : 0;
+  if (moonRansom > 0) fight.value.victim = { ...fight.value.victim, stone: fight.value.victim.stone + moonRansom };
   const survivors = cleanArmy(Object.fromEntries((Object.entries(m.troops) as [string, number][]).map(([id, n]) => [id, n - ((rep.attackerLost as Record<string, number>)[id] ?? 0)])) as Army);
   const back: March = { ...m, troops: survivors, status: "back", returnAt: at + outMs, loot: rep.stolen, ransom: rep.ransom, outcome: rep.success ? "won" : "lost" };
   const attackerAfter = replace(fight.value.attacker, armySize(survivors) > 0 || back.loot + back.ransom > 0 ? back : null);
@@ -2463,7 +2481,7 @@ async function settleMarches(
   if (!victim.isLord) {
     notify(admin, [victim.id], rep.success
       ? { title: "⚔️ Tu as été pillé !", body: `${owner.name} t'a volé ${Math.floor(rep.stolen).toLocaleString("fr-FR")} pierres.`, tag: "raid" }
-      : { title: "🛡️ Raid repoussé", body: `Tes défenses ont repoussé ${owner.name}.`, tag: "raid" });
+      : { title: "🛡️ Raid repoussé", body: `Tes défenses ont repoussé ${owner.name}${moonRansom ? ` : ${moonRansom.toLocaleString("fr-FR")} pierres de rançon` : ""}.`, tag: "raid" });
   }
   if (!owner.isLord) {
     notify(admin, [owner.id], rep.success
@@ -2502,7 +2520,7 @@ async function travelBetween(admin: SupabaseClient, seasonId: number, entities: 
 function incomingFor(meId: string, entities: Map<string, Entity>, now: number): IncomingView[] {
   return [...entities.values()].flatMap((e) =>
     (e.state.marches ?? [])
-      .filter((m) => m.kind === "raid" && m.target === meId && m.status === "out" && m.warned && m.arriveAt > now)
+      .filter((m) => m.kind === "raid" && m.target === meId && m.status === "out" && m.warned && !m.hidden && m.arriveAt > now)
       .map((m) => ({ id: m.id, arriveAt: m.arriveAt, from: m.revealed ? e.name : null })),
   );
 }
