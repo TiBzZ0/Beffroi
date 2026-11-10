@@ -11,6 +11,7 @@ import {
   COMBATANTS,
   LEVEL_BONUS,
   ACADEMY_SPEED,
+  RESEARCH_QUEUE_MAX,
   DEFENSES,
   GENERATORS,
   RAID_COOLDOWN_MS,
@@ -32,6 +33,7 @@ import {
   spyCost,
   academyCost,
   levelOf,
+  queuedLevel,
   researchCost,
   researchTime,
   maxAffordable,
@@ -544,7 +546,7 @@ function Raids({ snap, live, now, run }: { snap: GameSnapshot; live: PlayerState
   );
   const views: [RaidView, string][] = [
     ["armee", "Armée"],
-    ["forge", live.research ? "Forge ⏳" : "Forge"],
+    ["forge", live.research.some((r) => r.endsAt > now) ? `Forge ⏳${live.research.length}` : "Forge"],
     ["seigneurs", `Seigneurs (${snap.rivals.filter((r) => r.isLord).length})`],
     ["joueurs", `Joueurs (${players.length})`],
     ["chronique", "Chronique"],
@@ -750,13 +752,15 @@ function RivalRow({
 
 /** Forge : académie militaire et améliorations des troupes et fortifications (une recherche à la fois). */
 function Forge({ live, now, run }: { live: PlayerState; now: number; run: ReturnType<typeof useGame>["run"] }) {
-  const research = live.research && live.research.endsAt > now ? live.research : null;
-  const current = research ? COMBATANTS.get(research.id) : undefined;
+  // File de recherche : l'état local n'est pas encore « réglé », on ignore ce qui est déjà fini.
+  const queue = live.research.filter((r) => r.endsAt > now);
+  const full = queue.length >= RESEARCH_QUEUE_MAX;
   const academyPrice = academyCost(live);
   const rows = (defs: readonly CombatantDef<string>[]) =>
     defs.map((d) => {
       const id = d.id as CombatantId;
       const lv = levelOf(live, id);
+      const next = queuedLevel(live, id) + 1;
       const cost = researchCost(live, id);
       return (
         <div key={d.id} className="row">
@@ -769,11 +773,11 @@ function Forge({ live, now, run }: { live: PlayerState; now: number; run: Return
               <span className="badge">niv. {lv}</span>
             </div>
             <div className="row-desc num">
-              ⚔️ et ❤️ +{Math.round(lv * LEVEL_BONUS * 100)} % · niveau {lv + 1} en {duration(researchTime(live, id))}
+              ⚔️ et ❤️ +{Math.round(lv * LEVEL_BONUS * 100)} % · niveau {next} en {duration(researchTime(live, id))}
             </div>
           </div>
-          <button className="btn btn-primary" disabled={research !== null || cost > live.stone} onClick={() => void run({ type: "research", id: d.id })}>
-            Améliorer
+          <button className="btn btn-primary" disabled={full || cost > live.stone} onClick={() => void run({ type: "research", id: d.id })}>
+            {queue.length > 0 ? "En file" : "Améliorer"}
             <span className="cost num">{formatNumber(cost)} 🪨</span>
           </button>
         </div>
@@ -782,8 +786,8 @@ function Forge({ live, now, run }: { live: PlayerState; now: number; run: Return
   return (
     <>
       <p className="note raid-intro">
-        Chaque niveau donne +{Math.round(LEVEL_BONUS * 100)} % d&apos;attaque et de points de vie au type amélioré, en attaque comme en défense. Une seule
-        recherche à la fois, et chaque niveau prend plus de temps que le précédent. L&apos;académie accélère les recherches, mais les rivaux peuvent la
+        Chaque niveau donne +{Math.round(LEVEL_BONUS * 100)} % d&apos;attaque et de points de vie au type amélioré, en attaque comme en défense. Jusqu&apos;à 3
+        recherches en file, et chaque niveau prend plus de temps que le précédent. L&apos;académie accélère les recherches, mais les rivaux peuvent la
         saboter : les tours d&apos;archers gênent leurs saboteurs.
       </p>
       <div className="row">
@@ -804,9 +808,24 @@ function Forge({ live, now, run }: { live: PlayerState; now: number; run: Return
           <span className="cost num">{formatNumber(academyPrice)} 🪨</span>
         </button>
       </div>
-      <p className="raid-state">
-        {research && current ? `⏳ ${current.icon} ${current.name} niveau ${levelOf(live, research.id) + 1} : encore ${duration(research.endsAt - now)}.` : "🔨 Aucune recherche en cours."}
-      </p>
+      <h3 className="section-title">
+        File de recherche ({queue.length}/{RESEARCH_QUEUE_MAX})
+      </h3>
+      {queue.length === 0 ? (
+        <p className="raid-state">🔨 Aucune recherche en cours.</p>
+      ) : (
+        <ol className="research-queue">
+          {queue.map((r, i) => {
+            const def = COMBATANTS.get(r.id);
+            const level = levelOf(live, r.id) + queue.slice(0, i + 1).filter((q) => q.id === r.id).length;
+            return (
+              <li key={`${r.id}-${r.endsAt}`}>
+                {i === 0 ? "⏳" : "⌛"} {def?.icon} {def?.name} niveau {level} : {i === 0 ? `encore ${duration(r.endsAt - now)}` : `fini dans ${duration(r.endsAt - now)}`}
+              </li>
+            );
+          })}
+        </ol>
+      )}
       <h3 className="section-title">Troupes</h3>
       <div className="list">{rows(UNITS)}</div>
       <h3 className="section-title">Fortifications</h3>

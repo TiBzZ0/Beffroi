@@ -443,6 +443,8 @@ export const RESEARCH_COST_FACTOR = 100;
 export const RESEARCH_COST_GROWTH = 2.2;
 /** Durée d'un niveau : 2 min × 1,6^niveau actuel (niveau 10 ≈ 3 h 40, niveau 15 ≈ 39 h), divisée par l'académie. */
 export const RESEARCH_BASE_MS = 2 * 60 * 1000;
+/** Recherches en file d'attente, celle en cours comprise. */
+export const RESEARCH_QUEUE_MAX = 3;
 export const RESEARCH_TIME_GROWTH = 1.6;
 /** Académie militaire : chaque niveau accélère la recherche de 25 % (durée ÷ (1 + 0,25 × niveau)). */
 export const ACADEMY_SPEED = 0.25;

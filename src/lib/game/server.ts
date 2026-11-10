@@ -68,7 +68,7 @@ import {
   rateAt,
   startResearch,
   buyAcademy,
-  levelOf,
+  queuedLevel,
   sabotageCost,
   sabotageChance,
   sabotageBlocker,
@@ -122,7 +122,7 @@ interface PlayerRow {
   upgrades: string[];
   total_produced: number;
   total_contributed: number;
-  military?: { levels?: Record<string, number>; research?: { id: string; endsAt: number } | null; academy?: number; sabotageImmuneUntil?: number } | null;
+  military?: { levels?: Record<string, number>; research?: { id: string; endsAt: number }[] | { id: string; endsAt: number } | null; academy?: number; sabotageImmuneUntil?: number } | null;
   total_clicks: number;
   last_update: string;
   last_click_at: string;
@@ -230,7 +230,8 @@ function toEntity(row: PlayerRow): Entity {
           .filter(([, g]) => Object.keys(g).length > 0),
       ),
       levels: armyCounts(row.military?.levels ?? {}, [...UNIT_IDS, ...DEFENSE_IDS]),
-      research: row.military?.research ? { id: row.military.research.id as CombatantId, endsAt: Number(row.military.research.endsAt) } : null,
+      // Anciennes lignes : une seule recherche (objet) au lieu d'une file.
+      research: [row.military?.research ?? []].flat().map((r) => ({ id: r.id as CombatantId, endsAt: Number(r.endsAt) })),
       academy: Number(row.military?.academy ?? 0),
       sabotageImmuneUntil: Number(row.military?.sabotageImmuneUntil ?? 0),
     },
@@ -322,7 +323,7 @@ async function loadEntities(admin: SupabaseClient, seasonId: number, userId: str
   }
   // Les seigneurs suivent les améliorations des joueurs (niveau médian de chaque type).
   const levels = medianLevels(entities);
-  for (const e of entities.values()) if (e.isLord) e.state = { ...e.state, levels, research: null };
+  for (const e of entities.values()) if (e.isLord) e.state = { ...e.state, levels, research: [] };
   return entities;
 }
 
@@ -1158,7 +1159,7 @@ function rivalsFor(
         lastSeen: e.isLord ? undefined : e.lastSeen,
         revenge,
         blocker: raidBlocker(myState, s, ctx),
-        ...(e.isLord || allied ? {} : { academy: s.academy, researching: !!s.research, sabotageBlocker: sabotageBlocker(s, now), sabotageCost: sabotageCost(myState, s, world, now) }),
+        ...(e.isLord || allied ? {} : { academy: s.academy, researching: s.research.length > 0, sabotageBlocker: sabotageBlocker(s, now), sabotageCost: sabotageCost(myState, s, world, now) }),
       };
     })
     .sort((a, b) => Number(a.isLord) - Number(b.isLord) || (a.difficulty ?? 0) - (b.difficulty ?? 0) || b.loot - a.loot);
@@ -1213,7 +1214,7 @@ function applySimpleAction(state: PlayerState, action: GameAction, now: number, 
     }
     case "research": {
       const r = startResearch(state, String(action.id), now);
-      return r.ok ? { ok: true, value: { state: r.value, log: { action: "research", details: { id: action.id, level: levelOf(state, action.id as CombatantId) + 1 } } } } : r;
+      return r.ok ? { ok: true, value: { state: r.value, log: { action: "research", details: { id: action.id, level: queuedLevel(state, action.id as CombatantId) + 1 } } } } : r;
     }
     case "academy": {
       const r = buyAcademy(state);

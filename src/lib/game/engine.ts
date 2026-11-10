@@ -26,6 +26,7 @@ import {
   ACADEMY_COST_GROWTH,
   SABOTAGE_COST_SECONDS,
   SABOTAGE_MIN_COST,
+  RESEARCH_QUEUE_MAX,
   SABOTAGE_LEVEL_SHARE,
   SABOTAGE_BASE_SUCCESS,
   SABOTAGE_PER_TOWER,
@@ -99,7 +100,8 @@ export interface PlayerState {
   stationed: Record<string, Partial<Record<UnitId, number>>>;
   /** Améliorations militaires : niveau de chaque type, recherche en cours, académie. */
   levels: Levels;
-  research: { id: CombatantId; endsAt: number } | null;
+  /** File de recherches (3 au plus), dans l'ordre ; chacune a son heure de fin. */
+  research: { id: CombatantId; endsAt: number }[];
   academy: number;
   /** Protégé des sabotages jusqu'à cet horodatage. */
   sabotageImmuneUntil: number;
@@ -143,7 +145,7 @@ export function newPlayerState(now: number): PlayerState {
     clickPausedUntil: 0,
     stationed: {},
     levels: {},
-    research: null,
+    research: [],
     academy: 0,
     sabotageImmuneUntil: 0,
   };
@@ -728,32 +730,46 @@ export function levelOf(state: PlayerState, id: CombatantId): number {
   return state.levels?.[id] ?? 0;
 }
 
-/** Termine la recherche en cours si son heure est passée. */
+/** Termine les recherches de la file dont l'heure est passée. */
 export function settleResearch(state: PlayerState, now: number): PlayerState {
-  const r = state.research;
-  if (!r || r.endsAt > now) return state;
-  return { ...state, research: null, levels: { ...state.levels, [r.id]: levelOf(state, r.id) + 1 } };
+  const queue = state.research ?? [];
+  if (queue.length === 0 || queue[0].endsAt > now) return state;
+  const levels = { ...state.levels };
+  const rest: PlayerState["research"] = [];
+  for (const r of queue) {
+    if (r.endsAt <= now && rest.length === 0) levels[r.id] = (levels[r.id] ?? 0) + 1;
+    else rest.push(r);
+  }
+  return { ...state, research: rest, levels };
+}
+
+/** Niveau qu'aura ce type une fois la file terminée (c'est ce niveau-là qu'une nouvelle recherche améliore). */
+export function queuedLevel(state: PlayerState, id: CombatantId): number {
+  return levelOf(state, id) + (state.research ?? []).filter((r) => r.id === id).length;
 }
 
 export function researchCost(state: PlayerState, id: CombatantId): number {
   const def = COMBATANTS.get(id);
-  return Math.ceil((def?.cost ?? 0) * RESEARCH_COST_FACTOR * RESEARCH_COST_GROWTH ** levelOf(state, id));
+  return Math.ceil((def?.cost ?? 0) * RESEARCH_COST_FACTOR * RESEARCH_COST_GROWTH ** queuedLevel(state, id));
 }
 
 export function researchTime(state: PlayerState, id: CombatantId): number {
-  return Math.ceil((RESEARCH_BASE_MS * RESEARCH_TIME_GROWTH ** levelOf(state, id)) / (1 + ACADEMY_SPEED * (state.academy ?? 0)));
+  return Math.ceil((RESEARCH_BASE_MS * RESEARCH_TIME_GROWTH ** queuedLevel(state, id)) / (1 + ACADEMY_SPEED * (state.academy ?? 0)));
 }
 
 /** Types qu'on peut améliorer : troupes et fortifications (pas les gardes). */
 export const RESEARCHABLE: readonly CombatantId[] = [...UNIT_IDS, ...DEFENSE_IDS];
 
+/** Ajoute une recherche en bout de file : elle commence quand la précédente se termine. */
 export function startResearch(state: PlayerState, id: string, now: number): Result<PlayerState> {
   if (!RESEARCHABLE.includes(id as CombatantId)) return { ok: false, error: "Amélioration inconnue." };
   const s = settleResearch(state, now);
-  if (s.research) return { ok: false, error: "Une recherche est déjà en cours." };
+  const queue = s.research ?? [];
+  if (queue.length >= RESEARCH_QUEUE_MAX) return { ok: false, error: `La file de recherche est pleine (${RESEARCH_QUEUE_MAX} au plus).` };
   const cost = researchCost(s, id as CombatantId);
   if (cost > s.stone) return { ok: false, error: "Pas assez de pierre." };
-  return { ok: true, value: { ...s, stone: s.stone - cost, research: { id: id as CombatantId, endsAt: now + researchTime(s, id as CombatantId) } } };
+  const start = Math.max(now, queue[queue.length - 1]?.endsAt ?? now);
+  return { ok: true, value: { ...s, stone: s.stone - cost, research: [...queue, { id: id as CombatantId, endsAt: start + researchTime(s, id as CombatantId) }] } };
 }
 
 export function academyCost(state: PlayerState): number {
@@ -783,17 +799,19 @@ export function sabotageChance(defense: Army): number {
 /** Pourquoi on ne peut pas saboter cette cible, ou null. */
 export function sabotageBlocker(target: PlayerState, now: number): string | null {
   if (target.sabotageImmuneUntil > now) return "Sa garde est sur le qui-vive après un sabotage récent.";
-  if ((target.academy ?? 0) === 0 && !target.research) return "Rien à saboter : pas d'académie ni de recherche en cours.";
+  if ((target.academy ?? 0) === 0 && (target.research ?? []).length === 0) return "Rien à saboter : pas d'académie ni de recherche en cours.";
   return null;
 }
 
 /** Effet d'un sabotage réussi sur la cible. */
 export function applySabotage(target: PlayerState, now: number): PlayerState {
-  const r = target.research;
+  // La recherche en cours prend du retard, et toute la file avec elle.
+  const queue = target.research ?? [];
+  const delay = queue[0] && queue[0].endsAt > now ? Math.ceil((queue[0].endsAt - now) * SABOTAGE_DELAY) : 0;
   return {
     ...target,
     academy: Math.max(0, (target.academy ?? 0) - 1),
-    research: r && r.endsAt > now ? { ...r, endsAt: r.endsAt + Math.ceil((r.endsAt - now) * SABOTAGE_DELAY) } : r,
+    research: queue.map((r) => ({ ...r, endsAt: r.endsAt + delay })),
     sabotageImmuneUntil: now + SABOTAGE_IMMUNITY_MS,
   };
 }

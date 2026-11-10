@@ -13,12 +13,25 @@ describe("améliorations militaires", () => {
     expect(r.ok).toBe(true);
     if (!r.ok) return;
     expect(r.value.stone).toBe(1e9 - cost);
-    expect(startResearch(r.value, "milicien", 1).ok).toBe(false);
     expect(advance(r.value, time - 1, world).levels.piquier ?? 0).toBe(0);
     const done = advance(r.value, time, world);
     expect(done.levels.piquier).toBe(1);
-    expect(done.research).toBeNull();
+    expect(done.research).toEqual([]);
     expect(researchTime(done, "piquier")).toBeGreaterThan(time);
+  });
+
+  it("la file accepte 3 recherches qui s'enchaînent, pas une de plus", () => {
+    let s = { ...newPlayerState(0), stone: 1e12 };
+    for (const id of ["piquier", "piquier", "milicien"]) {
+      const r = startResearch(s, id, 0);
+      expect(r.ok).toBe(true);
+      if (r.ok) s = r.value;
+    }
+    expect(startResearch(s, "chevalier", 0).ok).toBe(false);
+    expect(s.research[1].endsAt).toBeGreaterThan(s.research[0].endsAt);
+    const end = advance(s, s.research[2].endsAt, world);
+    expect(end.levels).toMatchObject({ piquier: 2, milicien: 1 });
+    expect(end.research).toEqual([]);
   });
 
   it("l'académie raccourcit les recherches et coûte de plus en plus cher", () => {
@@ -32,10 +45,10 @@ describe("améliorations militaires", () => {
   });
 
   it("un sabotage abat un niveau d'académie, retarde la recherche et protège la cible", () => {
-    const s = { ...newPlayerState(0), academy: 2, research: { id: "piquier" as const, endsAt: 1000 } };
+    const s = { ...newPlayerState(0), academy: 2, research: [{ id: "piquier" as const, endsAt: 1000 }, { id: "milicien" as const, endsAt: 1500 }] };
     const hit = applySabotage(s, 0);
     expect(hit.academy).toBe(1);
-    expect(hit.research!.endsAt).toBe(1200);
+    expect(hit.research.map((r) => r.endsAt)).toEqual([1200, 1700]);
     expect(sabotageBlocker(hit, 10)).not.toBeNull();
     expect(sabotageBlocker(newPlayerState(0), 0)).not.toBeNull();
   });
