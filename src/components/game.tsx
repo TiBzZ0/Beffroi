@@ -196,7 +196,6 @@ function Hero({ snap, rate, clickGain, game }: { snap: GameSnapshot; rate: numbe
             <span ref={counter}>{formatNumber(Math.floor(snap.state.stone))}</span>
           </div>
           <div className="stone-label">pierres taillées</div>
-          <ResearchLine state={snap.state} now={game.serverNow()} />
           <div className="rate num">{formatRate(rate)} / seconde</div>
           {(snap.state.catchUp ?? 0) > 0 && (
             <div className="catch-up" title="Bonus accordé tant que tu es loin derrière le premier joueur. Il diminue à mesure que tu le rattrapes.">
@@ -229,6 +228,7 @@ function Hero({ snap, rate, clickGain, game }: { snap: GameSnapshot; rate: numbe
           <span>{finished ? `${STAGES.length}/${STAGES.length}` : `étape ${w.stage + 1}/${STAGES.length}`}</span>
         </div>
       </div>
+      <ResearchLine state={snap.state} now={game.serverNow()} />
     </section>
   );
 }
@@ -512,7 +512,9 @@ function ResearchLine({ state, now }: { state: PlayerState; now: number }) {
   const queue = (state.research ?? []).filter((r) => r.endsAt > now);
   if (queue.length === 0) return null;
   return (
-    <ul className="research-line num">
+    <div className="research-line">
+      <h3>Améliorations en cours</h3>
+      <ul className="num">
       {queue.map((r, i) => {
         const def = COMBATANTS.get(r.id);
         const level = levelOf(state, r.id) + (state.research ?? []).filter((q) => q.endsAt <= now && q.id === r.id).length + queue.slice(0, i + 1).filter((q) => q.id === r.id).length;
@@ -522,7 +524,8 @@ function ResearchLine({ state, now }: { state: PlayerState; now: number }) {
           </li>
         );
       })}
-    </ul>
+      </ul>
+    </div>
   );
 }
 

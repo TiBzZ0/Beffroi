@@ -877,9 +877,18 @@ a {
 }
 
 .research-line {
+  margin-top: 12px;
+}
+.research-line h3 {
+  margin: 0 0 4px;
+  font-size: 0.95rem;
+}
+.research-line ul {
   list-style: none;
-  margin: 4px 0 0;
+  margin: 0;
   padding: 0;
   font-size: 0.85rem;
   color: var(--ink-soft);
+  display: grid;
+  gap: 2px;
 }
