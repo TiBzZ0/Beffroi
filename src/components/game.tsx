@@ -5,7 +5,6 @@ import { signOut } from "@/app/(auth)/actions";
 import {
   CATEGORY_LABELS,
   MAX_ALLIANCE_SIZE,
-  MAX_ARMY_BATCH,
   DIFFICULTY_LABELS,
   COMBATANTS,
   DEFENSES,
@@ -1014,7 +1013,7 @@ function Garrison({ live, run }: { live: PlayerState; run: ReturnType<typeof use
   const pickCustom = (text: string) => {
     setCustom(text);
     const n = Math.floor(Number(text));
-    if (Number.isFinite(n) && n >= 1) setQty(Math.min(n, MAX_ARMY_BATCH));
+    if (Number.isSafeInteger(n) && n >= 1) setQty(n);
   };
   const buy = async (kind: "unit" | "defense", id: string) => {
     setBusy(true);
@@ -1073,7 +1072,6 @@ function Garrison({ live, run }: { live: PlayerState; run: ReturnType<typeof use
           type="number"
           inputMode="numeric"
           min={1}
-          max={MAX_ARMY_BATCH}
           placeholder="×…"
           value={custom}
           onChange={(e) => pickCustom(e.target.value)}

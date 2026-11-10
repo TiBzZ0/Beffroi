@@ -12,7 +12,6 @@ import {
   SUSPICIOUS_CLICK_RATE,
   COST_GROWTH,
   GENERATORS,
-  MAX_ARMY_BATCH,
   MAX_CLICKS_PER_SECOND,
   OFFLINE_CAP_MS,
   PROTECTED_PER_TYPE,
@@ -461,7 +460,7 @@ export function armyWorth(state: PlayerState): number {
 export function buyArmy(state: PlayerState, kind: "unit" | "defense", id: string, qty: number): Result<PlayerState> {
   const def = kind === "unit" ? UNITS.find((u) => u.id === id) : DEFENSES.find((d) => d.id === id);
   if (!def) return { ok: false, error: kind === "unit" ? "Troupe inconnue." : "Fortification inconnue." };
-  if (!Number.isInteger(qty) || qty < 1 || qty > MAX_ARMY_BATCH) return { ok: false, error: "Quantité invalide." };
+  if (!Number.isSafeInteger(qty) || qty < 1) return { ok: false, error: "Quantité invalide." };
   const cost = def.cost * qty;
   if (cost > state.stone) return { ok: false, error: "Pas assez de pierre." };
   const key = kind === "unit" ? "troops" : "defenses";
