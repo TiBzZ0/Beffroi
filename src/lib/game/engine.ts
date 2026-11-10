@@ -34,6 +34,8 @@ import {
   WOUNDED_WINNER,
   WOUNDED_ATTACKER_BEATEN,
   WOUNDED_DEFENDER_BEATEN,
+  RANSOM_SHARE,
+  FAIRNESS_SLOPE,
   RUIN_IMMUNITY_MS,
   RESEARCH_QUEUE_MAX,
   SABOTAGE_LEVEL_SHARE,
@@ -791,10 +793,22 @@ export function buyArmy(state: PlayerState, kind: "unit" | "defense", id: string
  * Chez un joueur, les 2 dernières heures de production sont à l'abri, mais jamais plus de la moitié du stock.
  * Un seigneur n'a pas de stock à l'abri. Entre joueurs, le butin est plafonné à 2 h de production de l'attaquant.
  */
-export function lootOf(stone: number, rate: number, revenge: boolean, opts: { lord?: boolean; cap?: number } = {}): number {
+export function lootOf(stone: number, rate: number, revenge: boolean, opts: { lord?: boolean; cap?: number; factor?: number } = {}): number {
   const secured = opts.lord ? 0 : Math.min(rate * SECURED_SECONDS, stone * (1 - MIN_EXPOSED_SHARE));
-  const loot = Math.floor(Math.max(0, stone - secured) * (revenge ? REVENGE_LOOT_RATE : RAID_LOOT_RATE));
+  const loot = Math.floor(Math.max(0, stone - secured) * (revenge ? REVENGE_LOOT_RATE : RAID_LOOT_RATE) * (opts.factor ?? 1));
   return opts.cap !== undefined ? Math.min(loot, Math.floor(opts.cap)) : loot;
+}
+
+/** E3 : coefficient d'équité entre joueurs, min(1, 2 × taille relative) ; 1 en revanche. */
+export function fairness(relative: number | undefined, revenge: boolean): number {
+  if (revenge || relative === undefined || !Number.isFinite(relative)) return 1;
+  return Math.max(0, Math.min(1, FAIRNESS_SLOPE * relative));
+}
+
+/** E2 : rançon d'une victoire contre un joueur, d'après les défenseurs abattus (gardes exclus). */
+export function ransomOf(felled: Army, factor: number): number {
+  const counted = Object.fromEntries(Object.entries(felled).filter(([id]) => id !== "garde")) as Army;
+  return Math.floor(armyValue(counted) * RANSOM_SHARE * factor);
 }
 
 /**
@@ -849,6 +863,9 @@ export interface RaidReport {
   /** Blessés qui reviendront dans 30 minutes, de chaque côté (troupes propres seulement). */
   attackerWounded: Army;
   defenderWounded: Army;
+  /** Rançon versée par le jeu (E2) et coefficient d'équité appliqué (E3). */
+  ransom: number;
+  fairness: number;
   revenge: boolean;
 }
 
@@ -948,15 +965,21 @@ export function resolveRaid(
     defenderLost: ctx.defenderArmy ? fight.defenderLost : defenderLost,
     attackerWounded,
     defenderWounded,
+    ransom: 0,
+    fairness: 1,
     revenge,
   };
   if (!fight.success) return { ok: true, value: { attacker: attackerAfter, victim: victimArmyAfter, report: base } };
 
   const playerVsPlayer = !ctx.attackerIsLord && !ctx.defenderArmy;
+  const factor = playerVsPlayer ? fairness(ctx.relativeSize, revenge) : 1;
   const stolen = lootOf(victim.stone, ctx.victimRate, revenge, {
     lord: !!ctx.defenderArmy,
     cap: playerVsPlayer && ctx.attackerRate !== undefined ? ctx.attackerRate * PVP_LOOT_CAP_SECONDS : undefined,
+    factor,
   });
+  // Rançon : pierre créée par le jeu (pas prise à la victime), sur les défenseurs abattus avant soins et réparations.
+  const ransom = playerVsPlayer ? ransomOf(fight.defenderLost, factor) : 0;
   const allyShares = ctx.attackerArmy ? {} : lootShares(attacker, stolen);
   const allyTotal = Object.values(allyShares).reduce((a, b) => a + b, 0);
 
@@ -981,7 +1004,7 @@ export function resolveRaid(
   return {
     ok: true,
     value: {
-      attacker: { ...attackerAfter, stone: attacker.stone + stolen - allyTotal, totalPlundered: attacker.totalPlundered + stolen - allyTotal },
+      attacker: { ...attackerAfter, stone: attacker.stone + stolen - allyTotal + ransom, totalPlundered: attacker.totalPlundered + stolen - allyTotal },
       victim: {
         ...victimArmyAfter,
         stone: victim.stone - stolen,
@@ -993,7 +1016,7 @@ export function resolveRaid(
         revengeTarget: ctx.attackerId,
         revengeUntil: now + REVENGE_MS,
       },
-      report: { ...base, stolen, allyShares, destroyed },
+      report: { ...base, stolen, allyShares, destroyed, ransom, fairness: factor },
     },
   };
 }

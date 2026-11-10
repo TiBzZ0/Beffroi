@@ -1063,7 +1063,14 @@ function RivalRow({
           {intel ? `🕵️ ${armyIcons(r.army)} (rapport encore ${duration(r.intelUntil - now)})` : `≈ ${armyIcons(r.army)}`}
         </div>
         <div className="row-desc">
-          {r.blocker ?? (loot > 0 ? `Butin estimé : ${formatNumber(loot)} pierres` : "Rien à piller pour l'instant.")}
+          {r.blocker ??
+            [
+              loot > 0 ? `Butin estimé : ${formatNumber(loot)} pierres` : "Rien à piller pour l'instant",
+              (r.ransom ?? 0) > 0 ? `rançon ≈ ${formatNumber(r.ransom ?? 0)}` : null,
+              (r.fairness ?? 1) < 1 ? `équité ×${(r.fairness ?? 1).toLocaleString("fr-FR", { maximumFractionDigits: 2 })} (cible plus petite)` : null,
+            ]
+              .filter(Boolean)
+              .join(" · ")}
         </div>
       </div>
       <div className="row-actions">

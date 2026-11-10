@@ -523,6 +523,10 @@ export const MIN_TARGET_SIZE = 0.1;
  * E1 : infirmerie. Une part des troupes perdues revient 30 minutes après la bataille :
  * 60 % pour le vainqueur, 30 % pour l'attaquant battu, 50 % pour le défenseur battu (remplace A7).
  */
+/** E2 : rançon versée par le jeu au vainqueur d'un raid contre un joueur : 30 % de la valeur des défenseurs abattus. */
+export const RANSOM_SHARE = 0.3;
+/** E3 : équité, coefficient min(1, 2 × taille relative) sur le butin et la rançon (1 en revanche). */
+export const FAIRNESS_SLOPE = 2;
 export const INFIRMARY_MS = 30 * 60_000;
 export const WOUNDED_WINNER = 0.6;
 export const WOUNDED_ATTACKER_BEATEN = 0.3;

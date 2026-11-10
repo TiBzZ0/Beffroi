@@ -32,6 +32,9 @@ export interface RivalView {
   rate: number;
   /** Pierre qu'un raid rapporterait maintenant (estimation). */
   loot: number;
+  /** Joueurs : rançon attendue en cas de victoire (E2), et coefficient d'équité (E3, 1 = plein). */
+  ransom?: number;
+  fairness?: number;
   /** Son alliance est en guerre contre la mienne. */
   atWar: boolean;
   /** Membre de mon alliance : on ne peut pas le piller, on peut lui envoyer des renforts. */
@@ -86,6 +89,7 @@ export interface ChronicleEntry {
     success?: boolean;
     chance?: number;
     stolen?: number;
+    ransom?: number;
     destroyed?: Record<string, number>;
     rounds?: number;
     allyShares?: Record<string, number>;

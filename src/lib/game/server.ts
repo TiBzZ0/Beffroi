@@ -103,6 +103,8 @@ import {
   claimQuest,
   addWounded,
   woundedOf,
+  fairness,
+  ransomOf,
   flagQuest,
   catchVein,
   stagesDoneAt,
@@ -1277,8 +1279,13 @@ function rivalsFor(
       const fight = raidArmies(myState, s, ctx);
       const intelUntil = intel.get(e.id) ?? 0;
       const seen = intelUntil > now || allied ? fight.defense : fuzzyArmy(fight.defense);
-      const loot = lootOf(s.stone, rate, revenge, { lord: e.isLord, cap: e.isLord ? undefined : myRate * PVP_LOOT_CAP_SECONDS });
+      const fair = e.isLord ? 1 : fairness(ctx.relativeSize, revenge);
+      const loot = lootOf(s.stone, rate, revenge, { lord: e.isLord, cap: e.isLord ? undefined : myRate * PVP_LOOT_CAP_SECONDS, factor: fair });
+      // Rançon attendue en cas de victoire : la défense qu'on voit, abattue.
+      const ransom = e.isLord ? 0 : ransomOf(seen as Army, fair);
       return {
+        ransom,
+        fairness: fair,
         id: e.id,
         name: e.name,
         isLord: e.isLord,
@@ -1361,7 +1368,7 @@ async function awaySummary(admin: SupabaseClient, seasonId: number, me: Entity, 
 }
 
 function chronicleDetails(r: RaidReport, chance: number) {
-  return { success: r.success, chance, rounds: r.rounds, stolen: r.stolen, allyShares: r.allyShares, destroyed: r.destroyed, attackerLost: r.attackerLost, defenderLost: r.defenderLost, revenge: r.revenge };
+  return { success: r.success, chance, rounds: r.rounds, stolen: r.stolen, ransom: r.ransom, allyShares: r.allyShares, destroyed: r.destroyed, attackerLost: r.attackerLost, defenderLost: r.defenderLost, revenge: r.revenge };
 }
 
 /** « 3 miliciens, 1 chevalier » */
@@ -1639,7 +1646,7 @@ export async function runAction(admin: SupabaseClient, userId: string, action: G
             .map(([id, n]) => `${Math.floor(n).toLocaleString("fr-FR")} pour ${entities.get(id)?.name ?? "un allié"}`)
             .join(", ");
           message = rep.success
-            ? `Raid réussi contre ${victim.name} : ${Math.floor(rep.stolen).toLocaleString("fr-FR")} pierres pillées${shared ? ` (dont ${shared})` : ""}${lost ? `, ${lost} bâtiment${lost > 1 ? "s" : ""} en ruine` : ""}. Tes pertes : ${fallen}.`
+            ? `Raid réussi contre ${victim.name} : ${Math.floor(rep.stolen).toLocaleString("fr-FR")} pierres pillées${shared ? ` (dont ${shared})` : ""}${rep.ransom > 0 ? `, ${Math.floor(rep.ransom).toLocaleString("fr-FR")} de rançon` : ""}${lost ? `, ${lost} bâtiment${lost > 1 ? "s" : ""} en ruine` : ""}. Tes pertes : ${fallen}.`
             : `${victim.name} a repoussé ton raid en ${rep.rounds} round${rep.rounds > 1 ? "s" : ""}. Tes pertes : ${fallen}.`;
           entities = await loadEntities(admin, season.id, userId);
         }

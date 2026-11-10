@@ -78,4 +78,12 @@ export const CHANGELOG: ChangeEntry[] = [
       "🩹 Infirmerie : après chaque bataille (raid ou forteresse), une part de tes troupes tombées revient 30 minutes plus tard : 60 % si tu as gagné, 30 % si ton attaque a échoué, 50 % si tu as été battu en défense. Cela remplace le retour immédiat de la moitié des troupes. Les blessés ne se battent pas, les fortifications gardent leur réparation à 70 %.",
     ],
   },
+  {
+    id: 10,
+    date: "10 novembre",
+    items: [
+      "💰 Rançon : quand tu gagnes un raid contre un joueur, le jeu te verse 30 % de la valeur des défenseurs que tu as abattus (troupes et fortifications). Cette pierre n'est pas prise à la victime. Rien contre les seigneurs, la caravane ou le colosse.",
+      "⚖️ Équité : contre un joueur plus petit que la moitié de ta taille, le butin et la rançon baissent (coefficient égal à 2 fois sa taille relative). Pas de baisse en revanche, mais elle s'applique en guerre. La fiche de la cible affiche le butin, la rançon et le coefficient.",
+    ],
+  },
 ];

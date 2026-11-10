@@ -3,6 +3,7 @@ import { BURN_MS, GUARDS_PER_DOMAIN, INFIRMARY_MS, LORD_SHIELD_MS, RAID_COOLDOWN
 import { armyFromBudget, battle, estimateChance, seededRng } from "./battle";
 import {
   settleWounded,
+  fairness,
   advance,
   applyClicks,
   armyWorth,
@@ -69,6 +70,18 @@ describe("raids", () => {
   it("entre joueurs, le butin est plafonné à 2 h de production de l'attaquant", () => {
     const r = resolveRaid(player(), player({ troops: {}, stone: 1e9 }), ctx({ attackerRate: 1 }));
     expect(r.ok && r.value.report.stolen).toBe(7_200);
+  });
+
+  it("rançon : 30 % des défenseurs abattus, créée par le jeu, réduite contre une cible plus petite", () => {
+    const victim = player({ troops: { milicien: 4 }, stone: 0 });
+    const full = resolveRaid(player(), victim, ctx({ relativeSize: 1 }));
+    if (!full.ok) throw new Error(full.error);
+    expect(full.value.report.ransom).toBe(Math.floor(4 * 200 * 0.3));
+    expect(full.value.attacker.stone).toBe(player().stone + full.value.report.ransom);
+    const small = resolveRaid(player(), victim, ctx({ relativeSize: 0.25 }));
+    expect(small.ok && small.value.report.fairness).toBe(0.5);
+    expect(small.ok && small.value.report.ransom).toBe(Math.floor(4 * 200 * 0.3 * 0.5));
+    expect(fairness(0.25, true)).toBe(1);
   });
 
   it("une cible trop petite ne peut pas être attaquée, sauf en revanche ou en guerre", () => {
