@@ -263,6 +263,9 @@ export interface EventView {
   /** V15 : prix d'un achat au marchand, et si j'ai déjà acheté à ce passage. */
   merchantPrice?: number;
   merchantBought?: boolean;
+  /** T6 : position sur la carte (colosse fixe, caravane qui avance de `path.from` à `path.to`). */
+  pos?: [number, number];
+  path?: { from: [number, number]; to: [number, number] };
   /** Actif : fin de l'événement. Sinon : arrivée du prochain. */
   active: boolean;
   startsAt: number;

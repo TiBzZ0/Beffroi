@@ -233,8 +233,8 @@ export function buyFromMerchant(state: PlayerState, choice: string, eventId: num
 
 export interface March {
   id: string;
-  /** Raid, ou renforts envoyés à un allié (T6). */
-  kind: "raid" | "reinforce";
+  /** Raid, renforts envoyés à un allié, assaut ou garnison de la forteresse (T6). */
+  kind: "raid" | "reinforce" | "fortress" | "station" | "event";
   target: string;
   troops: Army;
   departAt: number;

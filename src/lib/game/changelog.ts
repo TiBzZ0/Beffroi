@@ -234,4 +234,12 @@ export const CHANGELOG: ChangeEntry[] = [
       "⚖️ Pour savoir si une cible est trop petite et calculer l'équité, c'est toute ton armée qui compte (domaine, routes, renforts chez tes alliés), pas seulement le détachement envoyé.",
     ],
   },
+  {
+    id: 29,
+    date: "10 novembre",
+    items: [
+      "🏰 L'assaut et la garnison de Pierre-Haute voyagent jusqu'à sa case. Les 30 minutes sans assaut après une prise se vérifient à l'arrivée de l'armée.",
+      "🐪 La caravane traverse la carte d'un bord à l'autre en une heure, et 🗿 le colosse apparaît sur une case loin des joueurs. Pour les attaquer, ton armée marche jusqu'à eux ; la prime rentre avec elle.",
+    ],
+  },
 ];

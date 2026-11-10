@@ -24,3 +24,23 @@ describe("carte du royaume (T1)", () => {
     }
   });
 });
+
+describe("événements sur la carte (T6)", () => {
+  it("la caravane va d'un bord à l'autre", async () => {
+    const { caravanPath, caravanPos } = await import("./map");
+    for (let seed = 1; seed < 50; seed++) {
+      const { from, to } = caravanPath(seed);
+      const onEdge = (p: readonly number[]) => p.some((c) => c === 1 || c === MAP_SIZE);
+      expect(onEdge(from) && onEdge(to)).toBe(true);
+      expect(caravanPos(seed, 0, 100, 50)).toEqual([(from[0] + to[0]) / 2, (from[1] + to[1]) / 2]);
+    }
+  });
+  it("le colosse se pose à 4 cases au moins de tout joueur", async () => {
+    const { colossusPos } = await import("./map");
+    const players: MapPos[] = [[8, 6], [6, 9], [10, 10], [9, 12]];
+    for (let seed = 1; seed < 30; seed++) {
+      const p = colossusPos(seed, players);
+      for (const q of players) expect(mapDistance(p, q)).toBeGreaterThanOrEqual(4);
+    }
+  });
+});

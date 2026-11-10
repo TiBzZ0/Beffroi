@@ -87,7 +87,7 @@ import {
   mapDistance,
   type MapPos,
 } from "./config";
-import { fixedPlaces, pickSpawn } from "./map";
+import { caravanPath, caravanPos, colossusPos, fixedPlaces, pickSpawn } from "./map";
 import { pickNextEvent } from "./events";
 import {
   advance,
@@ -1068,15 +1068,23 @@ function fortressLevels(f: FortressRow, entities: Map<string, Entity>): Levels {
   return out;
 }
 
-function fortressBlocker(me: Entity, state: PlayerState, f: FortressRow, now: number): string | null {
+function fortressBlocker(me: Entity, state: PlayerState, f: FortressRow, now: number, army?: Army): string | null {
   if (me.allianceId === null) return "Rejoins une alliance pour assiéger la forteresse.";
   if (f.holder === me.allianceId) return "Ton alliance tient déjà la forteresse.";
   if (inCurfew(state, now)) return "Tu es en couvre-feu : pas d'attaque pendant ta plage.";
   // A13 : 30 minutes sans assaut après une prise, le temps de poster une garnison.
   if (f.holder !== null && now < f.capturedAt + FORTRESS_TRUCE_MS) return `La forteresse vient de changer de mains : pas d'assaut avant ${new Date(f.capturedAt + FORTRESS_TRUCE_MS).toLocaleTimeString("fr-FR", { hour: "2-digit", minute: "2-digit", timeZone: "Europe/Paris" })}.`;
-  if (now - state.lastRaidAt < RAID_COOLDOWN_MS) return "Tes troupes se reposent encore.";
-  if (armySize(attackArmy(state)) === 0) return "Il te faut des troupes pour l'assaut.";
+  if (!army && now - state.lastRaidAt < RAID_COOLDOWN_MS) return "Tes troupes se reposent encore.";
+  if (armySize(army ?? attackArmy(state)) === 0) return "Il te faut des troupes pour l'assaut.";
   return null;
+}
+
+/** Écrit l'état d'un joueur et la forteresse ensemble (version de la forteresse vérifiée). */
+async function applyFortress(admin: SupabaseClient, seasonId: number, f: FortressRow, e: Entity, state: PlayerState, holder: number | null, garrison: PlayerState["stationed"], captured: boolean, act: string, details: Record<string, unknown>): Promise<"ok" | "conflict"> {
+  const { data, error } = await admin.rpc("apply_fortress", { p_season: seasonId, p_state: toJson(e, state), p_version: f.version, p_holder: holder, p_garrison: garrison, p_captured: captured, p_action: act, p_details: details });
+  if (error?.message.includes("beffroi_conflict") || (data as { conflict?: boolean } | null)?.conflict) return "conflict";
+  if (error) throw new Error(`Forteresse : ${error.message}`);
+  return "ok";
 }
 
 /** Une garnison vue comme un domaine qui n'aurait que des renforts (pour réutiliser les règles des renforts). */
@@ -1133,45 +1141,40 @@ async function runConflictAction(
       return { message: `⚔️ Guerre déclarée à ${allianceNames.get(target)} : elle commence dans 2 h et dure 24 h. Pas de bouclier entre vous.` };
     }
     case "fortress_attack": {
-      const blocked = fortressBlocker(me, current, f, now);
-      if (blocked) return { error: blocked };
-      const defense = fortressDefense(f, entities, now);
-      const levels = { attackerLevels: current.levels, defenderLevels: fortressLevels(f, entities) };
-      const chance = estimateChance(attackArmy(current), defense, levels);
-      const fight = battle(attackArmy(current), defense, Math.random, levels);
-      const mine = splitTroopLosses(current, fight.attackerLost);
-      const theirs = splitTroopLosses(garrisonHost(f, now), fight.defenderLost);
-      // Infirmerie : une part de ses propres troupes tombées revient dans 30 minutes.
-      const healed = addWounded(current, woundedOf(mine.byOwner[""] ?? {}, fight.success ? WOUNDED_WINNER : WOUNDED_ATTACKER_BEATEN), now);
-      const after: PlayerState = { ...healed, troops: mine.troops, stationed: mine.stationed, lastRaidAt: now, shieldUntil: 0 };
-      const details = { success: fight.success, chance, rounds: fight.rounds, alliance: me.allianceId, attackerLost: fight.attackerLost, defenderLost: fight.defenderLost, log: fight.log };
-      const r = await writeFortress(after, fight.success ? me.allianceId : f.holder, fight.success ? {} : theirs.stationed, fight.success, "fortress_attack", details);
-      if (r === "conflict") return "conflict";
-      if (f.holder !== null) {
-        const defenders = [...entities.values()].filter((e) => !e.isLord && e.allianceId === f.holder).map((e) => e.id);
-        notify(admin, defenders, fight.success
-          ? { title: "🏰 La forteresse est tombée !", body: `${me.name} l'a prise pour ${allianceNames.get(me.allianceId!) ?? "son alliance"}.`, tag: "fortress" }
-          : { title: "🏰 La forteresse a tenu", body: `${me.name} s'est brisé sur vos murs.`, tag: "fortress" });
-      }
-      return {
-        state: after,
-        message: fight.success
-          ? `🏰 La ${FORTRESS_NAME} est à ${allianceNames.get(me.allianceId!) ?? "ton alliance"} ! +20 % de production pour toute l'alliance. Envoie vite une garnison.`
-          : `La ${FORTRESS_NAME} a tenu bon. Tes pertes : ${describeArmy(fight.attackerLost)}.`,
-      };
+      // T6 : l'assaut voyage jusqu'à la case de la forteresse ; les 30 minutes sans assaut se vérifient à l'arrivée.
+      const wanted = ((action as { troops?: Record<string, number> }).troops ?? current.troops) as Army;
+      const sending = sendTroops(current, wanted);
+      if (!sending.ok) return { error: sending.error };
+      const early = fortressBlocker(me, current, f, now, sending.value.sent);
+      if (early && !early.startsWith("La forteresse vient de changer")) return { error: early };
+      const outMs = await travelToFortress(admin, seasonId, entities, me.id, sending.value.sent);
+      const march: March = { id: marchId(), kind: "fortress", target: "fortress", troops: sending.value.sent, departAt: now, arriveAt: now + outMs, status: "out", returnAt: 0, revealed: true, warned: true, loot: 0, ransom: 0 };
+      const sent = { ...sending.value.state, marches: [...(current.marches ?? []), march], lastRaidAt: now, shieldUntil: 0 };
+      if ((await writeStates(admin, seasonId, [{ e: me, state: sent }], "fortress_march", { arriveAt: march.arriveAt })) === "conflict") return "conflict";
+      return { state: sent, message: `🏰 Ton armée marche sur la ${FORTRESS_NAME} : arrivée dans ${Math.round(outMs / 60_000)} min.` };
     }
     case "fortress_station": {
       if (me.allianceId === null || f.holder !== me.allianceId) return { error: "Seule l'alliance qui tient la forteresse peut y poster des troupes." };
-      const r = sendReinforcements(current, garrisonHost(f, now), me.id, String(action.unit), Number(action.qty));
-      if (!r.ok) return { error: r.error };
-      if ((await writeFortress(r.value.sender, f.holder, r.value.host.stationed, false, "fortress_station", { unit: action.unit, qty: action.qty })) === "conflict") return "conflict";
-      return { state: r.value.sender, message: "🏰 Troupes postées dans la forteresse." };
+      const sending = sendTroops(current, { [String(action.unit)]: Number(action.qty) } as Army);
+      if (!sending.ok) return { error: sending.error };
+      const outMs = await travelToFortress(admin, seasonId, entities, me.id, sending.value.sent);
+      const march: March = { id: marchId(), kind: "station", target: "fortress", troops: sending.value.sent, departAt: now, arriveAt: now + outMs, status: "out", returnAt: 0, revealed: true, warned: true, loot: 0, ransom: 0 };
+      const sent = { ...sending.value.state, marches: [...(current.marches ?? []), march] };
+      if ((await writeStates(admin, seasonId, [{ e: me, state: sent }], "fortress_station", { unit: action.unit, qty: action.qty })) === "conflict") return "conflict";
+      return { state: sent, message: `🏰 Garnison en route : arrivée dans ${Math.round(outMs / 60_000)} min.` };
     }
     case "fortress_recall": {
-      const r = recallReinforcements(current, garrisonHost(f, now), me.id);
-      if (!r.ok) return { error: r.error };
-      if ((await writeFortress(r.value.owner, f.holder, r.value.host.stationed, false, "fortress_recall", {})) === "conflict") return "conflict";
-      return { state: r.value.owner, message: "Tes troupes quittent la forteresse." };
+      const garrison = garrisonOf(f);
+      const group = garrison[me.id];
+      if (!group || Object.keys(group).length === 0) return { error: "Tu n'as pas de troupes là-bas." };
+      if ((current.marches ?? []).length >= MAX_MARCHES) return { error: `${MAX_MARCHES} armées en route au plus.` };
+      const outMs = await travelToFortress(admin, seasonId, entities, me.id, group as Army);
+      const march: March = { id: marchId(), kind: "station", target: "fortress", troops: { ...group } as Army, departAt: now - outMs, arriveAt: now, status: "back", returnAt: now + outMs, revealed: true, warned: true, loot: 0, ransom: 0, outcome: "recalled" };
+      const rest = { ...garrison };
+      delete rest[me.id];
+      const owner = { ...current, marches: [...(current.marches ?? []), march] };
+      if ((await writeFortress(owner, f.holder, rest, false, "fortress_recall", {})) === "conflict") return "conflict";
+      return { state: owner, message: `Tes troupes quittent la forteresse : retour dans ${Math.round(outMs / 60_000)} min.` };
     }
   }
 }
@@ -1352,19 +1355,22 @@ function killBonus(e: EventRow, entities: Map<string, Entity>, now: number, worl
 function eventBlocker(state: PlayerState, e: EventRow, meId: string, now: number): string | null {
   if (!COMBAT_EVENTS.includes(e.kind)) return "Cet événement ne se combat pas.";
   if (e.kind === "caravane" && meId in e.attackers) return "Tu as déjà attaqué cette caravane.";
-  if (now - state.lastRaidAt < RAID_COOLDOWN_MS) return "Tes troupes se reposent encore.";
+  if ((state.marches ?? []).some((m) => m.target === `event:${e.id}` && m.status === "out")) return "Une de tes armées y va déjà.";
+  void now;
   if (armySize(attackArmy(state)) === 0) return "Il te faut des troupes pour attaquer.";
   return null;
 }
 
-async function runEventAttack(admin: SupabaseClient, seasonId: number, me: Entity, current: PlayerState, ev: EventState, now: number, rate: number): Promise<"conflict" | { error?: string; state?: PlayerState; message?: string; settle?: number }> {
+async function runEventAttack(admin: SupabaseClient, seasonId: number, me: Entity, current: PlayerState, ev: EventState, now: number, rate: number, march?: March): Promise<"conflict" | { error?: string; state?: PlayerState; message?: string; settle?: number }> {
   const e = ev.active;
   if (!e) return { error: "Aucun événement en cours." };
-  const blocked = eventBlocker(current, e, me.id, now);
+  // T6 : une armée arrivée se bat avec ce qu'elle a emmené ; l'escorte de la caravane est taillée sur elle.
+  const fighter: PlayerState = march ? { ...current, troops: march.troops as PlayerState["troops"], stationed: {} } : current;
+  const blocked = march ? (e.kind === "caravane" && me.id in e.attackers ? "Tu as déjà attaqué cette caravane." : null) : eventBlocker(current, e, me.id, now);
   if (blocked) return { error: blocked };
-  const fight = battle(attackArmy(current), eventDefense(e, current), Math.random, { attackerLevels: current.levels, defenderLevels: ev.levels });
-  const mine = splitTroopLosses(current, fight.attackerLost);
-  let after: PlayerState = { ...current, troops: mine.troops, stationed: mine.stationed, lastRaidAt: now };
+  const fight = battle(attackArmy(fighter), eventDefense(e, fighter), Math.random, { attackerLevels: current.levels, defenderLevels: ev.levels });
+  const mine = splitTroopLosses(fighter, fight.attackerLost);
+  let after: PlayerState = march ? current : { ...current, troops: mine.troops, stationed: mine.stationed, lastRaidAt: now };
   const attackers = { ...e.attackers };
   let army = e.army;
   const pool = e.pool;
@@ -1391,6 +1397,12 @@ async function runEventAttack(admin: SupabaseClient, seasonId: number, me: Entit
           ? `🗿 Le Colosse est abattu ! La prime de ${Math.round(pool).toLocaleString("fr-FR")} pierres est partagée selon les pertes infligées.`
           : `🗿 Le Colosse est abattu ! +${Math.round(taken).toLocaleString("fr-FR")} pierres de prime, et chaque joueur qui l'a touché reçoit 15 minutes de sa production.`
         : `🗿 Tu as fauché ${describeArmy(fight.defenderLost) || "personne"}${taken > 0 ? ` : +${Math.round(taken).toLocaleString("fr-FR")} pierres de prime` : ""}. Tes pertes : ${describeArmy(fight.attackerLost)}.`;
+  }
+  if (march) {
+    // Les survivants et la prime rentrent par la route.
+    const back: March = { ...march, troops: cleanArmy(mine.troops as Army), status: "back", returnAt: now + (march.arriveAt - march.departAt), loot: taken, outcome: fight.success || e.kind === "colosse" ? "won" : "lost" };
+    const keep = armySize(back.troops) > 0 || taken > 0;
+    after = addWounded({ ...current, stone: current.stone, marches: (current.marches ?? []).flatMap((x) => (x.id === march.id ? (keep ? [back] : []) : [x])) }, woundedOf(fight.attackerLost, fight.success ? WOUNDED_WINNER : WOUNDED_ATTACKER_BEATEN), now);
   }
   const { data, error } = await admin.rpc("apply_event", {
     p_season: seasonId,
@@ -1423,7 +1435,15 @@ async function runEventAttack(admin: SupabaseClient, seasonId: number, me: Entit
   return { state: after, message, settle: finished ? e.id : undefined };
 }
 
-function eventView(meId: string, state: PlayerState, ev: EventState, now: number, rate: number): EventView | null {
+function eventView(meId: string, state: PlayerState, ev: EventState, now: number, rate: number, positions?: Map<string, MapPos>): EventView | null {
+  const view = eventViewInner(meId, state, ev, now, rate);
+  const e = ev.active;
+  if (!view || !e || !positions || !COMBAT_EVENTS.includes(e.kind)) return view;
+  const p = eventPosAt(e, positions, now);
+  return { ...view, pos: [p[0], p[1]], ...(e.kind === "caravane" ? { path: (({ from, to }) => ({ from: [from[0], from[1]] as [number, number], to: [to[0], to[1]] as [number, number] }))(caravanPath(e.id)) } : {}) };
+}
+
+function eventViewInner(meId: string, state: PlayerState, ev: EventState, now: number, rate: number): EventView | null {
   const e = ev.active;
   if (!e) {
     const info = EVENT_INFO[ev.nextKind];
@@ -1922,7 +1942,7 @@ export async function runAction(admin: SupabaseClient, userId: string, action: G
     let settled = 0;
     let marchConflict = false;
     while (settled < 8) {
-      const r = await settleMarches(admin, season.id, entities, world, flat, conflicts.wars, now);
+      const r = await settleMarches(admin, season.id, entities, world, flat, conflicts.wars, now, conflicts.fortress, allianceNames, events);
       if (r === "none") break;
       if (r === "conflict") {
         marchConflict = true;
@@ -1951,18 +1971,23 @@ export async function runAction(admin: SupabaseClient, userId: string, action: G
     if (ARMY_ACTIONS.has(action.type) && eventActive(current, "treve", now)) {
       error = "Trêve des cloches : aucune armée ne part.";
     } else if (action.type === "event_attack") {
-      const r = await runEventAttack(admin, season.id, me, current, events, now, currentRate(me, current, now, world, flat));
-      if (r === "conflict") continue;
-      if (r.error) error = r.error;
-      message = r.message;
-      if (r.state) finalState = r.state;
-      if (r.settle !== undefined) {
-        // Colosse abattu : 15 minutes de production pour chaque joueur qui l'a touché, puis on relit l'état qui fait foi.
-        const { data: killed } = await admin.from("events").select("*").eq("id", r.settle).maybeSingle();
-        await admin.rpc("settle_event_v2", { p_event: r.settle, p_bonus: killed ? killBonus(eventRow(killed), entities, now, world, flat) : {} });
+      // T6 : l'armée marche vers la caravane (sa position au départ) ou le colosse.
+      const e = events.active;
+      const blocked = !e ? "Aucun événement en cours." : !COMBAT_EVENTS.includes(e.kind) ? "Cet événement ne se combat pas." : e.kind === "caravane" && me.id in e.attackers ? "Tu as déjà attaqué cette caravane." : (current.marches ?? []).some((m) => m.target === `event:${e.id}` && m.status === "out") ? "Une de tes armées y va déjà." : null;
+      const sending = blocked ? null : sendTroops(current, ((action as { troops?: Record<string, number> }).troops ?? current.troops) as Army);
+      if (blocked) error = blocked;
+      else if (sending && !sending.ok) error = sending.error;
+      else if (sending && sending.ok && e) {
+        const positions = await loadPositions(admin, season.id, entities);
+        const from = positions.get(me.id);
+        const outMs = travelMs(sending.value.sent, from ? mapDistance(from, eventPosAt(e, positions, now)) : MAP_SPAWN_RADIUS);
+        const march: March = { id: marchId(), kind: "event", target: `event:${e.id}`, troops: sending.value.sent, departAt: now, arriveAt: now + outMs, status: "out", returnAt: 0, revealed: true, warned: true, loot: 0, ransom: 0 };
+        finalState = { ...sending.value.state, marches: [...(current.marches ?? []), march], lastRaidAt: now };
+        const { data, error: rpcError } = await admin.rpc("commit_state", { p_season: season.id, p_state: toJson(me, finalState, {}), p_touch: true, p_contribution: 0, p_stage_bases: stageSizes, p_active_window_days: ACTIVE_WINDOW_DAYS, p_action: "event_march", p_details: { event: e.id } });
+        if (rpcError) throw new Error(`Départ impossible : ${rpcError.message}`);
+        if ((data as { conflict?: boolean } | null)?.conflict) continue;
+        message = `${e.kind === "caravane" ? "🐪" : "🗿"} Ton armée marche vers ${e.kind === "caravane" ? "la caravane" : "le colosse"} : arrivée dans ${Math.round(outMs / 60_000)} min.`;
         entities = await loadEntities(admin, season.id, userId);
-        const fresh = entities.get(userId);
-        if (fresh) finalState = advance(fresh.state, now, world);
       }
       events = await loadEvent(admin, season.id, now, entities, world, flat);
     } else if (CONFLICT_ACTIONS.has(action.type)) {
@@ -2216,7 +2241,7 @@ export async function runAction(admin: SupabaseClient, userId: string, action: G
       ...info,
       alliances: [...allianceNames].map(([id, name]) => ({ id, name, size: [...entities.values()].filter((e) => e.allianceId === id).length })),
       war: warView(meNow, conflicts.wars, allianceNames),
-      event: eventView(userId, finalState, events, now, currentRate(meNow, finalState, now, worldFrom(worksite), flat)),
+      event: eventView(userId, finalState, events, now, currentRate(meNow, finalState, now, worldFrom(worksite), flat), positions),
       fortress: fortressView(meNow, finalState, conflicts.fortress, entities, allianceNames, now, intel.get(FORTRESS_INTEL) ?? null),
       chronicle,
       map: mapView(positions),
@@ -2237,7 +2262,7 @@ function cleanMarches(raw: unknown): March[] {
     .filter((m) => m && typeof m === "object" && typeof m.id === "string" && typeof m.target === "string")
     .map((m) => ({
       id: String(m.id),
-      kind: m.kind === "reinforce" ? ("reinforce" as const) : ("raid" as const),
+      kind: (["reinforce", "fortress", "station"].includes(m.kind) ? m.kind : "raid") as March["kind"],
       target: String(m.target),
       troops: armyCounts(m.troops ?? {}, UNIT_IDS) as Army,
       departAt: Number(m.departAt) || 0,
@@ -2270,6 +2295,9 @@ async function settleMarches(
   flat: Map<string, number>,
   wars: WarRow[],
   now: number,
+  fortress: FortressRow,
+  names: Map<number, string>,
+  events: EventState,
 ): Promise<"none" | "changed" | "conflict"> {
   const due = [...entities.values()]
     .flatMap((e) => (e.state.marches ?? []).map((m) => ({ e, m, at: marchDue(m) })))
@@ -2307,6 +2335,62 @@ async function settleMarches(
       notify(admin, [owner.id], { title: "🏇 Ton armée est rentrée", body: `Elle rapporte ${Math.floor(m.loot + m.ransom).toLocaleString("fr-FR")} pierres.`, tag: "march" });
     }
     return r;
+  }
+
+  if (m.kind === "event") {
+    // T6 : l'assaut se joue à l'arrivée, si l'événement est encore là.
+    const ev = events.active;
+    if (!ev || `event:${ev.id}` !== m.target || ms(ev.ends_at) <= at) return commit(owner, replace(owner.state, { ...m, status: "back", returnAt: m.arriveAt + outMs, outcome: "turned" }));
+    const aState = advanceEntity(owner, at, world, flat);
+    const r = await runEventAttack(admin, seasonId, owner, aState, events, at, currentRate(owner, aState, at, world, flat), m);
+    if (r === "conflict") return "conflict";
+    if (r.error) return commit(owner, replace(owner.state, { ...m, status: "back", returnAt: m.arriveAt + outMs, outcome: "turned" }));
+    if (r.settle !== undefined) {
+      const { data: killed } = await admin.from("events").select("*").eq("id", r.settle).maybeSingle();
+      await admin.rpc("settle_event_v2", { p_event: r.settle, p_bonus: killed ? killBonus(eventRow(killed), entities, at, world, flat) : {} });
+    }
+    if (r.message && !owner.isLord) notify(admin, [owner.id], { title: ev.kind === "caravane" ? "🐪 Caravane" : "🗿 Colosse", body: r.message.replace(/^\S+\s/, ""), tag: "event" });
+    return "changed";
+  }
+
+  if (m.kind === "station") {
+    // T6 : la garnison n'entre que si son alliance tient encore la forteresse.
+    if (owner.allianceId === null || fortress.holder !== owner.allianceId) return commit(owner, replace(owner.state, { ...m, status: "back", returnAt: m.arriveAt + outMs, outcome: "turned" }));
+    const garrison = { ...garrisonOf(fortress) };
+    const group = { ...(garrison[owner.id] ?? {}) } as Record<string, number>;
+    for (const [u, n] of Object.entries(m.troops) as [string, number][]) if (n > 0) group[u] = (group[u] ?? 0) + n;
+    garrison[owner.id] = group as PlayerState["troops"];
+    const r = await applyFortress(admin, seasonId, fortress, owner, replace(owner.state, null), fortress.holder, garrison, false, "fortress_station", {});
+    return r === "conflict" ? "conflict" : "changed";
+  }
+
+  if (m.kind === "fortress") {
+    // T6 : l'assaut se joue à l'arrivée, contre la garnison présente.
+    const aState = advanceEntity(owner, at, world, flat);
+    const blocked = fortressBlocker(owner, aState, fortress, at, m.troops);
+    if (blocked) return commit(owner, replace(owner.state, { ...m, status: "back", returnAt: m.arriveAt + outMs, outcome: "turned" }));
+    const defense = fortressDefense(fortress, entities, at);
+    const levels = { attackerLevels: aState.levels, defenderLevels: fortressLevels(fortress, entities) };
+    const chance = estimateChance(m.troops, defense, levels);
+    const fight = battle(m.troops, defense, Math.random, levels);
+    const theirs = splitTroopLosses(garrisonHost(fortress, at), fight.defenderLost);
+    const survivors = cleanArmy(Object.fromEntries((Object.entries(m.troops) as [string, number][]).map(([id, n]) => [id, n - ((fight.attackerLost as Record<string, number>)[id] ?? 0)])) as Army);
+    const healed = addWounded(aState, woundedOf(fight.attackerLost, fight.success ? WOUNDED_WINNER : WOUNDED_ATTACKER_BEATEN), at);
+    const back: March = { ...m, troops: survivors, status: "back", returnAt: at + outMs, outcome: fight.success ? "won" : "lost" };
+    const after = replace(healed, armySize(survivors) > 0 ? back : null);
+    const details = { success: fight.success, chance, rounds: fight.rounds, alliance: owner.allianceId, attackerLost: fight.attackerLost, defenderLost: fight.defenderLost, log: fight.log };
+    const r = await applyFortress(admin, seasonId, fortress, owner, after, fight.success ? owner.allianceId : fortress.holder, fight.success ? {} : theirs.stationed, fight.success, "fortress_attack", details);
+    if (r === "conflict") return "conflict";
+    if (fortress.holder !== null) {
+      const defenders = [...entities.values()].filter((e) => !e.isLord && e.allianceId === fortress.holder).map((e) => e.id);
+      notify(admin, defenders, fight.success
+        ? { title: "🏰 La forteresse est tombée !", body: `${owner.name} l'a prise pour ${names.get(owner.allianceId!) ?? "son alliance"}.`, tag: "fortress" }
+        : { title: "🏰 La forteresse a tenu", body: `${owner.name} s'est brisé sur vos murs.`, tag: "fortress" });
+    }
+    notify(admin, [owner.id], fight.success
+      ? { title: "🏰 Forteresse prise !", body: `La ${FORTRESS_NAME} est à ton alliance. Envoie vite une garnison.`, tag: "fortress" }
+      : { title: "🏰 Assaut repoussé", body: `La ${FORTRESS_NAME} a tenu. Tes survivants rentrent.`, tag: "fortress" });
+    return "changed";
   }
 
   if (m.kind === "reinforce") {
@@ -2391,6 +2475,19 @@ async function settleMarches(
 
 function marchId(): string {
   return `${Date.now().toString(36)}${Math.floor(Math.random() * 1e6).toString(36)}`;
+}
+
+/** T6 : position d'un événement de combat sur la carte à l'instant t. */
+function eventPosAt(e: EventRow, positions: Map<string, MapPos>, t: number): MapPos {
+  if (e.kind === "caravane") return caravanPos(e.id, ms(e.starts_at), ms(e.ends_at), t);
+  const players = [...positions.entries()].filter(([id]) => !LORDS.some((l) => l.id === id)).map(([, p]) => p);
+  return colossusPos(e.id, players);
+}
+
+async function travelToFortress(admin: SupabaseClient, seasonId: number, entities: Map<string, Entity>, fromId: string, army: Army): Promise<number> {
+  const positions = await loadPositions(admin, seasonId, entities);
+  const a = positions.get(fromId);
+  return travelMs(army, a ? mapDistance(a, FORTRESS_POS) : MAP_SPAWN_RADIUS);
 }
 
 /** Durée de l'aller entre deux lieux de la carte pour une armée donnée. */

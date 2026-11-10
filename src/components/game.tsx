@@ -1488,18 +1488,25 @@ function SendArmy({
 function Marches({ snap, now, run }: { snap: GameSnapshot; now: number; run: ReturnType<typeof useGame>["run"] }) {
   const list = snap.state.marches ?? [];
   if (list.length === 0) return null;
-  const nameOf = (id: string) => snap.rivals.find((r) => r.id === id)?.name ?? "une cible";
+  const nameOf = (id: string) =>
+    id === "fortress" ? "Pierre-Haute" : id.startsWith("event:") ? (snap.event?.kind === "colosse" ? "le colosse" : "la caravane") : (snap.rivals.find((r) => r.id === id)?.name ?? "une cible");
   return (
     <ul className="marches">
       {list.map((m) => {
         const back = m.status === "back";
         const left = Math.max(0, (back ? m.returnAt : m.arriveAt) - now);
-        const verdict = m.outcome === "won" ? "victoire" : m.outcome === "lost" ? "repoussée" : m.outcome === "turned" ? (m.kind === "reinforce" ? "demi-tour" : "demi-tour, cible protégée") : m.outcome === "recalled" ? "rappelée" : "";
+        const verdict = m.outcome === "won" ? "victoire" : m.outcome === "lost" ? "repoussée" : m.outcome === "turned" ? (m.kind === "raid" ? "demi-tour, cible protégée" : "demi-tour") : m.outcome === "recalled" ? "rappelée" : "";
         return (
           <li key={m.id}>
             <span>
-              {back ? "↩️" : m.kind === "reinforce" ? "🛡️" : "🏇"} {armyIcons(m.troops, "plus personne")}{" "}
-              {back ? `rentre de ${nameOf(m.target)}` : m.kind === "reinforce" ? `en renfort vers ${nameOf(m.target)}` : `vers ${nameOf(m.target)}`}
+              {back ? "↩️" : m.kind === "reinforce" || m.kind === "station" ? "🛡️" : m.kind === "fortress" ? "🏰" : "🏇"} {armyIcons(m.troops, "plus personne")}{" "}
+              {back
+                ? `rentre de ${nameOf(m.target)}`
+                : m.kind === "reinforce" || m.kind === "station"
+                  ? `en renfort vers ${nameOf(m.target)}`
+                  : m.kind === "fortress"
+                    ? `à l'assaut de ${nameOf(m.target)}`
+                    : `vers ${nameOf(m.target)}`}
               {verdict ? ` (${verdict})` : ""} · {left > 0 ? duration(left) : "imminent"}
               {back && m.loot + m.ransom > 0 ? ` · rapporte ${formatNumber(m.loot + m.ransom)} 🪨` : ""}
             </span>
@@ -2188,6 +2195,14 @@ function KingdomMap({ snap, live, now, run }: { snap: GameSnapshot; live: Player
   const size = map.size * cell;
   const at = (p: readonly [number, number]) => ({ cx: (p[0] - 0.5) * cell, cy: (map.size - p[1] + 0.5) * cell });
   const mine = map.places[snap.userId];
+  // La caravane avance en direct le long de sa route.
+  const ev = snap.event;
+  const evPos: [number, number] | undefined = ev?.active && ev.path
+    ? (() => {
+        const f = Math.min(1, Math.max(0, (now - ev.startsAt) / Math.max(1, ev.endsAt - ev.startsAt)));
+        return [ev.path.from[0] + (ev.path.to[0] - ev.path.from[0]) * f, ev.path.from[1] + (ev.path.to[1] - ev.path.from[1]) * f];
+      })()
+    : ev?.pos;
   const myAlliance = snap.alliance?.id ?? null;
   const allianceIdOf = (name: string | null) => snap.alliances.find((a) => a.name === name)?.id ?? null;
   const rival = snap.rivals.find((r) => r.id === picked);
@@ -2218,9 +2233,17 @@ function KingdomMap({ snap, live, now, run }: { snap: GameSnapshot; live: Player
           <text {...(({ cx, cy }) => ({ x: cx, y: cy }))(at(map.fortress))} className="map-icon" onClick={() => setPicked(null)}>
             🏰
           </text>
+          {snap.event?.active && snap.event.path && (
+            <line className="map-path" {...(({ cx, cy }) => ({ x1: cx, y1: cy }))(at(snap.event.path.from))} {...(({ cx, cy }) => ({ x2: cx, y2: cy }))(at(snap.event.path.to))} />
+          )}
+          {snap.event?.active && evPos && (
+            <text {...(({ cx, cy }) => ({ x: cx, y: cy }))(at(evPos))} className="map-icon">
+              {snap.event.kind === "caravane" ? "🐪" : "🗿"}
+            </text>
+          )}
           {mine &&
             (snap.state.marches ?? []).map((m) => {
-              const target = map.places[m.target];
+              const target = m.target === "fortress" ? map.fortress : m.target.startsWith("event:") ? evPos : map.places[m.target];
               if (!target) return null;
               const a = at(mine);
               const b = at(target);
