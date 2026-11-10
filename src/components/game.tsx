@@ -131,7 +131,7 @@ export function Game({ userId }: { userId: string }) {
   const live: PlayerState = { ...advance(snap.state, now, world), stone: game.predictedStone() };
   const rate = rateAt(live, world, now);
   const researchDone = tab !== "armee" && researchEnds.some((e) => e <= now && e > armySeenAt);
-  const eventLive = isCombatEvent(snap.event) && !!snap.event?.active && snap.event.endsAt > now;
+  const eventLive = (isCombatEvent(snap.event) || isLocalEvent(snap.event)) && !!snap.event?.active && snap.event.endsAt > now;
   const affordableUpgrades = UPGRADES.filter((u) => !live.upgrades.includes(u.id) && upgradeUnlocked(live, u) && upgradeCost(live, u) <= live.stone).length;
 
   return (
@@ -1147,7 +1147,8 @@ function Raids({ snap, live, now, run }: { snap: GameSnapshot; live: PlayerState
           </button>
         ))}
       </div>
-      {snap.event && <EventCard
+      {snap.event && isLocalEvent(snap.event) && snap.event.active && <LocalEventCard e={snap.event} live={live} now={now} run={run} />}
+      {snap.event && !(isLocalEvent(snap.event) && snap.event.active) && <EventCard
           e={snap.event}
           now={now}
           busy={busy !== null}
@@ -1486,18 +1487,31 @@ function Marches({ snap, now, run }: { snap: GameSnapshot; now: number; run: Ret
   const list = snap.state.marches ?? [];
   if (list.length === 0) return null;
   const nameOf = (id: string) =>
-    id === "fortress" ? "Pierre-Haute" : id.startsWith("event:") ? (snap.event?.kind === "colosse" ? "le colosse" : "la caravane") : (snap.rivals.find((r) => r.id === id)?.name ?? "une cible");
+    id === "fortress"
+      ? "Pierre-Haute"
+      : id.startsWith("event:")
+        ? snap.event?.kind === "colosse" ? "le colosse" : "la caravane"
+        : id.startsWith("mine:")
+          ? "le filon"
+          : id.startsWith("treasure:")
+            ? "le trésor"
+            : id.startsWith("camp:")
+              ? "un camp de bandits"
+              : (snap.rivals.find((r) => r.id === id)?.name ?? "une cible");
   return (
     <ul className="marches">
       {list.map((m) => {
         const back = m.status === "back";
-        const left = Math.max(0, (back ? m.returnAt : m.arriveAt) - now);
+        const camp = m.status === "camp";
+        const left = Math.max(0, (back || camp ? m.returnAt : m.arriveAt) - now);
         const verdict = m.outcome === "won" ? "victoire" : m.outcome === "lost" ? "repoussée" : m.outcome === "turned" ? (m.kind === "raid" ? "demi-tour, cible protégée" : "demi-tour") : m.outcome === "recalled" ? "rappelée" : "";
         return (
           <li key={m.id}>
             <span>
               {back ? "↩️" : m.kind === "reinforce" || m.kind === "station" ? "🛡️" : m.kind === "fortress" ? "🏰" : "🏇"} {armyIcons(m.troops, "plus personne")}{" "}
-              {back
+              {camp
+                ? `postée sur ${nameOf(m.target)}`
+                : back
                 ? `rentre de ${nameOf(m.target)}`
                 : m.kind === "reinforce" || m.kind === "station"
                   ? `en renfort vers ${nameOf(m.target)}`
@@ -1507,7 +1521,7 @@ function Marches({ snap, now, run }: { snap: GameSnapshot; now: number; run: Ret
               {verdict ? ` (${verdict})` : ""} · {left > 0 ? duration(left) : "imminent"}
               {back && m.loot + m.ransom > 0 ? ` · rapporte ${formatNumber(m.loot + m.ransom)} 🪨` : ""}
             </span>
-            {!back && left > 0 && (
+            {(camp || (!back && left > 0)) && (
               <button className="btn btn-ghost" onClick={() => void run({ type: "march_recall", id: m.id })}>
                 Rappeler
               </button>
@@ -1984,8 +1998,86 @@ function eventAttackText(c: ChronicleEntry, me: string): string {
 }
 
 /** Événement en cours (ou le prochain) en tête de l'onglet Raids, avec ses derniers assauts. */
-const EVENT_ICONS: Record<EventView["kind"], string> = { caravane: "🐪", colosse: "🗿", foire: "🎪", fete: "🎉", etoiles: "🌠", treve: "🔔", marchand: "🧺", lune: "🌕", brouillard: "🌫️" };
+const EVENT_ICONS: Record<EventView["kind"], string> = { caravane: "🐪", colosse: "🗿", foire: "🎪", fete: "🎉", etoiles: "🌠", treve: "🔔", marchand: "🧺", lune: "🌕", brouillard: "🌫️", filon: "⛏️", bandits: "🏕️", tresor: "💰" };
+const isLocalEvent = (e: EventView | null | undefined) => !!e && (e.kind === "filon" || e.kind === "bandits" || e.kind === "tresor");
 const isCombatEvent = (e: EventView | null | undefined) => !!e && (e.kind === "caravane" || e.kind === "colosse");
+
+/** V7 à V9 : filon, camps de bandits, trésor. On y envoie une armée composée comme pour un raid. */
+function LocalEventCard({ e, live, now, run }: { e: EventView; live: PlayerState; now: number; run: ReturnType<typeof useGame>["run"] }) {
+  const [target, setTarget] = useState<string | null>(null);
+  const [chosen, setChosen] = useState<Record<string, number> | null>(null);
+  const [busy, setBusy] = useState(false);
+  const have = live.troops as Record<string, number>;
+  const army = Object.fromEntries(UNITS.map((u) => [u.id, Math.min(have[u.id] ?? 0, Math.max(0, Math.floor((chosen ?? have)[u.id] ?? 0)))]).filter(([, n]) => (n as number) > 0)) as Record<string, number>;
+  const send = async (camp?: string) => {
+    setBusy(true);
+    await run({ type: "event_attack", troops: army, ...(camp ? { camp } : {}) });
+    setBusy(false);
+    setTarget(null);
+  };
+  const composer = (camp?: string) => (
+    <div className="simulator send-army">
+      {UNITS.filter((u) => (have[u.id] ?? 0) > 0).map((u) => (
+        <label key={u.id} className="send-line">
+          <span>
+            {u.icon} {u.name} <span className="num">({formatNumber(have[u.id] ?? 0)})</span>
+          </span>
+          <input type="number" min={0} max={have[u.id] ?? 0} value={army[u.id] ?? 0} onChange={(ev) => setChosen({ ...army, [u.id]: Math.max(0, Math.min(have[u.id] ?? 0, Math.floor(Number(ev.target.value) || 0))) })} />
+        </label>
+      ))}
+      <div className="qty">
+        <button className="btn" onClick={() => setChosen({ ...have })}>
+          Tout envoyer
+        </button>
+        <button className="btn btn-primary" disabled={busy || Object.keys(army).length === 0} onClick={() => void send(camp)}>
+          🏇 Envoyer
+        </button>
+        <button className="btn btn-ghost" onClick={() => setTarget(null)}>
+          Annuler
+        </button>
+      </div>
+    </div>
+  );
+  return (
+    <div className="row event-card">
+      <div className="row-icon" aria-hidden>
+        {EVENT_ICONS[e.kind]}
+      </div>
+      <div>
+        <div className="row-title">
+          {e.name}
+          <span className="badge badge-level-3">encore {duration(Math.max(0, e.endsAt - now))}</span>
+        </div>
+        <div className="row-desc">{e.description}</div>
+        {e.kind === "tresor" && <div className="row-desc">{e.holder ? `💰 La case est tenue par ${e.holder}.` : "💰 Personne ne tient encore la case."}</div>}
+        {e.kind === "bandits" && (
+          <ul className="marches">
+            {(e.camps ?? []).map((c) => (
+              <li key={c.id}>
+                <span>
+                  🏕️ {c.mine ? "Ton camp" : "Un camp"} · {c.winner ? `vidé par ${c.winner}` : armyIcons(c.army)}
+                </span>
+                {!c.winner && (
+                  <button className="btn" onClick={() => setTarget(target === c.id ? null : c.id)}>
+                    Attaquer
+                  </button>
+                )}
+              </li>
+            ))}
+            {(e.camps ?? []).length === 0 && <li>Aucun camp cette fois.</li>}
+          </ul>
+        )}
+        {e.kind === "bandits" && target && composer(target)}
+        {e.kind !== "bandits" && (target ? composer() : null)}
+      </div>
+      {e.kind !== "bandits" && !target && (
+        <button className="btn btn-primary" onClick={() => setTarget("go")}>
+          {e.kind === "filon" ? "Poster une armée" : "Prendre la case"}
+        </button>
+      )}
+    </div>
+  );
+}
 
 /** Événements sans combat (foire, fête, étoiles, trêve, marchand) : un bandeau sous le compteur, et les achats du marchand. */
 function EventBanner({ e, now, stone, run }: { e: EventView | null; now: number; stone: number; run: ReturnType<typeof useGame>["run"] }) {
@@ -1999,7 +2091,7 @@ function EventBanner({ e, now, stone, run }: { e: EventView | null; now: number;
       </div>
     );
   }
-  if (isCombatEvent(e) || e.endsAt <= now) return null;
+  if (isCombatEvent(e) || isLocalEvent(e) || e.endsAt <= now) return null;
   const buy = async (choice: MerchantChoice) => {
     setBusy(true);
     await run({ type: "merchant", choice });
@@ -2233,19 +2325,35 @@ function KingdomMap({ snap, live, now, run }: { snap: GameSnapshot; live: Player
           {snap.event?.active && snap.event.path && (
             <line className="map-path" {...(({ cx, cy }) => ({ x1: cx, y1: cy }))(at(snap.event.path.from))} {...(({ cx, cy }) => ({ x2: cx, y2: cy }))(at(snap.event.path.to))} />
           )}
+          {snap.event?.active &&
+            (snap.event.camps ?? []).map((c) => (
+              <text key={c.id} x={at(c.pos).cx} y={at(c.pos).cy} className="map-icon" opacity={c.winner ? 0.35 : 1}>
+                🏕️
+              </text>
+            ))}
           {snap.event?.active && evPos && (
             <text {...(({ cx, cy }) => ({ x: cx, y: cy }))(at(evPos))} className="map-icon">
-              {snap.event.kind === "caravane" ? "🐪" : "🗿"}
+              {EVENT_ICONS[snap.event.kind]}
             </text>
           )}
           {mine &&
             (snap.state.marches ?? []).map((m) => {
-              const target = m.target === "fortress" ? map.fortress : m.target.startsWith("event:") ? evPos : map.places[m.target];
+              const camp = m.target.startsWith("camp:") ? snap.event?.camps?.find((c) => `camp:${snap.event?.id}:${c.id}` === m.target) : undefined;
+              const target =
+                m.target === "fortress"
+                  ? map.fortress
+                  : m.target.startsWith("event:") || m.target.startsWith("mine:") || m.target.startsWith("treasure:")
+                    ? evPos
+                    : camp
+                      ? camp.pos
+                      : map.places[m.target];
               if (!target) return null;
               const a = at(mine);
               const b = at(target);
               // Position sur la route : 0 au domaine, 1 à la cible.
-              const f = m.status === "out"
+              const f = m.status === "camp"
+                ? 1
+                : m.status === "out"
                 ? Math.min(1, Math.max(0, (now - m.departAt) / Math.max(1, m.arriveAt - m.departAt)))
                 : Math.min(1, Math.max(0, (m.returnAt - now) / Math.max(1, m.arriveAt - m.departAt)));
               return (

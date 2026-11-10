@@ -244,7 +244,7 @@ export type GameAction =
   | { type: "fortress_attack" }
   | { type: "fortress_station"; unit: string; qty: number }
   | { type: "fortress_recall" }
-  | { type: "event_attack" }
+  | { type: "event_attack"; troops?: Record<string, number>; camp?: string }
   | { type: "research"; id: string }
   | { type: "merchant"; choice: MerchantChoice }
   | { type: "march_recall"; id: string }
@@ -266,6 +266,9 @@ export interface EventView {
   /** T6 : position sur la carte (colosse fixe, caravane qui avance de `path.from` à `path.to`). */
   pos?: [number, number];
   path?: { from: [number, number]; to: [number, number] };
+  /** V7 : camps de bandits (le mien d'abord), V8 : qui tient le trésor. */
+  camps?: { id: string; pos: [number, number]; army: Record<string, number>; winner: string | null; mine: boolean }[];
+  holder?: string | null;
   /** Actif : fin de l'événement. Sinon : arrivée du prochain. */
   active: boolean;
   startsAt: number;

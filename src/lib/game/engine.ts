@@ -102,6 +102,9 @@ import {
   DONOR_TIER_ECUS,
   DONOR_TIER_BONUS,
   FAIR_GENERATOR_FACTOR,
+  MINE_MAX_SECONDS,
+  MINE_SECONDS_PER_SLICE,
+  MINE_SLICE_MS,
   FOG_SPY_FACTOR,
   MAX_MARCHES,
   TRAVEL_BASE_MIN,
@@ -240,8 +243,9 @@ export interface March {
   troops: Army;
   departAt: number;
   arriveAt: number;
-  /** Aller : "out". Retour (après le combat, un demi-tour ou un rappel) : "back", jusqu'à `returnAt`. */
-  status: "out" | "back";
+  /** Aller : "out". Retour (après le combat, un demi-tour ou un rappel) : "back", jusqu'à `returnAt`.
+   *  "camp" : postée sur place (filon, trésor) jusqu'à `returnAt`, la fin de l'événement. */
+  status: "out" | "back" | "camp";
   returnAt: number;
   /** T5 : le défenseur verra le nom de l'attaquant (tirage fait au départ). */
   revealed: boolean;
@@ -286,11 +290,22 @@ export function sendTroops(state: PlayerState, wanted: Army): Result<{ state: Pl
 }
 
 /** T4 : rappel d'une armée à l'aller ; elle rentre en autant de temps qu'elle a marché. */
-export function recallMarch(state: PlayerState, id: string, now: number): Result<PlayerState> {
+export function recallMarch(state: PlayerState, id: string, now: number, rate = 0): Result<PlayerState> {
   const m = (state.marches ?? []).find((x) => x.id === id);
   if (!m) return { ok: false, error: "Armée introuvable." };
+  if (m.status === "camp") {
+    // V9 : quitter le filon avant la fin, avec ce qui a été extrait.
+    const loot = m.target.startsWith("mine:") ? mineReward(m, now, rate) : 0;
+    return { ok: true, value: { ...state, marches: (state.marches ?? []).map((x) => (x.id === id ? { ...x, status: "back", loot: x.loot + loot, returnAt: now + (x.arriveAt - x.departAt), outcome: "recalled" } : x)) } };
+  }
   if (m.status !== "out" || now >= m.arriveAt) return { ok: false, error: "Elle est déjà arrivée." };
   return { ok: true, value: { ...state, marches: (state.marches ?? []).map((x) => (x.id === id ? { ...x, status: "back", returnAt: now + (now - x.departAt), outcome: "recalled" } : x)) } };
+}
+
+/** V9 : ce que rapporte le filon pour le temps passé sur place, jusqu'à `until`. */
+export function mineReward(m: March, until: number, rate: number): number {
+  const slices = Math.floor(Math.max(0, Math.min(until, m.returnAt || until) - m.arriveAt) / MINE_SLICE_MS);
+  return Math.floor(rate * Math.min(MINE_MAX_SECONDS, slices * MINE_SECONDS_PER_SLICE));
 }
 
 /** T4 : armée rentrée, survivants et butin rendus au domaine. */

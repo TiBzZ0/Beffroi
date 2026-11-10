@@ -250,4 +250,13 @@ export const CHANGELOG: ChangeEntry[] = [
       "🌫️ Nouvel événement, le brouillard (2 h) : aucune alerte d'approche, les chances sont masquées sans espion, et l'espion coûte moitié prix.",
     ],
   },
+  {
+    id: 31,
+    date: "10 novembre",
+    items: [
+      "⛏️ Nouvel événement, le filon géant (2 h) : une mine apparaît sur la carte. Postes-y une armée, elle ne se bat pas et extrait 3 minutes de ta production par tranche de 10 minutes, 30 minutes au plus.",
+      "🏕️ Nouvel événement, les camps de bandits (3 h) : un camp près de chaque joueur actif, défendu par 30 % de son armée. Le premier qui le vide emporte 40 minutes de la production du joueur le plus proche.",
+      "💰 Nouvel événement, le trésor enfoui (90 min) : une case est révélée. Les armées qui y arrivent se battent dans l'ordre d'arrivée, et celle qui tient la case à la fin emporte 2 heures de la production médiane. Pas de trésor en couvre-feu.",
+    ],
+  },
 ];

@@ -47,3 +47,13 @@ describe("trajets (T2 à T4)", () => {
     expect(r.value.attacker.stone).toBe(attacker.stone);
   });
 });
+
+describe("filon géant (V9)", () => {
+  it("rapporte 3 minutes par tranche de 10 minutes, 30 minutes au plus", async () => {
+    const { mineReward } = await import("./engine");
+    const m: March = { id: "a", kind: "event", target: "mine:1", troops: { piquier: 1 }, departAt: T - 6e5, arriveAt: T, status: "camp", returnAt: T + 7_200_000, revealed: true, warned: true, loot: 0, ransom: 0 };
+    expect(mineReward(m, T + 25 * 60_000, 10)).toBe(10 * 2 * 180);
+    expect(mineReward(m, T + 7_200_000, 10)).toBe(10 * 1800);
+    expect(mineReward(m, T + 9_000_000, 10)).toBe(10 * 1800);
+  });
+});

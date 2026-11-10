@@ -57,3 +57,17 @@ export function caravanPos(seed: number, startsAt: number, endsAt: number, t: nu
   const f = Math.min(1, Math.max(0, (t - startsAt) / Math.max(1, endsAt - startsAt)));
   return [from[0] + (to[0] - from[0]) * f, from[1] + (to[1] - from[1]) * f];
 }
+
+/** V7 : une case libre à 2 ou 3 cases d'un joueur pour son camp de bandits. */
+export function banditSpot(home: MapPos, taken: MapPos[], seed: number): MapPos | null {
+  const free: MapPos[] = [];
+  for (let x = 1; x <= MAP_SIZE; x++)
+    for (let y = 1; y <= MAP_SIZE; y++) {
+      const c: MapPos = [x, y];
+      const d = mapDistance(c, home);
+      if (d < 2 || d > 3.2) continue;
+      if (taken.some((t) => mapDistance(t, c) < 1)) continue;
+      free.push(c);
+    }
+  return free.length ? free[Math.abs(Math.imul(seed + 1, 2654435761)) % free.length] : null;
+}

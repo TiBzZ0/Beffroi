@@ -623,8 +623,8 @@ export function mapDistance(a: MapPos, b: MapPos): number {
 }
 
 // Événements sans carte (V3 à V6, V15). Un événement toutes les 2 heures, tiré au sort selon ces poids, jamais deux fois de suite le même.
-export type EventKind = "caravane" | "colosse" | "foire" | "fete" | "etoiles" | "treve" | "marchand" | "lune" | "brouillard";
-export const EVENT_WEIGHTS: Record<EventKind, number> = { caravane: 3, colosse: 2, foire: 2, fete: 2, etoiles: 2, treve: 1, marchand: 2, lune: 1, brouillard: 1 };
+export type EventKind = "caravane" | "colosse" | "foire" | "fete" | "etoiles" | "treve" | "marchand" | "lune" | "brouillard" | "filon" | "bandits" | "tresor";
+export const EVENT_WEIGHTS: Record<EventKind, number> = { caravane: 3, colosse: 2, foire: 2, fete: 2, etoiles: 2, treve: 1, marchand: 2, lune: 1, brouillard: 1, filon: 2, bandits: 3, tresor: 2 };
 export const EVENT_DURATIONS_MS: Record<EventKind, number> = {
   caravane: 60 * 60 * 1000,
   colosse: 6 * 60 * 60 * 1000,
@@ -635,7 +635,19 @@ export const EVENT_DURATIONS_MS: Record<EventKind, number> = {
   marchand: 60 * 60 * 1000,
   lune: 2 * 60 * 60 * 1000,
   brouillard: 2 * 60 * 60 * 1000,
+  filon: 2 * 60 * 60 * 1000,
+  bandits: 3 * 60 * 60 * 1000,
+  tresor: 90 * 60 * 1000,
 };
+/** V9 : filon géant, 3 minutes de production par tranche de 10 minutes sur place, 30 minutes au plus. */
+export const MINE_SECONDS_PER_SLICE = 3 * 60;
+export const MINE_SLICE_MS = 10 * 60 * 1000;
+export const MINE_MAX_SECONDS = 30 * 60;
+/** V7 : un camp de bandits par joueur actif, à 2 ou 3 cases, défendu par 30 % de son armée ; 40 minutes de production pour le vainqueur. */
+export const BANDIT_ARMY_SHARE = 0.3;
+export const BANDIT_PRIZE_SECONDS = 40 * 60;
+/** V8 : le trésor vaut 2 heures de la production médiane. */
+export const TREASURE_PRIZE_SECONDS = 2 * 60 * 60;
 /** V13 : un raid de seigneur repoussé pendant la lune rouge rapporte 30 % de la valeur de son armée. */
 export const RED_MOON_RANSOM = 0.3;
 /** V14 : l'espion coûte moitié prix dans le brouillard. */
