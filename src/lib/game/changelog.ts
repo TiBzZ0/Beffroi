@@ -64,4 +64,11 @@ export const CHANGELOG: ChangeEntry[] = [
       "✨ Veines d'or : quand tu es en jeu, une pierre dorée apparaît près de ta pierre toutes les 5 à 10 minutes et reste 12 secondes. Touche-la : frénésie (production doublée 30 secondes) ou pluie de pierre (3 minutes de production d'un coup).",
     ],
   },
+  {
+    id: 8,
+    date: "10 novembre",
+    items: [
+      "📜 Accueil guidé : les nouveaux venus suivent dix quêtes, une à la fois, chacune récompensée par 5 minutes de production.",
+    ],
+  },
 ];

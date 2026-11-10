@@ -76,6 +76,11 @@ import {
   MAX_TITHE,
   CURFEW_MINUTES,
   CURFEW_DELAY_MS,
+  QUESTS,
+  QUEST_REWARD_SECONDS,
+  QUEST_MIN_REWARD,
+  QUEST_FINAL_ECUS,
+  type QuestId,
   VEIN_MIN_MS,
   VEIN_MAX_MS,
   VEIN_VISIBLE_MS,
@@ -147,6 +152,10 @@ export interface PlayerState {
   /** Veine d'or (C1) : heure d'apparition de la prochaine, et fin de la frénésie en cours. */
   veinAt: number;
   frenzyUntil: number;
+  /** Accueil guidé (B4) : index de la quête en cours (10 = fini), null pour un ancien compte. */
+  quest: number | null;
+  /** Quêtes qui ne se lisent pas dans l'état (dîme réglée…), notées au passage. */
+  questFlags: string[];
   /** Le joueur a déjà réglé sa dîme (sinon on lui montre le bandeau « Règle ta dîme »). */
   titheSet: boolean;
   /** Son alliance tient la forteresse (bonus de production). Fixé par le serveur, jamais enregistré. */
@@ -211,6 +220,8 @@ export function newPlayerState(now: number): PlayerState {
     tithe: 0,
     titheOwed: 0,
     titheSet: false,
+    quest: null,
+    questFlags: [],
     veinAt: 0,
     frenzyUntil: 0,
     curfew: { start: null },
@@ -494,10 +505,52 @@ export function catchVein(state: PlayerState, now: number, world: WorldState, rn
   };
 }
 
+/** Progression de la quête `id` d'après l'état (les quêtes notées à part valent 0 ou 1). */
+export function questProgress(state: PlayerState, id: QuestId, extra: { alliance?: boolean } = {}): number {
+  const sum = (o: Partial<Record<string, number>>) => Object.values(o).reduce<number>((a, b) => a + (b ?? 0), 0);
+  switch (id) {
+    case "clicks":
+      return state.totalClicks;
+    case "workshop":
+    case "workshops":
+      return sum(state.generators);
+    case "upgrade":
+      return state.upgrades.length;
+    case "troops":
+      return sum(state.troops) + Object.values(state.stationed ?? {}).reduce((a, t) => a + sum(t), 0);
+    case "defense":
+      return sum(state.defenses);
+    case "alliance":
+      return extra.alliance ? 1 : 0;
+    default:
+      return (state.questFlags ?? []).includes(id) ? 1 : 0;
+  }
+}
+
+/** Valide la quête en cours si elle est remplie : récompense et passage à la suivante. */
+export function claimQuest(state: PlayerState, world: WorldState, now: number, extra: { alliance?: boolean } = {}): { state: PlayerState; done: number | null; ecus: number } {
+  const i = state.quest;
+  if (i === null || i === undefined || i >= QUESTS.length) return { state, done: null, ecus: 0 };
+  const q = QUESTS[i];
+  if (questProgress(state, q.id, extra) < q.goal) return { state, done: null, ecus: 0 };
+  const reward = Math.max(QUEST_MIN_REWARD, productionPerSecond(state, world, stagesDoneAt(world, now)) * QUEST_REWARD_SECONDS);
+  return {
+    state: { ...state, quest: i + 1, stone: state.stone + reward, totalProduced: state.totalProduced + reward },
+    done: i,
+    ecus: i === QUESTS.length - 1 ? QUEST_FINAL_ECUS : 0,
+  };
+}
+
+/** Note une quête qui ne se lit pas dans l'état. */
+export function flagQuest(state: PlayerState, id: QuestId): PlayerState {
+  if (state.quest === null || (state.questFlags ?? []).includes(id)) return state;
+  return { ...state, questFlags: [...(state.questFlags ?? []), id] };
+}
+
 /** Règle la dîme, en pour cent entiers de 0 à 20. */
 export function setTithe(state: PlayerState, percent: number): Result<PlayerState> {
   if (!Number.isInteger(percent) || percent < 0 || percent > MAX_TITHE * 100) return { ok: false, error: "Dîme invalide." };
-  return { ok: true, value: { ...state, tithe: percent / 100, titheSet: true } };
+  return { ok: true, value: flagQuest({ ...state, tithe: percent / 100, titheSet: true }, "tithe") };
 }
 
 /** Verse au chantier la dîme prélevée (pierres entières) ; le reste attend le prochain versement. */

@@ -12,6 +12,7 @@ import {
   maxAffordable,
   newPlayerState,
   payTithe,
+  claimQuest,
   scheduleVein,
   catchVein,
   inCurfew,
@@ -319,6 +320,25 @@ describe("veines d'or", () => {
     expect(catchVein(s, T0 + 20_000, noWorld).ok).toBe(false);
     expect(catchVein(s, T0 - 10_000, noWorld).ok).toBe(false);
     expect(catchVein(newPlayerState(T0), T0, noWorld).ok).toBe(false);
+  });
+});
+
+describe("accueil guidé", () => {
+  it("valide une quête remplie, récompense 5 min de production (100 au moins) et passe à la suivante", () => {
+    const s = { ...newPlayerState(T0), quest: 0, totalClicks: 19 };
+    expect(claimQuest(s, noWorld, T0).done).toBeNull();
+    const r = claimQuest({ ...s, totalClicks: 20 }, noWorld, T0);
+    expect(r.done).toBe(0);
+    expect(r.state.quest).toBe(1);
+    expect(r.state.stone).toBe(100);
+  });
+
+  it("la dîme réglée remplit sa quête, la dernière donne 5 écus, un ancien compte n'a rien", () => {
+    const s = { ...withGenerators({ tailleur: 10 }), quest: 4 };
+    const t = setTithe(s, 10);
+    expect(t.ok && claimQuest(t.value, noWorld, T0).state.stone).toBe(3000);
+    expect(claimQuest({ ...s, quest: 9, questFlags: ["push"] }, noWorld, T0).ecus).toBe(5);
+    expect(claimQuest({ ...s, quest: null, totalClicks: 99 }, noWorld, T0).done).toBeNull();
   });
 });
 

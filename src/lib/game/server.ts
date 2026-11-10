@@ -45,6 +45,7 @@ import {
   MAX_TITHE,
   NEW_PLAYER_TITHE,
   DONOR_TIER_BONUS,
+  QUESTS,
   STAGES,
   DEFENSE_IDS,
   UNIT_IDS,
@@ -97,6 +98,8 @@ import {
   inCurfew,
   setCurfew,
   scheduleVein,
+  claimQuest,
+  flagQuest,
   catchVein,
   stagesDoneAt,
   type PlayerState,
@@ -146,7 +149,7 @@ interface PlayerRow {
   upgrades: string[];
   total_produced: number;
   total_contributed: number;
-  military?: { levels?: Record<string, number>; research?: { id: string; endsAt: number }[] | { id: string; endsAt: number } | null; academy?: number; sabotageImmuneUntil?: number; ruinImmuneUntil?: number; elanUntil?: number; tithe?: number; titheOwed?: number; titheSet?: boolean; share?: StageShare | null; donorTiers?: number; curfew?: Curfew | null; seen?: PlayerState["seen"] | null; veinAt?: number; frenzyUntil?: number } | null;
+  military?: { levels?: Record<string, number>; research?: { id: string; endsAt: number }[] | { id: string; endsAt: number } | null; academy?: number; sabotageImmuneUntil?: number; ruinImmuneUntil?: number; elanUntil?: number; tithe?: number; titheOwed?: number; titheSet?: boolean; share?: StageShare | null; donorTiers?: number; curfew?: Curfew | null; seen?: PlayerState["seen"] | null; veinAt?: number; frenzyUntil?: number; quest?: number | null; questFlags?: string[] } | null;
   total_clicks: number;
   last_update: string;
   last_click_at: string;
@@ -284,6 +287,8 @@ function toEntity(row: PlayerRow): Entity {
       curfew: cleanCurfew(row.military?.curfew),
       veinAt: Number(row.military?.veinAt ?? 0) || 0,
       frenzyUntil: Number(row.military?.frenzyUntil ?? 0) || 0,
+      quest: Number.isInteger(row.military?.quest) ? Number(row.military?.quest) : null,
+      questFlags: Array.isArray(row.military?.questFlags) ? row.military.questFlags.map(String) : [],
       ...(row.military?.seen ? { seen: { produced: Number(row.military.seen.produced ?? 0), contributed: Number(row.military.seen.contributed ?? 0), levels: armyCounts(row.military.seen.levels ?? {}, [...UNIT_IDS, ...DEFENSE_IDS]) } } : {}),
     },
   };
@@ -312,7 +317,7 @@ function toJson(e: Entity, state: PlayerState, extra: Record<string, unknown> = 
     troops: state.troops,
     defenses: state.defenses,
     stationed: state.stationed,
-    military: { levels: state.levels, research: state.research, academy: state.academy, sabotageImmuneUntil: state.sabotageImmuneUntil, ruinImmuneUntil: state.ruinImmuneUntil, elanUntil: state.elanUntil, tithe: state.tithe, titheOwed: state.titheOwed, titheSet: state.titheSet, share: state.share, donorTiers: state.donorTiers, curfew: state.curfew, seen: state.seen ?? null, veinAt: state.veinAt, frenzyUntil: state.frenzyUntil },
+    military: { levels: state.levels, research: state.research, academy: state.academy, sabotageImmuneUntil: state.sabotageImmuneUntil, ruinImmuneUntil: state.ruinImmuneUntil, elanUntil: state.elanUntil, tithe: state.tithe, titheOwed: state.titheOwed, titheSet: state.titheSet, share: state.share, donorTiers: state.donorTiers, curfew: state.curfew, seen: state.seen ?? null, veinAt: state.veinAt, frenzyUntil: state.frenzyUntil, quest: state.quest, questFlags: state.questFlags },
     click_strikes: state.clickStrikes,
     click_paused_until: iso(state.clickPausedUntil),
     ...extra,
@@ -353,11 +358,15 @@ async function loadEntities(admin: SupabaseClient, seasonId: number, userId: str
   const missing = [userId, ...LORDS.map((l) => l.id)].filter((id) => !present.has(id));
   if (missing.length > 0) {
     const now = iso(Date.now());
+    // Nouveau compte : aucune saison jouée avant celle-ci. Il a l'accueil guidé.
+    const { count: earlier } = missing.includes(userId)
+      ? await admin.from("player_states").select("user_id", { count: "exact", head: true }).eq("user_id", userId).neq("season_id", seasonId)
+      : { count: 1 };
     await admin.from("player_states").upsert(
       missing.map((id) => ({
         user_id: id, season_id: seasonId, last_update: now, last_click_at: now, last_seen: now,
         // Un nouveau compte démarre avec une dîme de 5 % (les seigneurs n'en versent pas).
-        ...(LORDS.some((l) => l.id === id) ? {} : { military: { tithe: NEW_PLAYER_TITHE, titheSet: true } }),
+        ...(LORDS.some((l) => l.id === id) ? {} : { military: { tithe: NEW_PLAYER_TITHE, titheSet: true, ...(id === userId && !earlier ? { quest: 0 } : {}) } }),
       })),
       { onConflict: "user_id,season_id", ignoreDuplicates: true },
     );
@@ -1292,6 +1301,21 @@ function rivalsFor(
     .sort((a, b) => Number(a.isLord) - Number(b.isLord) || (a.difficulty ?? 0) - (b.difficulty ?? 0) || b.loot - a.loot);
 }
 
+/** Quêtes d'accueil qui se lisent dans la base plutôt que dans l'état. */
+async function questFlagsFromDb(admin: SupabaseClient, seasonId: number, userId: string, state: PlayerState): Promise<PlayerState> {
+  const id = state.quest !== null ? QUESTS[state.quest]?.id : undefined;
+  if (id === "lord") {
+    const easy = LORDS.filter((l) => l.difficulty === 1).map((l) => l.id);
+    const { data } = await admin.from("chronicle").select("details").eq("season_id", seasonId).eq("kind", "raid").eq("actor_id", userId).in("target_id", easy).limit(20);
+    if ((data ?? []).some((r) => (r.details as { success?: boolean } | null)?.success)) return flagQuest(state, "lord");
+  }
+  if (id === "push") {
+    const { count } = await admin.from("push_subscriptions").select("endpoint", { count: "exact", head: true }).eq("user_id", userId);
+    if ((count ?? 0) > 0) return flagQuest(state, "push");
+  }
+  return state;
+}
+
 /** Absence au-delà de laquelle on résume ce qui s'est passé. */
 const AWAY_MS = 30 * 60_000;
 
@@ -1449,6 +1473,7 @@ export async function runAction(admin: SupabaseClient, userId: string, action: G
     let finalState = current;
     let ecus = me.ecus;
     let away: AwaySummary | undefined;
+    let questDone: { done: number | null; ecus: number } | null = null;
     let error: string | null = null;
     let message: string | undefined;
 
@@ -1626,6 +1651,13 @@ export async function runAction(admin: SupabaseClient, userId: string, action: G
       const contribution = (outcome.ok ? (outcome.value.contribution ?? 0) : 0) + paid.paid;
       const gift = recordGift(finalState, contribution);
       finalState = gift.state;
+      // Accueil guidé : quêtes lues dans la base (seigneur facile pillé, notifications), puis validation.
+      if (action.type === "sync" && finalState.quest !== null) finalState = await questFlagsFromDb(admin, season.id, userId, finalState);
+      const quest = claimQuest(finalState, world, now, { alliance: me.allianceId !== null });
+      if (quest.done !== null) {
+        finalState = quest.state;
+        questDone = quest;
+      }
       if (action.type === "sync") away = await awaySummary(admin, season.id, me, finalState, worksite, entities, now);
       finalState = { ...finalState, seen: { produced: finalState.totalProduced, contributed: finalState.totalContributed, levels: finalState.levels } };
       const { data, error: rpcError } = await admin.rpc("commit_state", {
@@ -1643,6 +1675,13 @@ export async function runAction(admin: SupabaseClient, userId: string, action: G
       if (!result.ok && result.conflict) continue;
       if (result.worksite) worksite = worksiteFromRow(result.worksite);
       if (contribution > 0) await recordContribution(season.id, userId, finalState.totalContributed);
+      if (questDone?.done != null) {
+        if (questDone.ecus > 0) {
+          const { data: total } = await admin.rpc("add_ecus", { p_user: userId, p_amount: questDone.ecus });
+          ecus = Number(total ?? ecus + questDone.ecus);
+        }
+        message = `📜 Quête accomplie : ${QUESTS[questDone.done].label}. Récompense : 5 minutes de production${questDone.ecus ? ` et ${questDone.ecus} écus` : ""}.`;
+      }
       if (gift.tiers > 0) {
         const { data: total } = await admin.rpc("add_ecus", { p_user: userId, p_amount: gift.ecus });
         ecus = Number(total ?? ecus + gift.ecus);

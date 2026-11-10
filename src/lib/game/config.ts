@@ -192,6 +192,24 @@ export const VEIN_FRENZY_CHANCE = 0.6;
 export const VEIN_FRENZY_MS = 30_000;
 export const VEIN_FRENZY_FACTOR = 2;
 export const VEIN_RAIN_SECONDS = 180;
+/** B4 : accueil guidé, dix quêtes affichées une à une pour les nouveaux comptes. */
+export const QUESTS = [
+  { id: "clicks", label: "Frappe 20 coups de marteau", goal: 20 },
+  { id: "workshop", label: "Achète un atelier", goal: 1 },
+  { id: "upgrade", label: "Achète un savoir", goal: 1 },
+  { id: "workshops", label: "Possède 10 ateliers", goal: 10 },
+  { id: "tithe", label: "Règle ta dîme dans l'onglet du chantier", goal: 1 },
+  { id: "troops", label: "Recrute 10 troupes", goal: 10 },
+  { id: "defense", label: "Bâtis une défense", goal: 1 },
+  { id: "lord", label: "Pille un seigneur facile", goal: 1 },
+  { id: "alliance", label: "Rejoins ou crée une alliance", goal: 1 },
+  { id: "push", label: "Active les notifications", goal: 1 },
+] as const;
+export type QuestId = (typeof QUESTS)[number]["id"];
+/** Récompense d'une quête : 5 minutes de production, 100 pierres au moins ; la dernière donne aussi 5 écus. */
+export const QUEST_REWARD_SECONDS = 300;
+export const QUEST_MIN_REWARD = 100;
+export const QUEST_FINAL_ECUS = 5;
 /** Taille minimale d'une étape, pour un chantier sans joueur actif. */
 export const STAGE_MIN_SIZE = 50_000;
 

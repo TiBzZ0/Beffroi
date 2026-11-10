@@ -18,6 +18,7 @@ import {
   DONOR_TIER_ECUS,
   DONOR_TIER_BONUS,
   CURFEW_MINUTES,
+  QUESTS,
   VEIN_VISIBLE_MS,
   ACADEMY_SPEED,
   RESEARCH_QUEUE_MAX,
@@ -35,6 +36,7 @@ import {
 import {
   advance,
   inCurfew,
+  questProgress,
   armyWorth,
   clickValue,
   generatorCost,
@@ -124,6 +126,29 @@ export function Game({ userId }: { userId: string }) {
 }
 
 /** Panneau « Ce qui change » : les nouvelles règles, une fois à la connexion suivante. */
+/** B4 : accueil guidé, une quête à la fois. */
+function QuestCard({ snap }: { snap: GameSnapshot }) {
+  const i = snap.state.quest;
+  if (i === null || i === undefined || i >= QUESTS.length) return null;
+  const q = QUESTS[i];
+  const done = Math.min(q.goal, questProgress(snap.state, q.id, { alliance: snap.alliance !== null && snap.alliance !== undefined }));
+  return (
+    <div className="quest">
+      <div className="row-title">
+        📜 Quête {i + 1}/{QUESTS.length} : {q.label}
+      </div>
+      {q.goal > 1 && (
+        <div className="bar bar-thin">
+          <span style={{ width: `${(done / q.goal) * 100}%` }} />
+        </div>
+      )}
+      <div className="note num">
+        {q.goal > 1 ? `${done} / ${q.goal} · ` : ""}Récompense : 5 minutes de production{i === QUESTS.length - 1 ? " et 5 écus" : ""}.
+      </div>
+    </div>
+  );
+}
+
 /** C1 : la veine d'or apparaît 12 secondes ; le serveur décide de l'heure et de ce qu'elle rapporte. */
 function Vein({ veinAt, now, run }: { veinAt: number; now: number; run: ReturnType<typeof useGame>["run"] }) {
   const [taken, setTaken] = useState(0);
@@ -372,6 +397,7 @@ function Hero({ snap, rate, clickGain, game }: { snap: GameSnapshot; rate: numbe
           <span>{finished ? `${STAGES.length}/${STAGES.length}` : `étape ${w.stage + 1}/${STAGES.length}`}</span>
         </div>
       </div>
+      <QuestCard snap={snap} />
       {!finished && <ShareLine snap={snap} />}
       {!finished && !snap.state.titheSet && <TitheBanner run={game.run} />}
       <ResearchLine state={snap.state} now={game.serverNow()} />

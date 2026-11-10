@@ -991,3 +991,11 @@ a {
 @media (prefers-reduced-motion: reduce) {
   .vein { animation: none; }
 }
+
+.quest {
+  margin-top: 14px;
+  padding: 10px 12px;
+  border: 1px dashed var(--line);
+  border-radius: 10px;
+  text-align: left;
+}
