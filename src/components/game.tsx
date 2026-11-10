@@ -196,6 +196,7 @@ function Hero({ snap, rate, clickGain, game }: { snap: GameSnapshot; rate: numbe
             <span ref={counter}>{formatNumber(Math.floor(snap.state.stone))}</span>
           </div>
           <div className="stone-label">pierres taillées</div>
+          <ResearchLine state={snap.state} now={game.serverNow()} />
           <div className="rate num">{formatRate(rate)} / seconde</div>
           {(snap.state.catchUp ?? 0) > 0 && (
             <div className="catch-up" title="Bonus accordé tant que tu es loin derrière le premier joueur. Il diminue à mesure que tu le rattrapes.">
@@ -504,6 +505,25 @@ function duration(msLeft: number): string {
   const m = Math.max(0, Math.ceil(msLeft / 60_000));
   if (m < 60) return `${m} min`;
   return `${Math.floor(m / 60)} h ${String(m % 60).padStart(2, "0")}`;
+}
+
+/** Améliorations en cours, sous le compteur de pierre. */
+function ResearchLine({ state, now }: { state: PlayerState; now: number }) {
+  const queue = (state.research ?? []).filter((r) => r.endsAt > now);
+  if (queue.length === 0) return null;
+  return (
+    <ul className="research-line num">
+      {queue.map((r, i) => {
+        const def = COMBATANTS.get(r.id);
+        const level = levelOf(state, r.id) + (state.research ?? []).filter((q) => q.endsAt <= now && q.id === r.id).length + queue.slice(0, i + 1).filter((q) => q.id === r.id).length;
+        return (
+          <li key={`${r.id}-${r.endsAt}`}>
+            {i === 0 ? "⏳" : "⌛"} {def?.icon} {def?.name} niv. {level} · {duration(r.endsAt - now)}
+          </li>
+        );
+      })}
+    </ul>
+  );
 }
 
 /** Bandeau d'état sous le marteau : incendie, bouclier. */
