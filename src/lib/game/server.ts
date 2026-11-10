@@ -26,6 +26,8 @@ import {
   EVENT_NOTICE_MS,
   EVENT_WEIGHTS,
   MERCHANT_PRICE_SECONDS,
+  MAX_MARCHES,
+  LORD_TARGET_RADIUS,
   TOWER_REVEAL_CHANCE,
   TOWER_REVEAL_MAX,
   FEAST_GIFT_FACTOR,
@@ -872,27 +874,38 @@ async function tickLords(admin: SupabaseClient, season: SeasonView, entities: Ma
         })
         .filter((c) => !raidBlocker(state, c.s, { now, attackerId: lord.id, victimId: c.e.id, victimRate: c.rate, attackerIsLord: true, allowRepeat: lord.retaliateOnly, attackerArmy: army.attack }))
         .sort((a, b) => b.loot - a.loot);
-      // Le plus riche le plus souvent, mais pas toujours.
-      const pick = candidates.length > 0 ? candidates[Math.random() < 0.6 ? 0 : Math.floor(Math.random() * candidates.length)] : null;
+      // T6 : de préférence un joueur à moins de 8 cases ; le plus riche le plus souvent, mais pas toujours.
+      const positions = await loadPositions(admin, season.id, entities);
+      const home = positions.get(lord.id);
+      const near = home ? candidates.filter((c) => { const p = positions.get(c.e.id); return !!p && mapDistance(home, p) <= LORD_TARGET_RADIUS; }) : [];
+      const pool = near.length > 0 ? near : candidates;
+      const pick = pool.length > 0 ? pool[Math.random() < 0.6 ? 0 : Math.floor(Math.random() * pool.length)] : null;
       if (pick) {
         // A10 : l'armée du seigneur est taillée sur la défense de sa cible, pour une chance d'environ un tiers.
         const shaped = raidArmies(state, pick.s, { now, victimId: pick.e.id, attackerArmy: army.attack, stagesDone: stagesDoneAt(world, now) });
         const sized = armyForChance(army.attack, shaped.defense, LORD_RAID_CHANCE, shaped.opts);
         const ctx = { now, attackerId: lord.id, victimId: pick.e.id, victimRate: pick.rate, attackerIsLord: true, allowRepeat: lord.retaliateOnly, attackerArmy: armySize(sized) > 0 ? sized : army.attack, stagesDone: stagesDoneAt(world, now) };
-        const armiesNow = raidArmies(state, pick.s, ctx);
-        const chance = estimateChance(armiesNow.attack, armiesNow.defense, armiesNow.opts);
-        const r = resolveRaid(state, pick.s, { ...ctx, rng: Math.random });
-        if (r.ok) {
-          await admin.rpc("apply_raid", {
-            p_season: season.id,
-            p_attacker: toJson(me, r.value.attacker, nextRaid),
-            p_victim: toJson(pick.e, r.value.victim),
-            p_attacker_touch: false,
-            p_chronicle: chronicleDetails(r.value.report, chance),
-          });
-          notify(admin, [pick.e.id], r.value.report.success
-            ? { title: `${lord.blazon} ${lord.name} t'a pillé !`, body: `${Math.floor(r.value.report.stolen).toLocaleString("fr-FR")} pierres envolées.`, tag: "raid" }
-            : { title: "🛡️ Raid repoussé", body: `Tes défenses ont repoussé ${lord.name}.`, tag: "raid" });
+        // T6 : l'armée du seigneur part de sa case, à vitesse 1 ; le combat se jouera à l'arrivée.
+        if (!raidBlocker(state, pick.s, ctx) && (state.marches ?? []).length < MAX_MARCHES) {
+          const from = home;
+          const to = positions.get(pick.e.id);
+          const outMs = travelMs({ milicien: 1 }, from && to ? mapDistance(from, to) : MAP_SPAWN_RADIUS);
+          const towers = Number((pick.s.defenses as Record<string, number>).tour ?? 0);
+          const march: March = {
+            id: `${now.toString(36)}${Math.floor(Math.random() * 1e6).toString(36)}`,
+            kind: "raid",
+            target: pick.e.id,
+            troops: ctx.attackerArmy,
+            departAt: now,
+            arriveAt: now + outMs,
+            status: "out",
+            returnAt: 0,
+            revealed: Math.random() < Math.min(TOWER_REVEAL_MAX, TOWER_REVEAL_CHANCE * towers),
+            warned: false,
+            loot: 0,
+            ransom: 0,
+          };
+          await admin.rpc("commit_state", { p_season: season.id, p_state: toJson(me, { ...state, marches: [...(state.marches ?? []), march], lastRaidAt: now, lastRaidTarget: pick.e.id }, nextRaid), p_touch: false, p_contribution: 0, p_stage_bases: stageSizes, p_active_window_days: ACTIVE_WINDOW_DAYS, p_action: null, p_details: null });
           changed = true;
           continue;
         }
@@ -1616,18 +1629,31 @@ async function runAllianceAction(
     case "reinforce": {
       const host = entities.get(String(action.target));
       if (!host || !isAllied(me, host)) return { error: "On n'envoie des renforts qu'à un allié." };
-      const r = sendReinforcements(current, advanceOf(host), me.id, String(action.unit), Number(action.qty));
-      if (!r.ok) return { error: r.error };
-      if ((await writeStates(admin, seasonId, [{ e: me, state: r.value.sender }, { e: host, state: r.value.host }], "reinforce", { target: host.id, unit: action.unit, qty: action.qty })) === "conflict") return "conflict";
-      return { message: `🛡️ Renforts envoyés chez ${host.name} : ils défendront et attaqueront avec lui.`, state: r.value.sender };
+      // T6 : les renforts voyagent comme une armée.
+      const sending = sendTroops(current, { [String(action.unit)]: Number(action.qty) } as Army);
+      if (!sending.ok) return { error: sending.error };
+      const outMs = await travelBetween(admin, seasonId, entities, me.id, host.id, sending.value.sent);
+      const march: March = { id: marchId(), kind: "reinforce", target: host.id, troops: sending.value.sent, departAt: Date.now(), arriveAt: Date.now() + outMs, status: "out", returnAt: 0, revealed: true, warned: true, loot: 0, ransom: 0 };
+      const sender = { ...sending.value.state, marches: [...(current.marches ?? []), march] };
+      if ((await writeStates(admin, seasonId, [{ e: me, state: sender }], "reinforce", { target: host.id, unit: action.unit, qty: action.qty })) === "conflict") return "conflict";
+      return { message: `🛡️ Renforts en route vers ${host.name} : arrivée dans ${Math.round(outMs / 60_000)} min.`, state: sender };
     }
     case "recall": {
       const host = entities.get(String(action.host));
       if (!host) return { error: "Domaine inconnu." };
-      const r = recallReinforcements(current, advanceOf(host), me.id);
-      if (!r.ok) return { error: r.error };
-      if ((await writeStates(admin, seasonId, [{ e: me, state: r.value.owner }, { e: host, state: r.value.host }], "recall", { host: host.id })) === "conflict") return "conflict";
-      return { message: `Tes troupes rentrent de chez ${host.name}.`, state: r.value.owner };
+      const hostState = advanceOf(host);
+      const group = hostState.stationed?.[me.id];
+      if (!group || Object.keys(group).length === 0) return { error: "Tu n'as pas de troupes là-bas." };
+      if ((current.marches ?? []).length >= MAX_MARCHES) return { error: `${MAX_MARCHES} armées en route au plus.` };
+      // T6 : elles quittent l'allié tout de suite et rentrent par la route.
+      const outMs = await travelBetween(admin, seasonId, entities, host.id, me.id, group as Army);
+      const now = Date.now();
+      const march: March = { id: marchId(), kind: "reinforce", target: host.id, troops: { ...group } as Army, departAt: now - outMs, arriveAt: now, status: "back", returnAt: now + outMs, revealed: true, warned: true, loot: 0, ransom: 0, outcome: "recalled" };
+      const stationed = { ...hostState.stationed };
+      delete stationed[me.id];
+      const owner = { ...current, marches: [...(current.marches ?? []), march] };
+      if ((await writeStates(admin, seasonId, [{ e: me, state: owner }, { e: host, state: { ...hostState, stationed } }], "recall", { host: host.id })) === "conflict") return "conflict";
+      return { message: `Tes troupes quittent ${host.name} : retour dans ${Math.round(outMs / 60_000)} min.`, state: owner };
     }
   }
 }
@@ -2211,7 +2237,7 @@ function cleanMarches(raw: unknown): March[] {
     .filter((m) => m && typeof m === "object" && typeof m.id === "string" && typeof m.target === "string")
     .map((m) => ({
       id: String(m.id),
-      kind: "raid" as const,
+      kind: m.kind === "reinforce" ? ("reinforce" as const) : ("raid" as const),
       target: String(m.target),
       troops: armyCounts(m.troops ?? {}, UNIT_IDS) as Army,
       departAt: Number(m.departAt) || 0,
@@ -2271,12 +2297,30 @@ async function settleMarches(
 
   if (m.status === "back") {
     // Retour : survivants, butin et rançon rendus au domaine.
-    const landed = landMarch(advanceEntity(owner, now, world, flat), m.id);
+    const s = advanceEntity(owner, now, world, flat);
+    // Un seigneur n'a pas de troupes à loger : seul le butin rentre au coffre.
+    const landed = owner.isLord
+      ? { ...s, stone: s.stone + m.loot, totalPlundered: s.totalPlundered + m.loot, marches: (s.marches ?? []).filter((x) => x.id !== m.id) }
+      : landMarch(s, m.id);
     const r = await commit(owner, landed);
     if (r === "changed" && !owner.isLord && (m.loot > 0 || m.ransom > 0)) {
       notify(admin, [owner.id], { title: "🏇 Ton armée est rentrée", body: `Elle rapporte ${Math.floor(m.loot + m.ransom).toLocaleString("fr-FR")} pierres.`, tag: "march" });
     }
     return r;
+  }
+
+  if (m.kind === "reinforce") {
+    // T6 : les renforts ne défendent l'allié qu'une fois arrivés ; s'il n'est plus allié, ils rentrent.
+    const turnBack = { ...m, status: "back" as const, warned: true, returnAt: m.arriveAt + outMs, outcome: "turned" as const };
+    if (!victim || !isAllied(owner, victim)) return commit(owner, replace(owner.state, turnBack));
+    const host = advanceEntity(victim, at, world, flat);
+    const group = { ...(host.stationed?.[owner.id] ?? {}) } as Record<string, number>;
+    for (const [u, n] of Object.entries(m.troops) as [string, number][]) if (n > 0) group[u] = (group[u] ?? 0) + n;
+    const written = await writeStates(admin, seasonId, [
+      { e: owner, state: replace(owner.state, null) },
+      { e: victim, state: { ...host, stationed: { ...host.stationed, [owner.id]: group as PlayerState["troops"] } } },
+    ], "reinforce_arrive", { owner: owner.id, host: victim.id });
+    return written === "conflict" ? "conflict" : "changed";
   }
 
   if (!m.warned) {
@@ -2306,8 +2350,9 @@ async function settleMarches(
     allied: isAllied(owner, victim),
     atWar: !!warBetween(wars, owner.allianceId, victim.allianceId, at),
     attackerRate: aRate,
-    relativeSize: victim.isLord ? undefined : relativeSize(sizeOf(vState, vRate), attackerSizeOf(owner.id, aState, entities, aRate)),
+    relativeSize: victim.isLord || owner.isLord ? undefined : relativeSize(sizeOf(vState, vRate), attackerSizeOf(owner.id, aState, entities, aRate)),
     attackerArmy: m.troops,
+    attackerIsLord: owner.isLord,
     marching: true,
     allowRepeat: true,
   };
@@ -2344,11 +2389,23 @@ async function settleMarches(
   return "changed";
 }
 
+function marchId(): string {
+  return `${Date.now().toString(36)}${Math.floor(Math.random() * 1e6).toString(36)}`;
+}
+
+/** Durée de l'aller entre deux lieux de la carte pour une armée donnée. */
+async function travelBetween(admin: SupabaseClient, seasonId: number, entities: Map<string, Entity>, fromId: string, toId: string, army: Army): Promise<number> {
+  const positions = await loadPositions(admin, seasonId, entities);
+  const a = positions.get(fromId);
+  const b = positions.get(toId);
+  return travelMs(army, a && b ? mapDistance(a, b) : MAP_SPAWN_RADIUS);
+}
+
 /** T5 : armées qui approchent de mon domaine (passé la mi-chemin). */
 function incomingFor(meId: string, entities: Map<string, Entity>, now: number): IncomingView[] {
   return [...entities.values()].flatMap((e) =>
     (e.state.marches ?? [])
-      .filter((m) => m.target === meId && m.status === "out" && m.warned && m.arriveAt > now)
+      .filter((m) => m.kind === "raid" && m.target === meId && m.status === "out" && m.warned && m.arriveAt > now)
       .map((m) => ({ id: m.id, arriveAt: m.arriveAt, from: m.revealed ? e.name : null })),
   );
 }

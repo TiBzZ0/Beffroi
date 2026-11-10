@@ -671,3 +671,5 @@ export const MAX_MARCHES = 3;
 /** T5 : chaque tour d'archers donne 5 % de chance de voir le nom de l'attaquant, 90 % au plus. */
 export const TOWER_REVEAL_CHANCE = 0.05;
 export const TOWER_REVEAL_MAX = 0.9;
+/** T6 : un seigneur vise de préférence un joueur à moins de 8 cases. */
+export const LORD_TARGET_RADIUS = 8;

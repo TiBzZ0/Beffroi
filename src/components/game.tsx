@@ -1204,6 +1204,7 @@ function AllianceTab({ snap, live, now, run }: { snap: GameSnapshot; live: Playe
   };
   return (
     <>
+      <Marches snap={snap} now={now} run={run} />
       <Alliance snap={snap} run={run} />
       <Fortress snap={snap} live={live} now={now} run={run} />
       {snap.alliance && <Wars snap={snap} run={run} now={now} />}
@@ -1493,11 +1494,12 @@ function Marches({ snap, now, run }: { snap: GameSnapshot; now: number; run: Ret
       {list.map((m) => {
         const back = m.status === "back";
         const left = Math.max(0, (back ? m.returnAt : m.arriveAt) - now);
-        const verdict = m.outcome === "won" ? "victoire" : m.outcome === "lost" ? "repoussée" : m.outcome === "turned" ? "demi-tour, cible protégée" : m.outcome === "recalled" ? "rappelée" : "";
+        const verdict = m.outcome === "won" ? "victoire" : m.outcome === "lost" ? "repoussée" : m.outcome === "turned" ? (m.kind === "reinforce" ? "demi-tour" : "demi-tour, cible protégée") : m.outcome === "recalled" ? "rappelée" : "";
         return (
           <li key={m.id}>
             <span>
-              {back ? "↩️" : "🏇"} {armyIcons(m.troops, "plus personne")} {back ? `rentre de ${nameOf(m.target)}` : `vers ${nameOf(m.target)}`}
+              {back ? "↩️" : m.kind === "reinforce" ? "🛡️" : "🏇"} {armyIcons(m.troops, "plus personne")}{" "}
+              {back ? `rentre de ${nameOf(m.target)}` : m.kind === "reinforce" ? `en renfort vers ${nameOf(m.target)}` : `vers ${nameOf(m.target)}`}
               {verdict ? ` (${verdict})` : ""} · {left > 0 ? duration(left) : "imminent"}
               {back && m.loot + m.ransom > 0 ? ` · rapporte ${formatNumber(m.loot + m.ransom)} 🪨` : ""}
             </span>

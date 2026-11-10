@@ -233,7 +233,8 @@ export function buyFromMerchant(state: PlayerState, choice: string, eventId: num
 
 export interface March {
   id: string;
-  kind: "raid";
+  /** Raid, ou renforts envoyés à un allié (T6). */
+  kind: "raid" | "reinforce";
   target: string;
   troops: Army;
   departAt: number;

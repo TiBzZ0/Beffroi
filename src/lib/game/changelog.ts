@@ -225,4 +225,13 @@ export const CHANGELOG: ChangeEntry[] = [
       "🗺️ Tes armées en route s'affichent sur la carte.",
     ],
   },
+  {
+    id: 28,
+    date: "10 novembre",
+    items: [
+      "👑 Les seigneurs pillards voyagent eux aussi : leur armée part de leur case et tu es prévenu à mi-chemin, comme pour un joueur. Ils visent de préférence les domaines à moins de 8 cases.",
+      "🛡️ Les renforts voyagent : ils ne défendent ton allié qu'une fois arrivés, et rentrent par la route quand tu les rappelles.",
+      "⚖️ Pour savoir si une cible est trop petite et calculer l'équité, c'est toute ton armée qui compte (domaine, routes, renforts chez tes alliés), pas seulement le détachement envoyé.",
+    ],
+  },
 ];
