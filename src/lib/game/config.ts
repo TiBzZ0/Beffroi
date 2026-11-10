@@ -400,3 +400,23 @@ export const CATCH_UP_MAX = 0.8;
  * pour rester une menace. Étalon = max(médiane, armée du plus fort × ce facteur).
  */
 export const STRONG_LORD_TOP_SHARE = 0.25;
+
+// Événements : une caravane marchande ou un colosse apparaît régulièrement pour tout le monde.
+/** Pause entre deux événements. */
+export const EVENT_GAP_MS = 2 * 60 * 60 * 1000;
+/** Caravane : 1 h pour la piller, une fois par joueur ; chaque assaut réussi emporte une part de sa pierre. */
+export const CARAVAN_MS = 60 * 60 * 1000;
+/** Sa pierre de départ : 45 min de production de tous les joueurs réunis. */
+export const CARAVAN_PRIZE_SECONDS = 45 * 60;
+/** Part de la pierre de départ emportée par un assaut réussi. */
+export const CARAVAN_TAKE = 0.25;
+/** Escorte (reformée à chaque assaut) : troupes médianes des joueurs × ce facteur. */
+export const CARAVAN_ESCORT_POWER = 0.6;
+export const CARAVAN_ESCORT: Partial<Record<CombatantId, number>> = { milicien: 0.3, piquier: 0.3, arbaletrier: 0.4 };
+/** Colosse : 6 h pour l'abattre à plusieurs ; ses pertes ne se reforment pas. */
+export const COLOSSUS_MS = 6 * 60 * 60 * 1000;
+/** Son armée : toutes les troupes des joueurs réunies × ce facteur (au moins 3 fois la médiane). */
+export const COLOSSUS_POWER = 0.6;
+export const COLOSSUS_ARMY: Partial<Record<CombatantId, number>> = { chevalier: 0.35, piquier: 0.3, arbaletrier: 0.35 };
+/** Prime partagée au prorata des dégâts : valeur de son armée × ce facteur. */
+export const COLOSSUS_BOUNTY = 1;

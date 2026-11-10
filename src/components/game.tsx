@@ -36,7 +36,7 @@ import {
   type PlayerState,
 } from "@/lib/game/engine";
 import { formatNumber, formatRate } from "@/lib/game/format";
-import { worldFrom, type AllianceSummary, type ChronicleEntry, type GameSnapshot, type RivalView } from "@/lib/game/types";
+import { worldFrom, type AllianceSummary, type ChronicleEntry, type EventView, type GameSnapshot, type RivalView } from "@/lib/game/types";
 import { useGame, useLeaderboard, useTick } from "./use-game";
 
 type Tab = "ateliers" | "ameliorations" | "chantier" | "raids" | "alliance" | "classement";
@@ -487,6 +487,7 @@ function Raids({ snap, live, now, run }: { snap: GameSnapshot; live: PlayerState
           </button>
         ))}
       </div>
+      {snap.event && <EventCard e={snap.event} now={now} busy={busy !== null} onAttack={() => act("event", { type: "event_attack" })} />}
       <p className="raid-state">
         {cooldown > 0 ? `⏳ Tes troupes se reposent encore ${duration(cooldown)}.` : "⚔️ Tes troupes sont prêtes."}
       </p>
@@ -953,6 +954,49 @@ function armyIcons(army: Record<string, number>, empty = "personne"): string {
   return parts.length ? parts.join("  ") : empty;
 }
 
+/** Événement en cours (ou le prochain) en tête de l'onglet Raids. */
+function EventCard({ e, now, busy, onAttack }: { e: EventView; now: number; busy: boolean; onAttack: () => void }) {
+  const icon = e.kind === "caravane" ? "🐪" : "🗿";
+  if (!e.active) {
+    return (
+      <p className="note event-next">
+        {icon} Prochain événement : {e.name}, {e.startsAt > now ? `dans ${duration(e.startsAt - now)}` : "imminent"}.
+      </p>
+    );
+  }
+  const pct = Math.round(e.chance * 100);
+  return (
+    <div className="row event-card">
+      <div className="row-icon" aria-hidden>
+        {icon}
+      </div>
+      <div>
+        <div className="row-title">
+          {e.name}
+          <span className="badge badge-level-3">encore {duration(Math.max(0, e.endsAt - now))}</span>
+        </div>
+        <div className="row-desc">{e.description}</div>
+        <div className="row-desc army-line num">{armyIcons(e.army)}</div>
+        <div className="event-bar" aria-label="Défenseurs restants">
+          <span style={{ width: `${Math.round((e.kind === "caravane" ? (e.prize > 0 ? e.pool / e.prize : 0) : e.armyLeft) * 100)}%` }} />
+        </div>
+        <div className="row-desc num">
+          {e.kind === "caravane"
+            ? `Chargement : ${formatNumber(e.pool)} / ${formatNumber(e.prize)} 🪨 · ${e.mine > 0 ? `tu as pris ${formatNumber(e.mine)} 🪨` : `un assaut réussi rapporte ${formatNumber(e.take)} 🪨`}`
+            : `Prime : ${formatNumber(e.pool)} 🪨 · ${e.attackers} combattant${e.attackers > 1 ? "s" : ""} · ta part : ${Math.round(e.mine * 100)} %`}
+        </div>
+        <div className="row-desc">
+          {e.blocker ?? (e.kind === "caravane" ? `${pct} % de chances de battre l'escorte.` : `Un assaut devrait faucher environ ${formatNumber(e.take)} 🪨 de son armée.`)}
+        </div>
+      </div>
+      <button className="btn btn-primary" disabled={busy || e.blocker !== null} onClick={onAttack}>
+        {e.kind === "caravane" ? "Piller" : "Attaquer"}
+        {e.kind === "caravane" && <span className="cost num">{pct} %</span>}
+      </button>
+    </div>
+  );
+}
+
 function Chronicle({ entries, me, now, rivals, alliances = [] }: { entries: ChronicleEntry[]; me: string; now: number; rivals: RivalView[]; alliances?: AllianceSummary[] }) {
   const allianceName = (id: number | null | undefined) => alliances.find((a) => a.id === id)?.name ?? "une alliance disparue";
   const nameOf = (id: string) => (id === me ? "toi" : (rivals.find((r) => r.id === id)?.name ?? "un allié"));
@@ -977,6 +1021,17 @@ function Chronicle({ entries, me, now, rivals, alliances = [] }: { entries: Chro
               d.winner != null
                 ? `🏆 ${allianceName(d.winner)} remporte la guerre ${allianceName(d.a)} – ${allianceName(d.b)} (${formatNumber(d.scoreA ?? 0)} contre ${formatNumber(d.scoreB ?? 0)}) et partage ${formatNumber(d.bounty ?? 0)} pierres de prime.`
                 : `🤝 La guerre ${allianceName(d.a)} – ${allianceName(d.b)} se termine sur une égalité.`;
+        } else if (e.kind === "event") {
+          const d = e.details;
+          const shares = Object.entries(d.shares ?? {})
+            .filter(([, v]) => v > 0)
+            .sort((a, b) => b[1] - a[1])
+            .map(([id]) => nameOf(id))
+            .slice(0, 4)
+            .join(", ");
+          if (d.event === "caravane")
+            text = (d.stolen ?? 0) > 0 ? `🐪 La caravane marchande est repartie, allégée de ${formatNumber(d.stolen ?? 0)} pierres (${shares}).` : "🐪 La caravane marchande est repartie intacte.";
+          else text = d.success ? `🗿 Le Colosse est tombé ! ${formatNumber(d.bounty ?? 0)} pierres de prime partagées (${shares}).` : "🗿 Le Colosse s'en va invaincu.";
         } else if (e.kind === "fortress") {
           text = e.details.success
             ? `🏰 ${who(e.actorId, e.actorName, true)} ${e.actorId === me ? "as pris" : "a pris"} la forteresse pour ${allianceName(e.details.alliance)} !`

@@ -54,7 +54,7 @@ export interface RivalView {
 export interface ChronicleEntry {
   id: number;
   at: number;
-  kind: "raid" | "gift" | "spy" | "war" | "fortress";
+  kind: "raid" | "gift" | "spy" | "war" | "fortress" | "event";
   actorId: string | null;
   actorName: string;
   targetId: string | null;
@@ -80,6 +80,9 @@ export interface ChronicleEntry {
     winner?: number | null;
     bounty?: number;
     alliance?: number;
+    /** Événement : type et parts de chacun (pierre prise ou dégâts). */
+    event?: "caravane" | "colosse";
+    shares?: Record<string, number>;
   };
 }
 
@@ -99,6 +102,7 @@ export interface GameSnapshot {
   alliances: AllianceSummary[];
   war: WarView | null;
   fortress: FortressView;
+  event: EventView | null;
   /** Fournie lors des synchronisations et des raids ; sinon le client garde la précédente. */
   chronicle?: ChronicleEntry[];
 }
@@ -134,7 +138,32 @@ export type GameAction =
   | { type: "war_declare"; alliance: number }
   | { type: "fortress_attack" }
   | { type: "fortress_station"; unit: string; qty: number }
-  | { type: "fortress_recall" };
+  | { type: "fortress_recall" }
+  | { type: "event_attack" };
+
+export interface EventView {
+  id: number;
+  kind: "caravane" | "colosse";
+  name: string;
+  description: string;
+  /** Actif : fin de l'événement. Sinon : arrivée du prochain. */
+  active: boolean;
+  startsAt: number;
+  endsAt: number;
+  army: Record<string, number>;
+  /** Part des défenseurs encore debout (0 à 1). */
+  armyLeft: number;
+  /** Caravane : pierre restante. Colosse : prime à partager. */
+  pool: number;
+  prize: number;
+  /** Caravane : pierre que j'ai prise. Colosse : ma part des dégâts (0 à 1). */
+  mine: number;
+  attackers: number;
+  chance: number;
+  /** Caravane : ce qu'un assaut réussi rapporte. */
+  take: number;
+  blocker: string | null;
+}
 
 export interface AllianceSummary {
   id: number;

@@ -14,6 +14,16 @@ import {
   SPY_INTEL_MS,
   MAX_ALLIANCE_SIZE,
   FORTRESS_NAME,
+  EVENT_GAP_MS,
+  CARAVAN_MS,
+  CARAVAN_PRIZE_SECONDS,
+  CARAVAN_TAKE,
+  CARAVAN_ESCORT_POWER,
+  CARAVAN_ESCORT,
+  COLOSSUS_MS,
+  COLOSSUS_POWER,
+  COLOSSUS_ARMY,
+  COLOSSUS_BOUNTY,
   FORTRESS_WALLS,
   FORTRESS_WALLS_POWER,
   RAID_COOLDOWN_MS,
@@ -76,8 +86,9 @@ import {
   type InviteView,
   type FortressView,
   type WarView,
+  type EventView,
 } from "./types";
-import { armyFromBudget, armySize, armyValue, battle, cleanArmy, estimateChance, type Army } from "./battle";
+import { armyFromBudget, armySize, armyValue, battle, cleanArmy, estimateChance, seededRng, type Army } from "./battle";
 import { recordContribution, topContributors } from "@/lib/redis";
 
 // Toute la logique qui fait foi : charger l'état, le recalculer, appliquer l'intention
@@ -677,6 +688,184 @@ function fortressView(me: Entity, state: PlayerState, f: FortressRow, entities: 
   };
 }
 
+// ---------------------------------------------------------------------------
+// Événements : caravane marchande et colosse
+// ---------------------------------------------------------------------------
+
+type EventKind = "caravane" | "colosse";
+
+interface EventRow {
+  id: number;
+  kind: EventKind;
+  starts_at: string;
+  ends_at: string;
+  army: Army;
+  army_start: Army;
+  pool: number;
+  prize: number;
+  attackers: Record<string, number>;
+  version: number;
+}
+
+const EVENT_INFO: Record<EventKind, { name: string; description: string }> = {
+  caravane: {
+    name: "Caravane marchande",
+    description: "Elle traverse la région chargée de pierre. Un assaut par joueur ; chaque victoire emporte une part du chargement.",
+  },
+  colosse: {
+    name: "Le Colosse de Grisemont",
+    description: "Une armée immense qui ne se reforme pas. Abattez-la à plusieurs : la prime est partagée selon les pertes infligées.",
+  },
+};
+
+interface EventState {
+  active: EventRow | null;
+  /** Arrivée du prochain événement quand aucun n'est en cours. */
+  nextAt: number;
+  nextKind: EventKind;
+}
+
+function eventRow(r: Record<string, unknown>): EventRow {
+  return {
+    id: Number(r.id),
+    kind: r.kind as EventKind,
+    starts_at: r.starts_at as string,
+    ends_at: r.ends_at as string,
+    army: (r.army ?? {}) as Army,
+    army_start: (r.army_start ?? {}) as Army,
+    pool: Number(r.pool ?? 0),
+    prize: Number(r.prize ?? 0),
+    attackers: (r.attackers ?? {}) as Record<string, number>,
+    version: Number(r.version ?? 0),
+  };
+}
+
+/** Clôt les événements finis, lance le suivant quand la pause est passée, et renvoie celui en cours. */
+async function loadEvent(admin: SupabaseClient, seasonId: number, now: number, entities: Map<string, Entity>, world: WorldState, flat: Map<string, number>): Promise<EventState> {
+  const { data: open } = await admin.from("events").select("*").eq("season_id", seasonId).eq("settled", false);
+  for (const raw of open ?? []) {
+    const e = eventRow(raw);
+    const finished = ms(e.ends_at) <= now || (e.kind === "caravane" && e.pool <= 0) || (e.kind === "colosse" && armySize(e.army) === 0);
+    if (!finished) return { active: e, nextAt: ms(e.ends_at), nextKind: e.kind === "caravane" ? "colosse" : "caravane" };
+    await admin.rpc("settle_event", { p_event: e.id });
+  }
+  const { data: last } = await admin.from("events").select("kind, ends_at").eq("season_id", seasonId).order("ends_at", { ascending: false }).limit(1).maybeSingle();
+  const nextKind: EventKind = last?.kind === "caravane" ? "colosse" : "caravane";
+  const nextAt = last ? ms(last.ends_at as string) + EVENT_GAP_MS : now;
+  const humans = [...entities.values()].filter((e) => !e.isLord);
+  if (now < nextAt || humans.length === 0) return { active: null, nextAt, nextKind };
+
+  let army: Army;
+  let prize: number;
+  let duration: number;
+  if (nextKind === "caravane") {
+    army = armyFromBudget(troopBudget(entities) * CARAVAN_ESCORT_POWER, CARAVAN_ESCORT);
+    prize = Math.floor(humans.reduce((sum, e) => sum + currentRate(e, advance(e.state, now, world), now, world, flat), 0) * CARAVAN_PRIZE_SECONDS);
+    duration = CARAVAN_MS;
+  } else {
+    const total = humanArmies(entities).reduce((a, b) => a + b, 0);
+    army = armyFromBudget(Math.max(total * COLOSSUS_POWER, troopBudget(entities) * 3), COLOSSUS_ARMY);
+    prize = Math.floor(armyValue(army) * COLOSSUS_BOUNTY);
+    duration = COLOSSUS_MS;
+  }
+  // L'index unique empêche deux événements simultanés si deux joueurs arrivent en même temps.
+  await admin.from("events").insert({ season_id: seasonId, kind: nextKind, ends_at: iso(now + duration), army, army_start: army, pool: prize, prize });
+  const { data: created } = await admin.from("events").select("*").eq("season_id", seasonId).eq("settled", false).maybeSingle();
+  if (!created) return { active: null, nextAt: now + EVENT_GAP_MS, nextKind };
+  const e = eventRow(created);
+  return { active: e, nextAt: ms(e.ends_at), nextKind };
+}
+
+/** Défenseurs qu'affronte un assaut : l'escorte entière de la caravane, ou ce qu'il reste du colosse. */
+function eventDefense(e: EventRow): Army {
+  return e.kind === "caravane" ? e.army_start : e.army;
+}
+
+function eventBlocker(state: PlayerState, e: EventRow, meId: string, now: number): string | null {
+  if (e.kind === "caravane" && meId in e.attackers) return "Tu as déjà attaqué cette caravane.";
+  if (e.kind === "caravane" && e.pool <= 0) return "La caravane est vide.";
+  if (now - state.lastRaidAt < RAID_COOLDOWN_MS) return "Tes troupes se reposent encore.";
+  if (armySize(attackArmy(state)) === 0) return "Il te faut des troupes pour attaquer.";
+  return null;
+}
+
+async function runEventAttack(admin: SupabaseClient, seasonId: number, me: Entity, current: PlayerState, ev: EventState, now: number): Promise<"conflict" | { error?: string; state?: PlayerState; message?: string; settle?: number }> {
+  const e = ev.active;
+  if (!e) return { error: "Aucun événement en cours." };
+  const blocked = eventBlocker(current, e, me.id, now);
+  if (blocked) return { error: blocked };
+  const fight = battle(attackArmy(current), eventDefense(e), Math.random);
+  const mine = splitTroopLosses(current, fight.attackerLost);
+  let after: PlayerState = { ...current, troops: mine.troops, stationed: mine.stationed, lastRaidAt: now };
+  const attackers = { ...e.attackers };
+  let army = e.army;
+  let pool = e.pool;
+  let message: string;
+  if (e.kind === "caravane") {
+    const take = fight.success ? Math.floor(Math.min(pool, e.prize * CARAVAN_TAKE)) : 0;
+    pool -= take;
+    after = { ...after, stone: after.stone + take };
+    attackers[me.id] = take;
+    message = fight.success
+      ? `🐪 Caravane pillée : +${Math.round(take).toLocaleString("fr-FR")} pierres ! Tes pertes : ${describeArmy(fight.attackerLost)}.`
+      : `🐪 L'escorte de la caravane t'a repoussé. Tes pertes : ${describeArmy(fight.attackerLost)}.`;
+  } else {
+    const dealt = armyValue(fight.defenderLost);
+    army = fight.defenderLeft;
+    attackers[me.id] = (attackers[me.id] ?? 0) + dealt;
+    message =
+      armySize(army) === 0
+        ? `🗿 Le Colosse est abattu ! La prime de ${Math.round(pool).toLocaleString("fr-FR")} pierres est partagée selon les pertes infligées.`
+        : `🗿 Tu as fauché ${describeArmy(fight.defenderLost) || "personne"}. Tes pertes : ${describeArmy(fight.attackerLost)}.`;
+  }
+  const { data, error } = await admin.rpc("apply_event", {
+    p_season: seasonId,
+    p_state: toJson(me, after),
+    p_event: e.id,
+    p_version: e.version,
+    p_army: army,
+    p_pool: pool,
+    p_attackers: attackers,
+    p_action: "event_attack",
+    p_details: { event: e.kind, success: fight.success, attackerLost: fight.attackerLost, defenderLost: fight.defenderLost },
+  });
+  if (error?.message.includes("beffroi_conflict") || (data as { conflict?: boolean } | null)?.conflict) return "conflict";
+  if (error) throw new Error(`Événement : ${error.message}`);
+  const finished = (e.kind === "caravane" && pool <= 0) || (e.kind === "colosse" && armySize(army) === 0);
+  return { state: after, message, settle: finished ? e.id : undefined };
+}
+
+function eventView(meId: string, state: PlayerState, ev: EventState, now: number): EventView | null {
+  const e = ev.active;
+  if (!e) {
+    const info = EVENT_INFO[ev.nextKind];
+    return { id: 0, kind: ev.nextKind, ...info, active: false, startsAt: ev.nextAt, endsAt: ev.nextAt, army: {}, armyLeft: 1, pool: 0, prize: 0, mine: 0, attackers: 0, chance: 0, take: 0, blocker: null };
+  }
+  const defense = eventDefense(e);
+  const startValue = armyValue(e.army_start);
+  const totalDealt = Object.values(e.attackers).reduce((a, b) => a + b, 0);
+  let take: number;
+  if (e.kind === "caravane") take = Math.floor(Math.min(e.pool, e.prize * CARAVAN_TAKE));
+  else take = armyValue(battle(attackArmy(state), defense, seededRng(0xc0105)).defenderLost);
+  return {
+    id: e.id,
+    kind: e.kind,
+    ...EVENT_INFO[e.kind],
+    active: true,
+    startsAt: ms(e.starts_at),
+    endsAt: ms(e.ends_at),
+    army: defense as Record<string, number>,
+    armyLeft: startValue > 0 ? armyValue(defense) / startValue : 0,
+    pool: e.pool,
+    prize: e.prize,
+    mine: e.kind === "caravane" ? (e.attackers[meId] ?? 0) : totalDealt > 0 ? (e.attackers[meId] ?? 0) / totalDealt : 0,
+    attackers: Object.keys(e.attackers).length,
+    chance: estimateChance(attackArmy(state), defense),
+    take,
+    blocker: eventBlocker(state, e, meId, now),
+  };
+}
+
 function warView(me: Entity, wars: WarRow[], names: Map<number, string>): WarView | null {
   const w = warOf(wars, me.allianceId);
   if (!w) return null;
@@ -965,7 +1154,7 @@ export type ActionResult = { ok: true; snapshot: GameSnapshot; message?: string 
 /** Exécute une intention du joueur et renvoie l'état qui fait foi. */
 export async function runAction(admin: SupabaseClient, userId: string, action: GameAction): Promise<ActionResult> {
   const season = await getActiveSeason(admin);
-  const wantsChronicle = action.type === "sync" || action.type === "raid" || action.type === "spy";
+  const wantsChronicle = action.type === "sync" || action.type === "raid" || action.type === "spy" || action.type === "event_attack";
 
   for (let attempt = 0; attempt < MAX_ATTEMPTS; attempt++) {
     let [worksite, entities] = await Promise.all([loadWorksite(admin, season.id), loadEntities(admin, season.id, userId)]);
@@ -979,13 +1168,28 @@ export async function runAction(admin: SupabaseClient, userId: string, action: G
     const world = worldFrom(worksite);
     const flat = lordRates(entities, world, now);
     let conflicts = await loadConflicts(admin, season.id, now);
+    let events = await loadEvent(admin, season.id, now, entities, world, flat);
     let allianceNames = await loadAllianceNames(admin, season.id);
     const current = advance(me.state, now, world);
     let finalState = current;
     let error: string | null = null;
     let message: string | undefined;
 
-    if (CONFLICT_ACTIONS.has(action.type)) {
+    if (action.type === "event_attack") {
+      const r = await runEventAttack(admin, season.id, me, current, events, now);
+      if (r === "conflict") continue;
+      if (r.error) error = r.error;
+      message = r.message;
+      if (r.state) finalState = r.state;
+      if (r.settle !== undefined) {
+        // Colosse abattu : la prime vient d'être versée, on relit l'état qui fait foi.
+        await admin.rpc("settle_event", { p_event: r.settle });
+        entities = await loadEntities(admin, season.id, userId);
+        const fresh = entities.get(userId);
+        if (fresh) finalState = advance(fresh.state, now, world);
+      }
+      events = await loadEvent(admin, season.id, now, entities, world, flat);
+    } else if (CONFLICT_ACTIONS.has(action.type)) {
       const r = await runConflictAction(admin, season.id, me, current, entities, conflicts, allianceNames, action as Parameters<typeof runConflictAction>[7], now);
       if (r === "conflict") continue;
       if (r.error) error = r.error;
@@ -1138,6 +1342,7 @@ export async function runAction(admin: SupabaseClient, userId: string, action: G
       ...(await allianceInfo(admin, season.id, meNow, finalState, entities, allianceNames)),
       alliances: [...allianceNames].map(([id, name]) => ({ id, name, size: [...entities.values()].filter((e) => e.allianceId === id).length })),
       war: warView(meNow, conflicts.wars, allianceNames),
+      event: eventView(userId, finalState, events, now),
       fortress: fortressView(meNow, finalState, conflicts.fortress, entities, allianceNames, now, intel.get(FORTRESS_INTEL) ?? null),
       chronicle: wantsChronicle ? await loadChronicle(admin, season.id, entities) : undefined,
     };
