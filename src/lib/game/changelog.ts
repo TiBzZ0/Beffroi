@@ -184,4 +184,12 @@ export const CHANGELOG: ChangeEntry[] = [
       "🐞 Le butin estimé d'un joueur tient enfin compte du plafond de 2 heures de ta production et du coefficient d'équité, comme le vrai raid.",
     ],
   },
+  {
+    id: 24,
+    date: "10 novembre",
+    items: [
+      "💬 Nouvel onglet Messages : un canal général pour tout le royaume et un canal privé pour ton alliance. Les messages font 200 caractères au plus, un toutes les 3 secondes.",
+      "👍 Tu peux réagir à un message d'un clic (👍 ⚔️ 🛡️ 🏗️ 😂 ❤️).",
+    ],
+  },
 ];

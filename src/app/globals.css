@@ -381,7 +381,7 @@ a {
 
 .tabs {
   display: grid;
-  grid-template-columns: repeat(7, 1fr);
+  grid-template-columns: repeat(8, 1fr);
   border-bottom: 1px solid var(--line);
 }
 @media (max-width: 480px) {
@@ -1087,4 +1087,64 @@ a {
 }
 .simulator p {
   margin: 0 0 6px;
+}
+
+/* B11 : messages */
+.chat {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 8px;
+  max-height: 420px;
+  overflow-y: auto;
+}
+.chat li {
+  padding: 6px 10px;
+  border-radius: var(--radius);
+  background: var(--panel-2);
+}
+.chat li.me {
+  border-left: 3px solid var(--gold);
+}
+.chat-body {
+  overflow-wrap: anywhere;
+}
+.chat-reactions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin-top: 4px;
+}
+.chat-react {
+  appearance: none;
+  border: 1px solid var(--line);
+  background: var(--panel);
+  color: var(--ink);
+  border-radius: 999px;
+  padding: 1px 7px;
+  font-size: 0.8rem;
+  cursor: pointer;
+}
+.chat-react.idle {
+  opacity: 0.45;
+}
+.chat-react.on {
+  border-color: var(--gold);
+  background: var(--bg-deep);
+}
+.chat-form {
+  display: flex;
+  gap: 8px;
+  margin-top: 10px;
+}
+.chat-form input {
+  flex: 1;
+  min-width: 0;
+  padding: 8px 10px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--panel);
+  color: var(--ink);
+  font: inherit;
 }

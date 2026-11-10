@@ -1,4 +1,5 @@
 "use client";
+import type { ChatChannel, ChatView } from "@/lib/game/chat-config";
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { MAX_CLICKS_PER_SECOND } from "@/lib/game/config";
@@ -425,4 +426,49 @@ export function usePush() {
   }, []);
 
   return { state, enable, disable };
+}
+
+/** B11 : messages d'un canal, relus toutes les 8 secondes tant que l'onglet est ouvert. */
+export function useChat(channel: ChatChannel) {
+  const [view, setView] = useState<ChatView | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  useEffect(() => {
+    let alive = true;
+    const load = async () => {
+      try {
+        const res = await fetch(`/api/chat?channel=${channel}`, { cache: "no-store" });
+        if (res.ok && alive) setView((await res.json()) as ChatView);
+      } catch {
+        // on garde les anciens messages
+      }
+    };
+    void load();
+    const id = setInterval(load, 8_000);
+    return () => {
+      alive = false;
+      clearInterval(id);
+    };
+  }, [channel]);
+  const post = async (payload: Record<string, unknown>): Promise<boolean> => {
+    try {
+      const res = await fetch("/api/chat", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ channel, ...payload }) });
+      const data = (await res.json()) as ChatView & { error?: string };
+      if (!res.ok) {
+        setError(data.error ?? "Envoi impossible.");
+        return false;
+      }
+      setError(null);
+      setView(data);
+      return true;
+    } catch {
+      setError("Le messager s'est perdu, réessaie.");
+      return false;
+    }
+  };
+  return {
+    view: view?.channel === channel ? view : null,
+    error,
+    send: (body: string) => post({ body }),
+    react: (id: number, emoji: string) => post({ id, emoji }),
+  };
 }

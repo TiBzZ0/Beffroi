@@ -70,10 +70,11 @@ import {
 import { formatNumber, formatRate } from "@/lib/game/format";
 import { battle, seededRng, type Army } from "@/lib/game/battle";
 import { worldFrom, type AwaySummary, type LotView, type AllianceSummary, type ChronicleEntry, type EventView, type GameSnapshot, type RivalView } from "@/lib/game/types";
-import { useGame, useLeaderboard, usePush, useTick } from "./use-game";
+import { useChat, useGame, useLeaderboard, usePush, useTick } from "./use-game";
+import { CHAT_MAX_LENGTH, CHAT_REACTIONS, type ChatChannel } from "@/lib/game/chat-config";
 import { CHANGELOG } from "@/lib/game/changelog";
 
-type Tab = "ateliers" | "ameliorations" | "chantier" | "armee" | "raids" | "alliance" | "classement";
+type Tab = "ateliers" | "ameliorations" | "chantier" | "armee" | "raids" | "alliance" | "messages" | "classement";
 type Qty = 1 | 10 | "max";
 const DAY_MS = 86_400_000;
 
@@ -142,6 +143,7 @@ export function Game({ userId }: { userId: string }) {
             <TabButton id="armee" tab={tab} setTab={selectTab} label="Armée" dot={researchDone} />
             <TabButton id="raids" tab={tab} setTab={selectTab} label={eventLive ? "Raids ⚡" : "Raids"} dot={eventLive || snap.rivals.some((r) => r.revenge && !r.blocker)} />
             <TabButton id="alliance" tab={tab} setTab={selectTab} label="Alliance" dot={snap.invites.length > 0} />
+            <TabButton id="messages" tab={tab} setTab={selectTab} label="Messages" />
             <TabButton id="classement" tab={tab} setTab={selectTab} label="Rangs" />
           </div>
           <div className="tab-body" role="tabpanel">
@@ -151,6 +153,7 @@ export function Game({ userId }: { userId: string }) {
             {tab === "armee" && <Army snap={snap} live={live} now={now} run={game.run} />}
             {tab === "raids" && <Raids snap={snap} live={live} now={now} run={game.run} />}
             {tab === "alliance" && <AllianceTab snap={snap} live={live} now={now} run={game.run} />}
+            {tab === "messages" && <Chat userId={userId} hasAlliance={!!snap.alliance} now={now} />}
             {tab === "classement" && <Ranking boards={leaderboard} userId={userId} />}
           </div>
         </section>
@@ -1888,13 +1891,7 @@ function Chronicle({ entries, me, now, rivals, alliances = [] }: { entries: Chro
   const allianceName = (id: number | null | undefined) => alliances.find((a) => a.id === id)?.name ?? "une alliance disparue";
   const nameOf = (id: string) => (id === me ? "toi" : (rivals.find((r) => r.id === id)?.name ?? "un allié"));
   if (entries.length === 0) return <p className="empty">Le royaume est calme. Pour l&apos;instant…</p>;
-  const ago = (t: number) => {
-    const m = Math.floor((now - t) / 60_000);
-    if (m < 1) return "à l'instant";
-    if (m < 60) return `il y a ${m} min`;
-    if (m < 1440) return `il y a ${Math.floor(m / 60)} h`;
-    return `il y a ${Math.floor(m / 1440)} j`;
-  };
+  const ago = (t: number) => agoText(t, now);
   const who = (id: string | null, name: string, cap = false) => (id === me ? (cap ? "Tu" : "toi") : name);
   return (
     <ul className="chronicle">
@@ -1969,6 +1966,78 @@ function Chronicle({ entries, me, now, rivals, alliances = [] }: { entries: Chro
         );
       })}
     </ul>
+  );
+}
+
+function agoText(t: number, now: number): string {
+  const m = Math.floor((now - t) / 60_000);
+  if (m < 1) return "à l'instant";
+  if (m < 60) return `il y a ${m} min`;
+  if (m < 1440) return `il y a ${Math.floor(m / 60)} h`;
+  return `il y a ${Math.floor(m / 1440)} j`;
+}
+
+/** B11 : messages courts, canal général ou d'alliance, avec réactions. */
+function Chat({ userId, hasAlliance, now }: { userId: string; hasAlliance: boolean; now: number }) {
+  const [channel, setChannel] = useState<ChatChannel>(hasAlliance ? "alliance" : "general");
+  const { view, error, send, react } = useChat(channel);
+  const [draft, setDraft] = useState("");
+  const [sending, setSending] = useState(false);
+  const submit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!draft.trim() || sending) return;
+    setSending(true);
+    if (await send(draft)) setDraft("");
+    setSending(false);
+  };
+  return (
+    <>
+      <div className="subtabs" role="group" aria-label="Canaux">
+        <button className="btn" aria-pressed={channel === "general"} onClick={() => setChannel("general")}>
+          🌍 Général
+        </button>
+        <button className="btn" aria-pressed={channel === "alliance"} onClick={() => setChannel("alliance")} disabled={!hasAlliance} title={hasAlliance ? undefined : "Rejoins une alliance pour son canal"}>
+          🤝 Alliance
+        </button>
+      </div>
+      {!view ? (
+        <p className="empty">On déroule les parchemins…</p>
+      ) : !view.available ? (
+        <p className="empty">Tu n&apos;as pas d&apos;alliance.</p>
+      ) : (
+        <ul className="chat">
+          {view.messages.length === 0 && <li className="empty">Aucun message pour l&apos;instant. Lance la conversation !</li>}
+          {view.messages.map((m) => (
+            <li key={m.id} className={m.userId === userId ? "me" : undefined}>
+              <div>
+                <strong>{m.name}</strong> <span className="when">{agoText(m.at, now)}</span>
+              </div>
+              <div className="chat-body">{m.body}</div>
+              <div className="chat-reactions">
+                {CHAT_REACTIONS.map((emoji) => {
+                  const who = m.reactions[emoji] ?? [];
+                  return (
+                    <button key={emoji} className={`chat-react${who.includes(userId) ? " on" : ""}${who.length ? "" : " idle"}`} onClick={() => void react(m.id, emoji)} aria-label={`Réagir ${emoji}`}>
+                      {emoji}
+                      {who.length > 0 && <span className="num"> {who.length}</span>}
+                    </button>
+                  );
+                })}
+              </div>
+            </li>
+          ))}
+        </ul>
+      )}
+      {view?.available && (
+        <form className="chat-form" onSubmit={submit}>
+          <input value={draft} onChange={(e) => setDraft(e.target.value)} maxLength={CHAT_MAX_LENGTH} placeholder={channel === "general" ? "Un mot pour tout le royaume…" : "Un mot pour ton alliance…"} aria-label="Message" />
+          <button className="btn btn-primary" disabled={sending || !draft.trim()}>
+            Envoyer
+          </button>
+        </form>
+      )}
+      {error && <p className="note">{error}</p>}
+    </>
   );
 }
 
