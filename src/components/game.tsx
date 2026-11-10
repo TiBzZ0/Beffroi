@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useId, useRef, useState } from "react";
 import { signOut } from "@/app/(auth)/actions";
 import {
   CATEGORY_LABELS,
@@ -406,6 +406,77 @@ interface Floater {
   text: string;
 }
 
+/** B5 : le beffroi dessiné, une pièce par étape. L'étape en cours se remplit de bas en haut au fil des dons. */
+const BELFRY_PARTS: { box: [number, number]; draw: React.ReactNode }[] = [
+  { box: [140, 156], draw: <><rect x="12" y="140" width="76" height="16" rx="1" /><rect x="6" y="152" width="88" height="4" /></> },
+  {
+    box: [62, 140],
+    draw: (
+      <>
+        <rect x="28" y="70" width="44" height="70" />
+        {[28, 37, 46, 55, 64].map((x) => <rect key={x} x={x} y="62" width="6" height="9" />)}
+        <rect className="belfry-hole" x="46" y="122" width="8" height="18" rx="4" />
+      </>
+    ),
+  },
+  {
+    box: [38, 62],
+    draw: (
+      <>
+        <rect x="31" y="38" width="38" height="24" />
+        <rect className="belfry-hole" x="36" y="43" width="11" height="17" rx="5" />
+        <rect className="belfry-hole" x="53" y="43" width="11" height="17" rx="5" />
+      </>
+    ),
+  },
+  { box: [58, 68], draw: <><path d="M28 64 L16 60 L19 66 Z" /><path d="M72 64 L84 60 L81 66 Z" /></> },
+  { box: [44, 60], draw: <path className="belfry-gold" d="M50 44 C44 44 44 52 42 57 L58 57 C56 52 56 44 50 44 Z M48 57 a2 2 0 0 0 4 0 Z" /> },
+  { box: [4, 38], draw: <path d="M29 38 L50 4 L71 38 Z" /> },
+  {
+    box: [84, 106],
+    draw: (
+      <>
+        <circle className="belfry-gold" cx="50" cy="95" r="10" />
+        <path className="belfry-hand" d="M50 95 L50 88 M50 95 L55 98" />
+      </>
+    ),
+  },
+  { box: [-14, 6], draw: <><path className="belfry-hand" d="M50 6 L50 -14" /><path className="belfry-gold" d="M50 -14 L64 -10 L50 -6 Z" /></> },
+];
+
+function Belfry({ done, pct }: { done: number; pct: number }) {
+  const clip = `belfry-rise-${useId().replace(/[^a-zA-Z0-9]/g, "")}`;
+  return (
+    <svg className="belfry" viewBox="0 -16 100 174" role="img" aria-label={`Le beffroi : ${done} étape${done > 1 ? "s" : ""} sur ${BELFRY_PARTS.length}`}>
+      <defs>
+        {done < BELFRY_PARTS.length && (
+          <clipPath id={clip}>
+            {(() => {
+              const [top, bottom] = BELFRY_PARTS[done].box;
+              const h = ((bottom - top) * pct) / 100;
+              return <rect x="0" y={bottom - h} width="100" height={h} />;
+            })()}
+          </clipPath>
+        )}
+      </defs>
+      {BELFRY_PARTS.map((p, i) =>
+        i < done ? (
+          <g key={i} className="belfry-part">
+            {p.draw}
+          </g>
+        ) : i === done ? (
+          <g key={i}>
+            <g className="belfry-ghost">{p.draw}</g>
+            <g className="belfry-part" clipPath={`url(#${clip})`}>
+              {p.draw}
+            </g>
+          </g>
+        ) : null,
+      )}
+    </svg>
+  );
+}
+
 function Hero({ snap, rate, clickGain, game }: { snap: GameSnapshot; rate: number; clickGain: number; game: ReturnType<typeof useGame> }) {
   const counter = useRef<HTMLSpanElement>(null);
   const [floaters, setFloaters] = useState<Floater[]>([]);
@@ -485,6 +556,7 @@ function Hero({ snap, rate, clickGain, game }: { snap: GameSnapshot; rate: numbe
       </div>
       <Status state={snap.state} now={game.serverNow()} />
       <div className="mini-site">
+        <Belfry done={Math.min(w.stage, STAGES.length)} pct={pct} />
         <h3>{finished ? "Le beffroi est achevé !" : `Chantier : ${STAGES[w.stage].name}`}</h3>
         <div className="bar" role="progressbar" aria-valuenow={Math.round(pct)} aria-valuemin={0} aria-valuemax={100}>
           <span style={{ width: `${pct}%` }} />

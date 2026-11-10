@@ -170,4 +170,9 @@ export const CHANGELOG: ChangeEntry[] = [
       "🔴 Une pastille signale une recherche terminée (onglet Armée) et un événement en cours (onglet Raids).",
     ],
   },
+  {
+    id: 22,
+    date: "10 novembre",
+    items: ["🔔 Le beffroi est dessiné à côté du chantier : il gagne une pièce à chaque étape, et la pièce en cours se remplit à mesure des dons."],
+  },
 ];
