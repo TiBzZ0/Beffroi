@@ -999,3 +999,13 @@ a {
   border-radius: 10px;
   text-align: left;
 }
+
+.lots {
+  margin: 16px 0;
+}
+.lot {
+  margin-top: 8px;
+}
+.lot-mine .bar-caption {
+  font-weight: 600;
+}

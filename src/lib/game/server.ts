@@ -46,6 +46,12 @@ import {
   NEW_PLAYER_TITHE,
   DONOR_TIER_BONUS,
   QUESTS,
+  LOT_PRIME_SHARE,
+  LOT_ECUS,
+  MASTER_BONUSES,
+  MASTER_BONUS_MS,
+  MASTER_CHOICE_MS,
+  type MasterBonusKind,
   WOUNDED_WINNER,
   WOUNDED_ATTACKER_BEATEN,
   STAGES,
@@ -94,6 +100,7 @@ import {
   setTithe,
   payTithe,
   openShare,
+  shareSize,
   recordGift,
   type StageShare,
   type Curfew,
@@ -118,6 +125,7 @@ import {
   worldFrom,
   type ChronicleEntry,
   type AwaySummary,
+  type LotView,
   type GameAction,
   type GameSnapshot,
   type LeaderboardRow,
@@ -360,6 +368,7 @@ async function loadEntities(admin: SupabaseClient, seasonId: number, userId: str
   const select = () =>
     admin.from("player_states").select("*, profiles(username, display_name, is_bot, ecus)").eq("season_id", seasonId);
   const fortP = admin.from("fortresses").select("holder").eq("season_id", seasonId).maybeSingle();
+  const lotsP = admin.from("stage_lots").select("*").eq("season_id", seasonId);
   let { data, error } = await select();
   if (error) throw new Error(`Joueurs introuvables : ${error.message}`);
   const present = new Set((data ?? []).map((r) => (r as PlayerRow).user_id));
@@ -396,7 +405,183 @@ async function loadEntities(admin: SupabaseClient, seasonId: number, userId: str
   // Les seigneurs suivent les améliorations des joueurs (niveau médian de chaque type).
   const levels = medianLevels(entities);
   for (const e of entities.values()) if (e.isLord) e.state = { ...e.state, levels, research: [] };
+  // Lots du chantier : prime de lot et bonus du maître d'œuvre (D2, D3).
+  const { data: lotRows } = await lotsP;
+  const lots = ((lotRows ?? []) as LotRow[]).map(lotFromRow);
+  applyLotBonuses(entities, lots, Date.now());
+  lotsOf.set(entities, lots);
   return entities;
+}
+
+// ---------------------------------------------------------------------------
+// Lots du chantier (D1 à D4)
+// ---------------------------------------------------------------------------
+
+interface LotRow {
+  stage: number;
+  owner: string;
+  alliance_id: number | null;
+  user_id: string | null;
+  target: number;
+  progress: number;
+  members: Record<string, { share: number; given: number }>;
+  closes_at: string | null;
+  finished_at: string | null;
+  master: boolean;
+  master_choice: string | null;
+  master_from: string | null;
+}
+
+interface Lot {
+  stage: number;
+  owner: string;
+  allianceId: number | null;
+  userId: string | null;
+  target: number;
+  progress: number;
+  members: Record<string, { share: number; given: number }>;
+  closesAt: number | null;
+  finishedAt: number | null;
+  master: boolean;
+  masterChoice: MasterBonusKind | null;
+  masterFrom: number | null;
+}
+
+function lotFromRow(r: LotRow): Lot {
+  const choice = r.master_choice && r.master_choice in MASTER_BONUSES ? (r.master_choice as MasterBonusKind) : null;
+  return {
+    stage: Number(r.stage),
+    owner: r.owner,
+    allianceId: r.alliance_id === null ? null : Number(r.alliance_id),
+    userId: r.user_id,
+    target: Number(r.target),
+    progress: Number(r.progress),
+    members: r.members ?? {},
+    closesAt: r.closes_at ? ms(r.closes_at) : null,
+    finishedAt: r.finished_at ? ms(r.finished_at) : null,
+    master: !!r.master,
+    masterChoice: choice,
+    masterFrom: r.master_from ? ms(r.master_from) : null,
+  };
+}
+
+/** Lots chargés avec les participants (même requête). */
+const lotsOf = new WeakMap<Map<string, Entity>, Lot[]>();
+
+/** Bonus effectif du maître d'œuvre : le choix, ou la production au bout d'une heure sans choix. */
+function masterBonusOf(l: Lot, now: number): { kind: MasterBonusKind; from: number; until: number } | null {
+  if (!l.master || l.finishedAt === null) return null;
+  const kind = l.masterChoice ?? (now >= l.finishedAt + MASTER_CHOICE_MS ? "production" : null);
+  if (!kind) return null;
+  const from = l.masterFrom ?? l.finishedAt + MASTER_CHOICE_MS;
+  return { kind, from, until: from + MASTER_BONUS_MS };
+}
+
+function applyLotBonuses(entities: Map<string, Entity>, lots: Lot[], now: number) {
+  for (const l of lots) {
+    if (l.finishedAt === null) continue;
+    const bonus = masterBonusOf(l, now);
+    for (const [uid, m] of Object.entries(l.members)) {
+      const e = entities.get(uid);
+      if (!e || e.isLord) continue;
+      let state = e.state;
+      if (m.given >= LOT_PRIME_SHARE * m.share) state = { ...state, lotBonusUntilStage: Math.max(state.lotBonusUntilStage ?? 0, l.stage + 2) };
+      if (bonus && bonus.until > now && (!state.masterBonus || state.masterBonus.until < bonus.until)) state = { ...state, masterBonus: bonus };
+      e.state = state;
+    }
+  }
+}
+
+function lotOwnerOf(e: Entity): string {
+  return e.allianceId !== null ? `a:${e.allianceId}` : `p:${e.id}`;
+}
+
+/**
+ * À l'ouverture d'une étape, chaque alliance (ou joueur seul) reçoit un lot égal à la somme des parts
+ * de ses membres actifs, mesurées tout de suite. Un joueur qui arrive en cours d'étape rejoint le lot de son alliance.
+ * Renvoie true si quelque chose a été créé.
+ */
+async function ensureLots(admin: SupabaseClient, seasonId: number, worksite: WorksiteView, entities: Map<string, Entity>, me: Entity, world: WorldState, now: number): Promise<boolean> {
+  if (worksite.stage >= STAGES.length) return false;
+  const lots = (lotsOf.get(entities) ?? []).filter((l) => l.stage === worksite.stage);
+  const inLot = new Set(lots.flatMap((l) => Object.keys(l.members)));
+  const joiners = lots.length === 0 ? activeHumans(entities, now) : me.isLord || inLot.has(me.id) ? [] : [me];
+  if (joiners.length === 0) return false;
+  await Promise.all(
+    joiners.map((e) =>
+      admin.rpc("join_lot", {
+        p_season: seasonId,
+        p_stage: worksite.stage,
+        p_owner: lotOwnerOf(e),
+        p_alliance: e.allianceId,
+        p_user: e.id,
+        p_share: shareSize(advance(e.state, now, world), world, now),
+      }),
+    ),
+  );
+  return true;
+}
+
+/** Ce que le joueur voit des lots : ceux de l'étape en cours, et ceux de l'étape d'avant encore ouverts. */
+function lotsView(lots: Lot[], me: Entity, entities: Map<string, Entity>, allianceNames: Map<number, string>, stage: number, now: number): LotView[] {
+  return lots
+    .filter((l) => l.stage === stage || (l.stage === stage - 1 && l.finishedAt === null && (l.closesAt ?? 0) > now))
+    .map((l) => {
+      const mine = l.members[me.id];
+      const bonus = masterBonusOf(l, now);
+      return {
+        stage: l.stage,
+        owner: l.owner,
+        name: l.allianceId !== null ? (allianceNames.get(l.allianceId) ?? "Alliance") : (entities.get(l.userId ?? "")?.name ?? "Joueur"),
+        solo: l.allianceId === null,
+        target: l.target,
+        progress: l.progress,
+        members: Object.keys(l.members).length,
+        finishedAt: l.finishedAt,
+        closesAt: l.closesAt,
+        master: l.master,
+        masterChoice: bonus?.kind ?? null,
+        masterUntil: bonus?.until ?? null,
+        canChoose: l.master && !!mine && l.masterChoice === null && l.finishedAt !== null && now < l.finishedAt + MASTER_CHOICE_MS,
+        mine: !!mine,
+        myShare: mine?.share,
+        myGiven: mine?.given,
+      };
+    })
+    .sort((a, b) => b.stage - a.stage || Number(b.mine) - Number(a.mine) || b.progress / b.target - a.progress / a.target);
+}
+
+/** Verse un don aux lots du joueur ; annonce un lot fini et le maître d'œuvre. */
+async function giveToLots(admin: SupabaseClient, seasonId: number, me: Entity, stage: number, amount: number, entities: Map<string, Entity>, allianceNames: Map<number, string>): Promise<string | null> {
+  let message: string | null = null;
+  for (const st of [stage, stage - 1]) {
+    if (st < 0) continue;
+    const { data } = await admin.rpc("add_to_lot", { p_season: seasonId, p_stage: st, p_user: me.id, p_amount: amount, p_lot_bonus_ecus: LOT_ECUS });
+    const r = data as { owner: string; finished: boolean; master: boolean } | null;
+    if (!r?.finished) continue;
+    const lot = (lotsOf.get(entities) ?? []).find((l) => l.stage === st && l.owner === r.owner);
+    const name = me.allianceId !== null && r.owner === `a:${me.allianceId}` ? (allianceNames.get(me.allianceId) ?? "Ton alliance") : me.name;
+    await addChronicle(admin, seasonId, { kind: "lot", actor_id: me.id, details: { stage: st, name, master: r.master } });
+    const members = Object.keys(lot?.members ?? { [me.id]: null }).filter((id) => id !== me.id);
+    if (members.length) {
+      notify(admin, members, {
+        title: r.master ? "👑 Maître d'œuvre !" : "🏗️ Lot fini",
+        body: r.master ? `Votre lot de « ${STAGES[st]?.name} » est le premier fini. Choisissez votre bonus dans l'onglet du chantier.` : `Votre lot de « ${STAGES[st]?.name} » est fini.`,
+        tag: "lot",
+      });
+    }
+    message = r.master
+      ? `👑 Lot fini, et le premier de l'étape : maître d'œuvre ! Choisis le bonus de 24 h dans l'onglet du chantier.`
+      : `🏗️ Lot fini ! Ceux qui ont versé au moins 25 % de leur part gagnent +10 % de production jusqu'à la fin de l'étape suivante et ${LOT_ECUS} écus.`;
+  }
+  return message;
+}
+
+/** Maître d'œuvre de chaque étape : nom du premier lot fini. */
+function mastersView(lots: Lot[], entities: Map<string, Entity>, allianceNames: Map<number, string>): Record<number, string> {
+  const out: Record<number, string> = {};
+  for (const l of lots) if (l.master) out[l.stage] = l.allianceId !== null ? (allianceNames.get(l.allianceId) ?? "Alliance") : (entities.get(l.userId ?? "")?.name ?? "Joueur");
+  return out;
 }
 
 /** Niveau médian de chaque type chez les vrais joueurs : celui des seigneurs, de la garnison neutre et des événements. */
@@ -1472,11 +1657,16 @@ export async function runAction(admin: SupabaseClient, userId: string, action: G
     if (action.type === "sync" && attempt === 0 && (await tickLords(admin, season, entities, worksite, Date.now()))) {
       [worksite, entities] = await Promise.all([loadWorksite(admin, season.id), loadEntities(admin, season.id, userId)]);
     }
-    const me = entities.get(userId);
+    let me = entities.get(userId);
     if (!me) throw new Error("Joueur introuvable.");
 
     const now = Date.now();
     const world = worldFrom(worksite);
+    // Lots de l'étape : créés à son ouverture, ou on y inscrit le joueur qui arrive en cours d'étape.
+    if (await ensureLots(admin, season.id, worksite, entities, me, world, now)) {
+      entities = await loadEntities(admin, season.id, userId);
+      me = entities.get(userId) ?? me;
+    }
     const flat = lordRates(entities, world, now);
     let [conflicts, events, allianceNames] = await Promise.all([
       loadConflicts(admin, season.id, now),
@@ -1484,7 +1674,9 @@ export async function runAction(admin: SupabaseClient, userId: string, action: G
       loadAllianceNames(admin, season.id),
     ]);
     // La part de chantier de l'étape en cours s'ouvre la première fois qu'on voit le joueur pendant l'étape.
-    const current = openShare(advance(me.state, now, world), worksite.stage, world, now);
+    const stageAtLoad = worksite.stage;
+    const myLotShare = (lotsOf.get(entities) ?? []).find((l) => l.stage === worksite.stage && l.members[userId])?.members[userId]?.share;
+    const current = openShare(advance(me.state, now, world), worksite.stage, world, now, myLotShare);
     let finalState = current;
     let ecus = me.ecus;
     let away: AwaySummary | undefined;
@@ -1523,6 +1715,17 @@ export async function runAction(admin: SupabaseClient, userId: string, action: G
       message = r.message;
       if (r.state) finalState = r.state;
       entities = await loadEntities(admin, season.id, userId);
+    } else if (action.type === "master_choice") {
+      const choice = String(action.choice);
+      const lot = (lotsOf.get(entities) ?? []).find((l) => l.master && l.members[userId] && l.masterChoice === null && l.finishedAt !== null && now < l.finishedAt + MASTER_CHOICE_MS);
+      if (!(choice in MASTER_BONUSES)) error = "Bonus inconnu.";
+      else if (!lot) error = "Ton lot n'a pas de bonus à choisir.";
+      else {
+        await admin.from("stage_lots").update({ master_choice: choice, master_from: iso(now) }).eq("season_id", season.id).eq("stage", lot.stage).eq("owner", lot.owner).is("master_choice", null);
+        entities = await loadEntities(admin, season.id, userId);
+        finalState = { ...finalState, masterBonus: entities.get(userId)?.state.masterBonus };
+        message = `👑 Bonus choisi pour 24 h : ${MASTER_BONUSES[choice as MasterBonusKind].label}.`;
+      }
     } else if (action.type === "sabotage") {
       const target = entities.get(String(action.target));
       const targetState = target ? advanceEntity(target, now, world, flat) : null;
@@ -1691,6 +1894,11 @@ export async function runAction(admin: SupabaseClient, userId: string, action: G
       if (!result.ok && result.conflict) continue;
       if (result.worksite) worksite = worksiteFromRow(result.worksite);
       if (contribution > 0) await recordContribution(season.id, userId, finalState.totalContributed);
+      if (contribution > 0) {
+        // Le don compte aussi pour le lot du joueur, et pour celui de l'étape d'avant s'il est encore ouvert.
+        const lotMessage = await giveToLots(admin, season.id, me, stageAtLoad, contribution, entities, allianceNames);
+        if (lotMessage) message = lotMessage;
+      }
       if (questDone?.done != null) {
         if (questDone.ecus > 0) {
           const { data: total } = await admin.rpc("add_ecus", { p_user: userId, p_amount: questDone.ecus });
@@ -1728,6 +1936,8 @@ export async function runAction(admin: SupabaseClient, userId: string, action: G
       myTitles: titles.get(userId) ?? [],
       ecus,
       ...(away ? { away } : {}),
+      lots: lotsView(lotsOf.get(entities) ?? [], meNow, entities, allianceNames, worksite.stage, now),
+      masters: mastersView(lotsOf.get(entities) ?? [], entities, allianceNames),
       ...info,
       alliances: [...allianceNames].map(([id, name]) => ({ id, name, size: [...entities.values()].filter((e) => e.allianceId === id).length })),
       war: warView(meNow, conflicts.wars, allianceNames),

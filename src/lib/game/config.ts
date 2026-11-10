@@ -210,6 +210,19 @@ export type QuestId = (typeof QUESTS)[number]["id"];
 export const QUEST_REWARD_SECONDS = 300;
 export const QUEST_MIN_REWARD = 100;
 export const QUEST_FINAL_ECUS = 5;
+/** D1 à D4 : lots du chantier. Prime de lot : +10 % de production jusqu'à la fin de l'étape suivante et 10 écus. */
+export const LOT_BONUS = 0.1;
+export const LOT_ECUS = 10;
+export const LOT_PRIME_SHARE = 0.25;
+/** Maître d'œuvre : bonus de 24 h au choix pour ses membres ; sans choix au bout d'une heure, la production. */
+export const MASTER_BONUSES = {
+  production: { label: "+15 % de production", value: 0.15 },
+  defense: { label: "+25 % de points de vie en défense", value: 0.25 },
+  loot: { label: "+25 % de butin", value: 0.25 },
+} as const;
+export type MasterBonusKind = keyof typeof MASTER_BONUSES;
+export const MASTER_BONUS_MS = 24 * 3_600_000;
+export const MASTER_CHOICE_MS = 3_600_000;
 /** Taille minimale d'une étape, pour un chantier sans joueur actif. */
 export const STAGE_MIN_SIZE = 50_000;
 

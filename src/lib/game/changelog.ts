@@ -86,4 +86,13 @@ export const CHANGELOG: ChangeEntry[] = [
       "⚖️ Équité : contre un joueur plus petit que la moitié de ta taille, le butin et la rançon baissent (coefficient égal à 2 fois sa taille relative). Pas de baisse en revanche, mais elle s'applique en guerre. La fiche de la cible affiche le butin, la rançon et le coefficient.",
     ],
   },
+  {
+    id: 11,
+    date: "10 novembre",
+    items: [
+      "🏗️ Lots du chantier : à chaque étape, chaque alliance reçoit un lot égal à 4 heures de la production de ses membres (un joueur seul a son propre lot). Tes dons, dîme comprise, comptent pour l'étape et pour ton lot. Un lot pas fini à la fin de l'étape reste ouvert 6 heures.",
+      "🎁 Prime de lot : quand ton lot est fini, si tu as versé au moins 25 % de ta part, tu gagnes +10 % de production jusqu'à la fin de l'étape suivante et 10 écus.",
+      "👑 Maître d'œuvre : le premier lot fini de l'étape donne son nom à l'étage et choisit un bonus de 24 heures pour ses membres : +15 % de production, +25 % de points de vie en défense, ou +25 % de butin. Sans choix au bout d'une heure, c'est la production.",
+    ],
+  },
 ];

@@ -18,6 +18,9 @@ import {
   DONOR_TIER_ECUS,
   DONOR_TIER_BONUS,
   CURFEW_MINUTES,
+  LOT_ECUS,
+  MASTER_BONUSES,
+  type MasterBonusKind,
   QUESTS,
   VEIN_VISIBLE_MS,
   ACADEMY_SPEED,
@@ -60,7 +63,7 @@ import {
   type PlayerState,
 } from "@/lib/game/engine";
 import { formatNumber, formatRate } from "@/lib/game/format";
-import { worldFrom, type AwaySummary, type AllianceSummary, type ChronicleEntry, type EventView, type GameSnapshot, type RivalView } from "@/lib/game/types";
+import { worldFrom, type AwaySummary, type LotView, type AllianceSummary, type ChronicleEntry, type EventView, type GameSnapshot, type RivalView } from "@/lib/game/types";
 import { useGame, useLeaderboard, usePush, useTick } from "./use-game";
 import { CHANGELOG } from "@/lib/game/changelog";
 
@@ -367,6 +370,12 @@ function Hero({ snap, rate, clickGain, game }: { snap: GameSnapshot; rate: numbe
               bonus={elanBonus(snap.state)}
             />
           )}
+          {(snap.state.lotBonusUntilStage ?? 0) > snap.worksite.stageCompletedAt.length && (
+            <div className="catch-up">🏗️ Prime de lot : +10 % de production jusqu&apos;à la fin de l&apos;étape suivante</div>
+          )}
+          {snap.state.masterBonus && snap.state.masterBonus.until > game.serverNow() && snap.state.masterBonus.from <= game.serverNow() && (
+            <div className="catch-up">👑 Maître d&apos;œuvre : {MASTER_BONUSES[snap.state.masterBonus.kind].label} encore {duration(snap.state.masterBonus.until - game.serverNow())}</div>
+          )}
           {(snap.state.frenzyUntil ?? 0) > game.serverNow() && (
             <div className="catch-up">✨ Frénésie : production doublée encore {Math.ceil((snap.state.frenzyUntil - game.serverNow()) / 1000)} s</div>
           )}
@@ -543,6 +552,7 @@ function Worksite({ snap, live, run }: { snap: GameSnapshot; live: PlayerState; 
                 </span>
               </div>
               <div className="stage-bonus">🎁 {s.bonusLabel}</div>
+              {snap.masters?.[i] && <div className="stage-bonus">👑 Maître d&apos;œuvre : {snap.masters[i]}</div>}
               {(current || done) && (
                 <>
                   <div className="bar">
@@ -562,6 +572,7 @@ function Worksite({ snap, live, run }: { snap: GameSnapshot; live: PlayerState; 
           );
         })}
       </div>
+      {(snap.lots ?? []).length > 0 && <Lots lots={snap.lots ?? []} now={snap.serverNow} run={run} />}
       <div className="row-title">{finished ? "Orner le beffroi" : "Verser de la pierre au chantier"}</div>
       <div className="contrib">
         {[
@@ -581,6 +592,66 @@ function Worksite({ snap, live, run }: { snap: GameSnapshot; live: PlayerState; 
         Tu as versé {formatNumber(snap.state.totalContributed)} pierres. {w.activePlayers} bâtisseur{w.activePlayers > 1 ? "s" : ""} actif{w.activePlayers > 1 ? "s" : ""} cette semaine. Chaque étape vaut 4 heures de leur production, fixée à son ouverture.
       </p>
     </>
+  );
+}
+
+/** D1 à D4 : les lots de l'étape, une barre par alliance ou joueur seul. */
+function Lots({ lots, now, run }: { lots: LotView[]; now: number; run: ReturnType<typeof useGame>["run"] }) {
+  const [busy, setBusy] = useState(false);
+  const choose = async (choice: MasterBonusKind) => {
+    setBusy(true);
+    await run({ type: "master_choice", choice });
+    setBusy(false);
+  };
+  const mine = lots.find((l) => l.mine && l.canChoose);
+  return (
+    <div className="lots">
+      <div className="row-title">Lots de l&apos;étape</div>
+      <p className="note">
+        Chaque alliance (ou joueur seul) a son lot : 4 heures de la production de ses membres. Lot fini : ceux qui ont versé au moins 25 % de leur part
+        gagnent +10 % de production jusqu&apos;à la fin de l&apos;étape suivante et {LOT_ECUS} écus. Le premier lot fini désigne le maître d&apos;œuvre.
+      </p>
+      {mine && (
+        <div className="notice notice-info">
+          <strong>👑 Maître d&apos;œuvre !</strong> Choisis le bonus de 24 heures de ton lot (sinon ce sera la production) :
+          <div className="row-actions">
+            {(Object.keys(MASTER_BONUSES) as MasterBonusKind[]).map((k) => (
+              <button key={k} className="btn btn-primary" disabled={busy} onClick={() => choose(k)}>
+                {MASTER_BONUSES[k].label}
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
+      {lots.map((l) => {
+        const pct = Math.min(100, (l.progress / Math.max(1, l.target)) * 100);
+        return (
+          <div key={`${l.stage}-${l.owner}`} className={`lot${l.mine ? " lot-mine" : ""}`}>
+            <div className="bar-caption num">
+              <span>
+                {l.master ? "👑 " : l.finishedAt ? "✓ " : ""}
+                {l.name}
+                {l.solo ? "" : ` (${l.members})`}
+                {l.stage !== lots[0].stage ? ` · étape précédente, ferme ${new Date(l.closesAt ?? 0).toLocaleTimeString("fr-FR", { hour: "2-digit", minute: "2-digit" })}` : ""}
+              </span>
+              <span>{l.finishedAt ? "fini" : `${Math.floor(pct)} %`}</span>
+            </div>
+            <div className="bar bar-thin">
+              <span style={{ width: `${pct}%` }} />
+            </div>
+            {l.mine && l.myShare !== undefined && (
+              <div className="note num">
+                Ta part : {formatNumber(l.myGiven ?? 0)} / {formatNumber(l.myShare)} versées
+                {(l.myGiven ?? 0) >= l.myShare * 0.25 ? " ✓ prime assurée si le lot est fini" : ` (25 % pour la prime : ${formatNumber(l.myShare * 0.25)})`}
+              </div>
+            )}
+            {l.master && l.masterChoice && l.masterUntil && l.masterUntil > now && (
+              <div className="note">Bonus du maître d&apos;œuvre : {MASTER_BONUSES[l.masterChoice].label} jusqu&apos;à {new Date(l.masterUntil).toLocaleTimeString("fr-FR", { hour: "2-digit", minute: "2-digit" })}.</div>
+            )}
+          </div>
+        );
+      })}
+    </div>
   );
 }
 
@@ -1623,6 +1694,12 @@ function Chronicle({ entries, me, now, rivals, alliances = [] }: { entries: Chro
             : `🧨 ${who(e.actorId, e.actorName, true)} ${e.actorId === me ? "as été pris" : "a été pris"} en train de saboter ${target}.`;
         } else if (e.kind === "spy") {
           text = `${who(e.actorId, e.actorName, true)} ${e.actorId === me ? "as été surpris" : "a été surpris"} à espionner ${e.details.fortress ? "la forteresse" : e.targetId === me ? "ton domaine" : e.targetName}.`;
+        } else if (e.kind === "lot") {
+          const d = e.details as { stage?: number; name?: string; master?: boolean };
+          const stageName = STAGES[d.stage ?? 0]?.name ?? "l'étape";
+          text = d.master
+            ? `👑 ${d.name} finit son lot de « ${stageName} » le premier et devient maître d'œuvre !`
+            : `🏗️ ${d.name} finit son lot de « ${stageName} ».`;
         } else if (e.kind === "gift") {
           text = `${e.actorName} a offert ${formatNumber(e.details.amount ?? 0)} pierres au chantier.`;
         } else {

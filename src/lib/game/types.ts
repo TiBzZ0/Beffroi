@@ -66,6 +66,26 @@ export interface RivalView {
 }
 
 /** B3 : ce qui s'est passé pendant une absence d'au moins 30 minutes. */
+/** D1 à D4 : un lot du chantier (alliance, ou joueur seul). */
+export interface LotView {
+  stage: number;
+  owner: string;
+  name: string;
+  solo: boolean;
+  target: number;
+  progress: number;
+  members: number;
+  finishedAt: number | null;
+  closesAt: number | null;
+  master: boolean;
+  masterChoice: "production" | "defense" | "loot" | null;
+  masterUntil: number | null;
+  canChoose: boolean;
+  mine: boolean;
+  myShare?: number;
+  myGiven?: number;
+}
+
 export interface AwaySummary {
   since: number;
   produced: number;
@@ -80,7 +100,7 @@ export interface AwaySummary {
 export interface ChronicleEntry {
   id: number;
   at: number;
-  kind: "raid" | "gift" | "spy" | "war" | "fortress" | "event" | "sabotage";
+  kind: "raid" | "gift" | "spy" | "war" | "fortress" | "event" | "sabotage" | "lot";
   actorId: string | null;
   actorName: string;
   targetId: string | null;
@@ -89,6 +109,9 @@ export interface ChronicleEntry {
     success?: boolean;
     chance?: number;
     stolen?: number;
+    stage?: number;
+    name?: string;
+    master?: boolean;
     ransom?: number;
     destroyed?: Record<string, number>;
     rounds?: number;
@@ -135,6 +158,9 @@ export interface GameSnapshot {
   event: EventView | null;
   /** Mes titres gagnés à la saison précédente. */
   myTitles: string[];
+  /** Lots du chantier, et maître d'œuvre de chaque étape. */
+  lots?: LotView[];
+  masters?: Record<number, string>;
   /** Résumé de l'absence, envoyé une seule fois au retour du joueur. */
   away?: AwaySummary;
   /** Écus du joueur (monnaie de profil, dépensable dès la saison 1). */
@@ -201,6 +227,7 @@ export type GameAction =
   | { type: "tithe"; percent: number }
   | { type: "curfew"; start: number | null }
   | { type: "vein" }
+  | { type: "master_choice"; choice: "production" | "defense" | "loot" }
   | { type: "sabotage"; target: string };
 
 export interface EventView {

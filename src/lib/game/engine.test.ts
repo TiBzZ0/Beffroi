@@ -342,6 +342,19 @@ describe("accueil guidé", () => {
   });
 });
 
+describe("lots du chantier", () => {
+  it("prime de lot : +10 % jusqu'à la fin de l'étape suivante", () => {
+    const s = { ...withGenerators({ tailleur: 10 }), lotBonusUntilStage: 2 };
+    expect(productionPerSecond(s, noWorld, 1)).toBeCloseTo(10 * 1.1 * 1.1); // étape 1 finie : +10 % d'étape
+    expect(productionPerSecond(s, noWorld, 2)).toBeCloseTo(productionPerSecond({ ...s, lotBonusUntilStage: 0 }, noWorld, 2));
+  });
+
+  it("maître d'œuvre : +15 % de production pendant 24 h", () => {
+    const s = { ...withGenerators({ tailleur: 10 }), masterBonus: { kind: "production" as const, from: T0 + 10_000, until: T0 + 20_000 } };
+    expect(advance(s, T0 + 30_000, noWorld).stone).toBeCloseTo(300 + 10 * 10 * 0.15);
+  });
+});
+
 describe("coup de pouce aux joueurs distancés", () => {
   it("rien tant que l'écart reste faible", () => {
     expect(catchUpBonus(1000, 1000)).toBe(0);

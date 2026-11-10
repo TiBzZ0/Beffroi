@@ -35,6 +35,9 @@ import {
   WOUNDED_ATTACKER_BEATEN,
   WOUNDED_DEFENDER_BEATEN,
   RANSOM_SHARE,
+  LOT_BONUS,
+  MASTER_BONUSES,
+  type MasterBonusKind,
   FAIRNESS_SLOPE,
   RUIN_IMMUNITY_MS,
   RESEARCH_QUEUE_MAX,
@@ -168,6 +171,10 @@ export interface PlayerState {
   titheSet: boolean;
   /** Son alliance tient la forteresse (bonus de production). Fixé par le serveur, jamais enregistré. */
   fortress?: boolean;
+  /** Prime de lot (D2) : +10 % de production tant que moins de ce nombre d'étapes sont finies. Fixé par le serveur. */
+  lotBonusUntilStage?: number;
+  /** Bonus du maître d'œuvre (D3) pour les membres du premier lot fini. Fixé par le serveur. */
+  masterBonus?: { kind: MasterBonusKind; from: number; until: number };
   /** Coup de pouce aux joueurs distancés (0.3 = +30 % de production et de défense). Fixé par le serveur, jamais enregistré. */
   catchUp?: number;
 }
@@ -285,7 +292,7 @@ export function catchUpBonus(produced: number, leaderProduced: number): number {
 
 /** Multiplicateur global de production (améliorations, chantier, héritage, coup de pouce). */
 export function productionMultiplier(state: PlayerState, world: WorldState, stagesDone: number): number {
-  let m = (1 + (world.legacyBonus ?? 0)) * (state.fortress ? FORTRESS_PRODUCTION_BONUS : 1) * (1 + (state.catchUp ?? 0)) * (1 + DONOR_TIER_BONUS * (state.donorTiers ?? 0));
+  let m = (1 + (world.legacyBonus ?? 0)) * (state.fortress ? FORTRESS_PRODUCTION_BONUS : 1) * (1 + (state.catchUp ?? 0)) * (1 + DONOR_TIER_BONUS * (state.donorTiers ?? 0)) * (stagesDone < (state.lotBonusUntilStage ?? 0) ? 1 + LOT_BONUS : 1);
   for (const u of ownedUpgrades(state)) {
     if (u.effect.kind === "production") m *= u.effect.multiplier;
   }
@@ -311,6 +318,12 @@ export function clickValue(state: PlayerState, world: WorldState, stagesDone: nu
 }
 
 /** Bonus de production de l'élan (0 sans marteau) : +20 % avec le Marteau de maître, +50 % avec le runique en plus. */
+/** Le bonus de maître d'œuvre `kind` est-il actif à `t` ? */
+export function masterActive(state: PlayerState, kind: MasterBonusKind, t: number): boolean {
+  const m = state.masterBonus;
+  return !!m && m.kind === kind && t >= m.from && t < m.until;
+}
+
 export function elanBonus(state: PlayerState): number {
   return ownedUpgrades(state).reduce((sum, u) => sum + (u.effect.kind === "elan" ? u.effect.bonus : 0), 0);
 }
@@ -325,7 +338,8 @@ export function rateAt(state: PlayerState, world: WorldState, t: number, opts: A
   const base = opts.flatRate ?? productionPerSecond(state, world, stagesDoneAt(world, t));
   const elan = !opts.flatRate && t < (state.elanUntil ?? 0) ? 1 + elanBonus(state) : 1;
   const frenzy = !opts.flatRate && t < (state.frenzyUntil ?? 0) ? VEIN_FRENZY_FACTOR : 1;
-  return (t < state.burnedUntil ? base * BURN_PRODUCTION_FACTOR : base) * elan * frenzy;
+  const master = !opts.flatRate && masterActive(state, "production", t) ? 1 + MASTER_BONUSES.production.value : 1;
+  return (t < state.burnedUntil ? base * BURN_PRODUCTION_FACTOR : base) * elan * frenzy * master;
 }
 
 /**
@@ -337,7 +351,7 @@ export function advance(state: PlayerState, now: number, world: WorldState, opts
   state = settleWounded(settleCurfew(settleResearch(state, now), now), now);
   if (now <= state.lastUpdate) return state;
   const start = Math.max(state.lastUpdate, now - OFFLINE_CAP_MS);
-  const events = [...world.stageCompletedAt, state.burnedUntil, state.elanUntil ?? 0, state.frenzyUntil ?? 0];
+  const events = [...world.stageCompletedAt, state.burnedUntil, state.elanUntil ?? 0, state.frenzyUntil ?? 0, state.masterBonus?.from ?? 0, state.masterBonus?.until ?? 0];
   const breakpoints = events.filter((t) => t > start && t < now).sort((a, b) => a - b);
   let gain = 0;
   let tithed = 0;
@@ -574,10 +588,15 @@ export function payTithe(state: PlayerState): { state: PlayerState; paid: number
  * Ouvre la part de chantier du joueur pour l'étape en cours : 4 h de sa production,
  * mesurée la première fois qu'on le voit pendant cette étape.
  */
-export function openShare(state: PlayerState, stage: number, world: WorldState, now: number): PlayerState {
+export function openShare(state: PlayerState, stage: number, world: WorldState, now: number, fixed?: number): PlayerState {
   if (stage >= STAGES.length || state.share?.stage === stage) return state;
-  const size = Math.max(1, Math.ceil(productionPerSecond(state, world, stagesDoneAt(world, now)) * SHARE_HOURS * 3600));
+  const size = fixed && fixed > 0 ? Math.ceil(fixed) : shareSize(state, world, now);
   return { ...state, share: { stage, size, given: 0, tiers: 0 } };
+}
+
+/** Part de chantier d'un joueur : 4 h de sa production actuelle. */
+export function shareSize(state: PlayerState, world: WorldState, now: number): number {
+  return Math.max(1, Math.ceil(productionPerSecond(state, world, stagesDoneAt(world, now)) * SHARE_HOURS * 3600));
 }
 
 /** Compte un don dans la part de chantier ; renvoie les paliers franchis et les écus gagnés. */
@@ -871,7 +890,8 @@ export interface RaidReport {
 
 export function raidArmies(attacker: PlayerState, victim: PlayerState, ctx: Pick<RaidContext, "attackerArmy" | "defenderArmy" | "victimId" | "now">) {
   // Le coup de pouce de la victime rend ses défenseurs plus durs à abattre.
-  const attackBonus = (hasRevenge(attacker, ctx.victimId, ctx.now) ? REVENGE_ATTACK_BONUS : 1) / (1 + (victim.catchUp ?? 0));
+  const sturdy = masterActive(victim, "defense", ctx.now) ? 1 + MASTER_BONUSES.defense.value : 1;
+  const attackBonus = (hasRevenge(attacker, ctx.victimId, ctx.now) ? REVENGE_ATTACK_BONUS : 1) / (1 + (victim.catchUp ?? 0)) / sturdy;
   const opts: BattleOptions = { attackBonus, attackerLevels: attacker.levels, defenderLevels: victim.levels };
   return {
     attack: ctx.attackerArmy ?? attackArmy(attacker),
@@ -973,10 +993,11 @@ export function resolveRaid(
 
   const playerVsPlayer = !ctx.attackerIsLord && !ctx.defenderArmy;
   const factor = playerVsPlayer ? fairness(ctx.relativeSize, revenge) : 1;
+  const lootBonus = masterActive(attacker, "loot", now) ? 1 + MASTER_BONUSES.loot.value : 1;
   const stolen = lootOf(victim.stone, ctx.victimRate, revenge, {
     lord: !!ctx.defenderArmy,
     cap: playerVsPlayer && ctx.attackerRate !== undefined ? ctx.attackerRate * PVP_LOOT_CAP_SECONDS : undefined,
-    factor,
+    factor: factor * lootBonus,
   });
   // Rançon : pierre créée par le jeu (pas prise à la victime), sur les défenseurs abattus avant soins et réparations.
   const ransom = playerVsPlayer ? ransomOf(fight.defenderLost, factor) : 0;
