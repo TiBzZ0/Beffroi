@@ -162,4 +162,12 @@ export const CHANGELOG: ChangeEntry[] = [
       "🪙 À la fin de la saison, ces trois podiums rapportent 30, 20 et 10 écus. Il faut avoir produit au moins 1 M de pierre pour y figurer.",
     ],
   },
+  {
+    id: 21,
+    date: "10 novembre",
+    items: [
+      "🛡️ Nouvel onglet Armée : ta garnison, le couvre-feu et la Forge y sont rangés, l'onglet Raids ne garde que les cibles et la chronique.",
+      "🔴 Une pastille signale une recherche terminée (onglet Armée) et un événement en cours (onglet Raids).",
+    ],
+  },
 ];

@@ -70,7 +70,7 @@ import { worldFrom, type AwaySummary, type LotView, type AllianceSummary, type C
 import { useGame, useLeaderboard, usePush, useTick } from "./use-game";
 import { CHANGELOG } from "@/lib/game/changelog";
 
-type Tab = "ateliers" | "ameliorations" | "chantier" | "raids" | "alliance" | "classement";
+type Tab = "ateliers" | "ameliorations" | "chantier" | "armee" | "raids" | "alliance" | "classement";
 type Qty = 1 | 10 | "max";
 const DAY_MS = 86_400_000;
 
@@ -85,6 +85,31 @@ export function Game({ userId }: { userId: string }) {
   useEffect(() => {
     watchRivals(tab === "raids" || tab === "alliance");
   }, [tab, watchRivals]);
+  // B8 : pastille « recherche terminée » tant que l'onglet Armée n'a pas été ouvert depuis.
+  const research = snap?.state.research;
+  const [seenResearch, setSeenResearch] = useState(research);
+  const [researchEnds, setResearchEnds] = useState<number[]>([]);
+  if (research !== seenResearch) {
+    setSeenResearch(research);
+    setResearchEnds((prev) => [...new Set([...prev, ...(research ?? []).map((r) => r.endsAt)])]);
+  }
+  const [armySeenAt, setArmySeenAt] = useState(() => {
+    try {
+      return Number(localStorage.getItem("beffroi.armySeenAt")) || 0;
+    } catch {
+      return 0;
+    }
+  });
+  const selectTab = (t: Tab) => {
+    if (t === "armee" || tab === "armee") {
+      const seen = game.serverNow();
+      setArmySeenAt(seen);
+      try {
+        localStorage.setItem("beffroi.armySeenAt", String(seen));
+      } catch {}
+    }
+    setTab(t);
+  };
 
   if (!snap) return <div className="loading">On allume les torches…</div>;
 
@@ -94,6 +119,8 @@ export function Game({ userId }: { userId: string }) {
   // État prévu « maintenant » : sert à savoir ce qui est achetable.
   const live: PlayerState = { ...advance(snap.state, now, world), stone: game.predictedStone() };
   const rate = rateAt(live, world, now);
+  const researchDone = tab !== "armee" && researchEnds.some((e) => e <= now && e > armySeenAt);
+  const eventLive = !!snap.event && snap.event.endsAt > now;
   const affordableUpgrades = UPGRADES.filter((u) => !live.upgrades.includes(u.id) && upgradeUnlocked(live, u) && u.cost <= live.stone).length;
 
   return (
@@ -106,17 +133,19 @@ export function Game({ userId }: { userId: string }) {
         <Hero snap={snap} rate={rate} clickGain={clickValue(live, world, stagesDone)} game={game} />
         <section className="panel">
           <div className="tabs" role="tablist">
-            <TabButton id="ateliers" tab={tab} setTab={setTab} label="Ateliers" />
-            <TabButton id="ameliorations" tab={tab} setTab={setTab} label="Savoirs" dot={affordableUpgrades > 0} />
-            <TabButton id="chantier" tab={tab} setTab={setTab} label="Chantier" />
-            <TabButton id="raids" tab={tab} setTab={setTab} label="Raids" dot={snap.rivals.some((r) => r.revenge && !r.blocker)} />
-            <TabButton id="alliance" tab={tab} setTab={setTab} label="Alliance" dot={snap.invites.length > 0} />
-            <TabButton id="classement" tab={tab} setTab={setTab} label="Rangs" />
+            <TabButton id="ateliers" tab={tab} setTab={selectTab} label="Ateliers" />
+            <TabButton id="ameliorations" tab={tab} setTab={selectTab} label="Savoirs" dot={affordableUpgrades > 0} />
+            <TabButton id="chantier" tab={tab} setTab={selectTab} label="Chantier" />
+            <TabButton id="armee" tab={tab} setTab={selectTab} label="Armée" dot={researchDone} />
+            <TabButton id="raids" tab={tab} setTab={selectTab} label={eventLive ? "Raids ⚡" : "Raids"} dot={eventLive || snap.rivals.some((r) => r.revenge && !r.blocker)} />
+            <TabButton id="alliance" tab={tab} setTab={selectTab} label="Alliance" dot={snap.invites.length > 0} />
+            <TabButton id="classement" tab={tab} setTab={selectTab} label="Rangs" />
           </div>
           <div className="tab-body" role="tabpanel">
             {tab === "ateliers" && <Generators live={live} stagesDone={stagesDone} snap={snap} run={game.run} />}
             {tab === "ameliorations" && <Upgrades live={live} run={game.run} />}
             {tab === "chantier" && <Worksite snap={snap} live={live} run={game.run} />}
+            {tab === "armee" && <Army snap={snap} live={live} now={now} run={game.run} />}
             {tab === "raids" && <Raids snap={snap} live={live} now={now} run={game.run} />}
             {tab === "alliance" && <AllianceTab snap={snap} live={live} now={now} run={game.run} />}
             {tab === "classement" && <Ranking boards={leaderboard} userId={userId} />}
@@ -958,7 +987,40 @@ function Status({ state, now }: { state: PlayerState; now: number }) {
   );
 }
 
-type RaidView = "armee" | "forge" | "seigneurs" | "joueurs" | "chronique";
+type RaidView = "seigneurs" | "joueurs" | "chronique";
+type ArmyView = "garnison" | "forge";
+
+/** B8 : onglet Armée, avec la garnison et la Forge, sorties de l'onglet Raids. */
+function Army({ snap, live, now, run }: { snap: GameSnapshot; live: PlayerState; now: number; run: ReturnType<typeof useGame>["run"] }) {
+  const [view, setView] = useState<ArmyView>("garnison");
+  const views: [ArmyView, string][] = [
+    ["garnison", "Garnison"],
+    ["forge", live.research.some((r) => r.endsAt > now) ? `Forge ⏳${live.research.length}` : "Forge"],
+  ];
+  return (
+    <>
+      <div className="subtabs" role="group" aria-label="Sections de l'armée">
+        {views.map(([id, label]) => (
+          <button key={id} className="btn" aria-pressed={view === id} onClick={() => setView(id)}>
+            {label}
+          </button>
+        ))}
+      </div>
+      {view === "garnison" && (
+        <>
+          <p className="note raid-intro">
+            Un raid est une bataille de 4 rounds au plus : toutes tes troupes (et les renforts de tes alliés) contre les troupes, fortifications et 3 gardes
+            de la cible. Chaque unité a ses forces et ses faiblesses, compose ton armée selon ce que tu vois en face. Tu gagnes si plus personne ne
+            riposte en face. Une partie des troupes perdues revient de l&apos;infirmerie au bout de 30 minutes.
+          </p>
+          <Garrison live={live} run={run} />
+          <CurfewCard live={live} now={now} run={run} />
+        </>
+      )}
+      {view === "forge" && <Forge live={live} now={now} run={run} stagesDone={stagesDoneAt(worldFrom(snap.worksite), now)} />}
+    </>
+  );
+}
 
 function Raids({ snap, live, now, run }: { snap: GameSnapshot; live: PlayerState; now: number; run: ReturnType<typeof useGame>["run"] }) {
   const [view, setView] = useState<RaidView>("seigneurs");
@@ -980,8 +1042,6 @@ function Raids({ snap, live, now, run }: { snap: GameSnapshot; live: PlayerState
     <RivalRow key={r.id} r={r} now={now} busy={busy} onRaid={raid} onSpy={spy} spyPrice={spyPrice} stone={live.stone} onSabotage={sabotage} />
   );
   const views: [RaidView, string][] = [
-    ["armee", "Armée"],
-    ["forge", live.research.some((r) => r.endsAt > now) ? `Forge ⏳${live.research.length}` : "Forge"],
     ["seigneurs", `Seigneurs (${snap.rivals.filter((r) => r.isLord).length})`],
     ["joueurs", `Joueurs (${players.length})`],
     ["chronique", "Chronique"],
@@ -1008,22 +1068,15 @@ function Raids({ snap, live, now, run }: { snap: GameSnapshot; live: PlayerState
       <p className="raid-state">
         {cooldown > 0 ? `⏳ Tes troupes se reposent encore ${duration(cooldown)}.` : "⚔️ Tes troupes sont prêtes."}
       </p>
-      {view === "armee" && (
-        <>
-          <p className="note raid-intro">
-            Un raid est une bataille de 4 rounds au plus : toutes tes troupes (et les renforts de tes alliés) contre les troupes, fortifications et 3 gardes
-            de la cible. Chaque unité a ses forces et ses faiblesses, compose ton armée selon ce que tu vois en face. Tu gagnes si plus personne ne
-            riposte en face. Les pertes sont réelles des deux côtés (70 % des fortifications abattues se relèvent). Un raid réussi vole 25 % (40 % en
-            revanche) de la pierre non sécurisée (les 2 dernières heures de production sont à l&apos;abri, mais jamais plus de la moitié du stock),
-            incendie les ateliers 30 min et ruine quelques bâtiments ; la victime reçoit 4 h de bouclier (10 min pour un seigneur) et un droit de revanche (+50 % de dégâts). Les
-            seigneurs difficiles ne frappent que ceux qui les ont attaqués. De loin, tu ne vois qu&apos;une estimation (≈) des armées : un espion révèle
-            l&apos;armée exacte pendant 1 h, mais il peut être repéré (surtout par les tours d&apos;archers).
-          </p>
-          <Garrison live={live} run={run} />
-          <CurfewCard live={live} now={now} run={run} />
-        </>
+      {view === "seigneurs" && (
+        <p className="note raid-intro">
+          Un raid réussi vole 25 % (40 % en revanche) de la pierre non sécurisée (les 2 dernières heures de production sont à l&apos;abri, mais jamais plus
+          de la moitié du stock), incendie les ateliers 30 min et ruine quelques bâtiments ; la victime reçoit 4 h de bouclier (10 min pour un seigneur) et un
+          droit de revanche (+50 % de dégâts). Les seigneurs difficiles ne frappent que ceux qui les ont attaqués. De loin, tu ne vois qu&apos;une estimation
+          (≈) des armées : un espion révèle l&apos;armée exacte pendant 1 h, mais il peut être repéré (surtout par les tours d&apos;archers). Ta garnison et
+          la Forge sont dans l&apos;onglet Armée.
+        </p>
       )}
-      {view === "forge" && <Forge live={live} now={now} run={run} stagesDone={stagesDoneAt(worldFrom(snap.worksite), now)} />}
       {view === "seigneurs" && (
         <>
           <div className="qty level-filter" role="group" aria-label="Difficulté">
