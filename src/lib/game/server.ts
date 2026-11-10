@@ -700,6 +700,14 @@ function sizeOf(state: PlayerState, rate: number): { army: number; rate: number 
   return { army: armyValue(cleanArmy({ ...troopsHere(state), ...state.defenses })), rate };
 }
 
+/** T4 : taille d'un attaquant, toute son armée comptée (domaine, routes, renforts postés chez ses alliés) pour qu'un petit détachement ne lève pas l'interdiction. */
+function attackerSizeOf(id: string, state: PlayerState, entities: Map<string, Entity>, rate: number): { army: number; rate: number } {
+  const home = sizeOf(state, rate).army;
+  const roads = (state.marches ?? []).reduce((a, m) => a + armyValue(m.troops), 0);
+  const abroad = [...entities.values()].reduce((a, e) => (e.id === id ? a : a + armyValue((e.state.stationed?.[id] ?? {}) as Army)), 0);
+  return { army: home + roads + abroad, rate };
+}
+
 /** Taille des étapes passée au chantier : seule compte celle de l'étape qui s'ouvre (audit A9). */
 let stageSizes: number[] = STAGES.map(() => STAGE_MIN_SIZE);
 
@@ -1637,7 +1645,7 @@ function rivalsFor(
 ): RivalView[] {
   const armies = lordArmies(entities, world, now, flat);
   const myRate = currentRate(me, myState, now, world, flat);
-  const mySize = sizeOf(myState, myRate);
+  const mySize = attackerSizeOf(me.id, myState, entities, myRate);
   return [...entities.values()]
     .filter((e) => e.id !== me.id)
     .map((e) => {
@@ -2048,7 +2056,7 @@ export async function runAction(admin: SupabaseClient, userId: string, action: G
             allied: isAllied(me, victim),
             atWar: !!warBetween(conflicts.wars, me.allianceId, victim.allianceId, now),
             attackerRate: myRate,
-            relativeSize: victim.isLord ? undefined : relativeSize(sizeOf(victimState, vRate), { army: armyValue(sent), rate: myRate }),
+            relativeSize: victim.isLord ? undefined : relativeSize(sizeOf(victimState, vRate), attackerSizeOf(me.id, current, entities, myRate)),
             attackerArmy: sent,
             marching: true,
           });
@@ -2298,7 +2306,7 @@ async function settleMarches(
     allied: isAllied(owner, victim),
     atWar: !!warBetween(wars, owner.allianceId, victim.allianceId, at),
     attackerRate: aRate,
-    relativeSize: victim.isLord ? undefined : relativeSize(sizeOf(vState, vRate), { army: armyValue(m.troops), rate: aRate }),
+    relativeSize: victim.isLord ? undefined : relativeSize(sizeOf(vState, vRate), attackerSizeOf(owner.id, aState, entities, aRate)),
     attackerArmy: m.troops,
     marching: true,
     allowRepeat: true,
