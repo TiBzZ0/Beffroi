@@ -509,15 +509,18 @@ export const COLOSSUS_KILL_SECONDS = 15 * 60;
 export const ONLINE_MS = 2.5 * 60 * 1000;
 
 // Panthéon : catégories figées à la fin de chaque saison (podium de 3), titres pour les premiers.
-export const HALL: readonly { id: "builder" | "plunderer" | "producer" | "colossus" | "caravan" | "fortress" | "war"; icon: string; label: string; title: string; unit: "stone" | "time" | "count"; alliance: boolean }[] = [
-  { id: "builder", icon: "🏗️", label: "Bâtisseurs du chantier", title: "Grand bâtisseur", unit: "stone", alliance: false },
+export type HallUnit = "stone" | "time" | "count" | "percent" | "ratio";
+export const HALL: readonly { id: "generous" | "plunderer" | "progress" | "colossus" | "defender" | "fortress" | "war"; icon: string; label: string; title: string; unit: HallUnit; alliance: boolean; ecus?: readonly number[] }[] = [
+  { id: "generous", icon: "🏗️", label: "Les plus généreux (part de sa production versée)", title: "Grand bâtisseur", unit: "percent", alliance: false, ecus: [30, 20, 10] },
   { id: "plunderer", icon: "⚔️", label: "Pillards", title: "Fléau du royaume", unit: "stone", alliance: false },
-  { id: "producer", icon: "⛏️", label: "Carriers (pierre produite)", title: "Maître carrier", unit: "stone", alliance: false },
+  { id: "progress", icon: "📈", label: "Meilleure progression (production multipliée sur 7 jours)", title: "Étoile montante", unit: "ratio", alliance: false, ecus: [30, 20, 10] },
   { id: "colossus", icon: "🗿", label: "Chasseurs de colosses (dégâts)", title: "Tueur de colosses", unit: "stone", alliance: false },
-  { id: "caravan", icon: "🐪", label: "Détrousseurs de caravanes", title: "Détrousseur", unit: "stone", alliance: false },
+  { id: "defender", icon: "🛡️", label: "Meilleurs défenseurs (raids repoussés)", title: "Rempart du royaume", unit: "count", alliance: false, ecus: [30, 20, 10] },
   { id: "fortress", icon: "🏰", label: "Gardiens de Pierre-Haute (temps tenu)", title: "Gardiens de Pierre-Haute", unit: "time", alliance: true },
   { id: "war", icon: "🏆", label: "Guerres gagnées", title: "Seigneurs de guerre", unit: "count", alliance: true },
 ];
+/** Joueurs qui n'ont presque rien produit : exclus des classements relatifs (B12). */
+export const HALL_MIN_PRODUCED = 1_000_000;
 export const HALL_PODIUM = 3;
 
 // Améliorations militaires : chaque niveau donne +10 % d'attaque et de PV au type amélioré.

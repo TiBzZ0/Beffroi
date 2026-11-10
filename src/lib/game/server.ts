@@ -45,6 +45,7 @@ import {
   NEW_PLAYER_TITHE,
   DONOR_TIER_BONUS,
   QUESTS,
+  HALL_MIN_PRODUCED,
   COLOSSUS_KILL_SECONDS,
   FORTRESS_TRUCE_MS,
   FORTRESS_WALLS_START,
@@ -150,7 +151,7 @@ import {
   type Standing,
 } from "./types";
 import { armyForChance, armyFromBudget, armySize, armyValue, battle, cleanArmy, estimateChance, seededRng, type Army, type Levels } from "./battle";
-import { recordContribution, topContributors } from "@/lib/redis";
+import { recordContribution } from "@/lib/redis";
 import { notify, notifyEach, type PushMessage } from "@/lib/push";
 
 // Toute la logique qui fait foi : charger l'état, le recalculer, appliquer l'intention
@@ -582,6 +583,12 @@ async function maybeDailySummary(admin: SupabaseClient, seasonId: number, entiti
   await admin.from("app_secrets").upsert({ key: "daily_summary", value: "" }, { onConflict: "key", ignoreDuplicates: true });
   const { data: claimed } = await admin.from("app_secrets").update({ value: today }).eq("key", "daily_summary").lt("value", today).select("key");
   if (!claimed || claimed.length === 0) return;
+  // B12 : production du jour de chaque joueur (hors bonus passagers), pour la meilleure progression.
+  const world = worldFrom(worksite);
+  const rates = [...entities.values()]
+    .filter((e) => !e.isLord)
+    .map((e) => ({ season_id: seasonId, user_id: e.id, day: today, rate: productionPerSecond(advance(e.state, now, world), world, stagesDoneAt(world, now)) }));
+  if (rates.length) await admin.from("rate_history").upsert(rates, { onConflict: "season_id,user_id,day", ignoreDuplicates: true });
   const [{ data: subs }, { data: raids }] = await Promise.all([
     admin.from("push_subscriptions").select("user_id"),
     admin.from("chronicle").select("actor_id, target_id, details").eq("season_id", seasonId).eq("kind", "raid").gt("created_at", iso(now - 86_400_000)),
@@ -2059,29 +2066,44 @@ export async function runAction(admin: SupabaseClient, userId: string, action: G
 
 /** Classements d'une saison dans toutes les catégories, arrêtés à `until` (fin de saison ou maintenant). */
 async function seasonStandings(admin: SupabaseClient, seasonId: number, until: number): Promise<Standing[]> {
-  const [{ data: players }, { data: events }, { data: captures }, { data: wars }, { data: alliances }] = await Promise.all([
+  const [{ data: players }, { data: events }, { data: captures }, { data: wars }, { data: alliances }, { data: repelled }, { data: history }] = await Promise.all([
     admin.from("player_states").select("user_id, total_contributed, total_plundered, total_produced, profiles(username, is_bot)").eq("season_id", seasonId),
     admin.from("events").select("kind, attackers").eq("season_id", seasonId),
     admin.from("chronicle").select("created_at, details").eq("season_id", seasonId).eq("kind", "fortress").order("created_at", { ascending: true }),
     admin.from("wars").select("winner").eq("season_id", seasonId).eq("settled", true).not("winner", "is", null),
     admin.from("alliances").select("id, name").eq("season_id", seasonId),
+    admin.from("chronicle").select("target_id").eq("season_id", seasonId).eq("kind", "raid").eq("details->>success", "false").lte("created_at", iso(until)),
+    admin.from("rate_history").select("user_id, day, rate").eq("season_id", seasonId).order("day", { ascending: true }),
   ]);
   type Row = { user_id: string; total_contributed: number; total_plundered: number; total_produced: number; profiles: { username: string; is_bot: boolean } | null };
   const humans = ((players ?? []) as unknown as Row[]).filter((r) => r.profiles && !r.profiles.is_bot);
   const names = new Map(humans.map((r) => [r.user_id, r.profiles!.username]));
   const allianceNames = new Map((alliances ?? []).map((a) => [String(a.id), a.name as string]));
+  // B12 : catégories relatives, pour que les petits joueurs puissent gagner un titre.
+  const real = humans.filter((r) => Number(r.total_produced ?? 0) >= HALL_MIN_PRODUCED);
+  const progress = new Map<string, number>();
+  const day7 = new Date(until - 7 * 86_400_000).toISOString().slice(0, 10);
+  const byUser = new Map<string, { day: string; rate: number }[]>();
+  for (const h of (history ?? []) as { user_id: string; day: string; rate: number }[]) byUser.set(h.user_id, [...(byUser.get(h.user_id) ?? []), { day: h.day, rate: Number(h.rate) }]);
+  for (const [id, list] of byUser) {
+    // Production d'il y a 7 jours (ou la plus ancienne relevée), comparée à la dernière.
+    const past = [...list].reverse().find((h) => h.day <= day7) ?? list[0];
+    const last = list[list.length - 1];
+    if (past && last && past.rate > 0 && last.day > past.day) progress.set(id, last.rate / past.rate);
+  }
   const totals: Record<HallCategory, Map<string, number>> = {
-    builder: new Map(humans.map((r) => [r.user_id, Number(r.total_contributed ?? 0)])),
+    generous: new Map(real.map((r) => [r.user_id, (Number(r.total_contributed ?? 0) / Number(r.total_produced)) * 100])),
     plunderer: new Map(humans.map((r) => [r.user_id, Number(r.total_plundered ?? 0)])),
-    producer: new Map(humans.map((r) => [r.user_id, Number(r.total_produced ?? 0)])),
+    progress,
     colossus: new Map(),
-    caravan: new Map(),
+    defender: new Map(),
     fortress: new Map(),
     war: new Map(),
   };
+  for (const r of (repelled ?? []) as { target_id: string | null }[]) if (r.target_id) totals.defender.set(r.target_id, (totals.defender.get(r.target_id) ?? 0) + 1);
   for (const e of events ?? []) {
-    const m = e.kind === "colosse" ? totals.colossus : totals.caravan;
-    for (const [id, v] of Object.entries((e.attackers ?? {}) as Record<string, number>)) m.set(id, (m.get(id) ?? 0) + Number(v));
+    if (e.kind !== "colosse") continue;
+    for (const [id, v] of Object.entries((e.attackers ?? {}) as Record<string, number>)) totals.colossus.set(id, (totals.colossus.get(id) ?? 0) + Number(v));
   }
   // Temps de garde de la forteresse : d'une prise réussie à la suivante (ou à la fin).
   const held = ((captures ?? []) as { created_at: string; details: { success?: boolean; alliance?: number } }[]).filter((c) => c.details?.success && c.details.alliance != null);
@@ -2118,7 +2140,13 @@ async function closeEndedSeasons(admin: SupabaseClient, now: number): Promise<vo
       })),
     );
     if (rows.length > 0) await admin.from("season_hall").upsert(rows, { onConflict: "season_id,category,rank", ignoreDuplicates: true });
-    await admin.from("seasons").update({ hall_closed: true }).eq("id", season.id);
+    // Seul l'appel qui ferme la saison paie le podium, pour ne jamais payer deux fois.
+    const { data: claimed } = await admin.from("seasons").update({ hall_closed: true }).eq("id", season.id).eq("hall_closed", false).select("id");
+    if (!claimed?.length) continue;
+    for (const r of rows) {
+      const prize = HALL.find((h) => h.id === r.category)?.ecus?.[r.rank - 1];
+      if (prize && r.user_id) await admin.rpc("add_ecus", { p_user: r.user_id, p_amount: prize });
+    }
   }
 }
 
@@ -2161,16 +2189,10 @@ function titlesFrom(hall: SeasonHall[]): Map<string, string[]> {
 
 export async function getLeaderboards(admin: SupabaseClient, limit = 20): Promise<Leaderboards> {
   const season = await getActiveSeason(admin);
-  const [standings, hall, redisTop] = await Promise.all([seasonStandings(admin, season.id, Date.now()), loadHall(admin), topContributors(season.id, limit)]);
+  const [standings, hall] = await Promise.all([seasonStandings(admin, season.id, Date.now()), loadHall(admin)]);
   const rowsOf = (c: HallCategory) => standings.find((st) => st.category === c)?.rows ?? [];
   const toBoard = (rows: { id: string; name: string; value: number }[]): LeaderboardRow[] => rows.slice(0, limit).map((r) => ({ userId: r.id, username: r.name, total: r.value }));
-  // Le compteur Redis des dons, s'il existe, est plus frais que la base.
-  const builderNames = new Map(rowsOf("builder").map((r) => [r.id, r.name]));
-  const contributors = redisTop
-    ? redisTop.filter((r) => builderNames.has(r.userId) && r.total > 0).map((r) => ({ userId: r.userId, username: builderNames.get(r.userId)!, total: r.total }))
-    : toBoard(rowsOf("builder"));
   return {
-    contributors,
     plunderers: toBoard(rowsOf("plunderer")),
     standings: standings.map((st) => ({ ...st, rows: st.rows.slice(0, limit) })),
     hall,

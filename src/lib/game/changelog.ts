@@ -154,4 +154,12 @@ export const CHANGELOG: ChangeEntry[] = [
       "🔢 Une légende des grands nombres (k, M, Md, Bn…) est en bas de la page.",
     ],
   },
+  {
+    id: 20,
+    date: "10 novembre",
+    items: [
+      "🏛️ Le classement de saison change : les plus généreux (part de ta production versée au chantier), la meilleure progression (production multipliée sur 7 jours) et les meilleurs défenseurs (raids repoussés) remplacent les bâtisseurs, les carriers et les détrousseurs de caravanes.",
+      "🪙 À la fin de la saison, ces trois podiums rapportent 30, 20 et 10 écus. Il faut avoir produit au moins 1 M de pierre pour y figurer.",
+    ],
+  },
 ];

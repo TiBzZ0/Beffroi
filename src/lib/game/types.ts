@@ -175,7 +175,7 @@ export interface LeaderboardRow {
   total: number;
 }
 
-export type HallCategory = "builder" | "plunderer" | "producer" | "colossus" | "caravan" | "fortress" | "war";
+export type HallCategory = "generous" | "plunderer" | "progress" | "colossus" | "defender" | "fortress" | "war";
 
 /** Un classement : joueurs ou alliances, du premier au dernier. */
 export interface Standing {
@@ -191,7 +191,6 @@ export interface SeasonHall {
 }
 
 export interface Leaderboards {
-  contributors: LeaderboardRow[];
   plunderers: LeaderboardRow[];
   /** Saison en cours, toutes catégories. */
   standings: Standing[];

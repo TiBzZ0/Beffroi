@@ -35,6 +35,7 @@ import {
   type CombatantDef,
   type CombatantId,
   type GeneratorId,
+  type HallUnit,
 } from "@/lib/game/config";
 import {
   advance,
@@ -826,7 +827,7 @@ function Ranking({ boards, userId }: { boards: ReturnType<typeof useLeaderboard>
             saison suivante. Les seigneurs voisins n&apos;y figurent pas.
           </p>
           {HALL.map((h) => {
-            const rows = h.id === "builder" ? boards.contributors.map((r) => ({ id: r.userId, name: r.username, value: r.total })) : (standings.find((st) => st.category === h.id)?.rows ?? []);
+            const rows = standings.find((st) => st.category === h.id)?.rows ?? [];
             return (
               <div key={h.id}>
                 <h3 className="section-title">
@@ -873,13 +874,15 @@ function Ranking({ boards, userId }: { boards: ReturnType<typeof useLeaderboard>
   );
 }
 
-function formatValue(v: number, unit: "stone" | "time" | "count"): string {
+function formatValue(v: number, unit: HallUnit): string {
   if (unit === "time") return duration(v);
+  if (unit === "percent") return `${v.toLocaleString("fr-FR", { maximumFractionDigits: 1 })} %`;
+  if (unit === "ratio") return `×${v.toLocaleString("fr-FR", { maximumFractionDigits: 1 })}`;
   if (unit === "count") return String(v);
   return formatNumber(v);
 }
 
-function Board({ rows, userId, empty, unit = "stone" }: { rows: { userId: string; username: string; total: number }[]; userId: string; empty: string; unit?: "stone" | "time" | "count" }) {
+function Board({ rows, userId, empty, unit = "stone" }: { rows: { userId: string; username: string; total: number }[]; userId: string; empty: string; unit?: HallUnit }) {
   if (rows.length === 0) return <p className="empty">{empty}</p>;
   const medals = ["🥇", "🥈", "🥉"];
   return (
