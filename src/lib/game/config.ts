@@ -409,6 +409,11 @@ export const FORTRESS_PRODUCTION_BONUS = 1.2;
 export const FORTRESS_WALLS_POWER = 2;
 /** A13 : pas d'assaut pendant 30 minutes après une prise. */
 export const FORTRESS_TRUCE_MS = 30 * 60_000;
+/** A13 : murs d'une forteresse tenue, en part de leur valeur neutre : 25 % à la prise, +25 % toutes les 2 h, 200 % au plus. */
+export const FORTRESS_WALLS_START = 0.25;
+export const FORTRESS_WALLS_STEP = 0.25;
+export const FORTRESS_WALLS_STEP_MS = 2 * 3_600_000;
+export const FORTRESS_WALLS_MAX = 2;
 export const FORTRESS_WALLS: Partial<Record<CombatantId, number>> = { muraille: 0.35, baliste: 0.35, tour: 0.3 };
 export const FORTRESS_NAME = "Forteresse de Pierre-Haute";
 export const SPY_COST_SECONDS = 60;

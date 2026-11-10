@@ -47,6 +47,10 @@ import {
   QUESTS,
   COLOSSUS_KILL_SECONDS,
   FORTRESS_TRUCE_MS,
+  FORTRESS_WALLS_START,
+  FORTRESS_WALLS_STEP,
+  FORTRESS_WALLS_STEP_MS,
+  FORTRESS_WALLS_MAX,
   LORD_RAID_CHANCE,
   LOT_PRIME_SHARE,
   LOT_ECUS,
@@ -918,8 +922,18 @@ function garrisonOf(f: FortressRow): PlayerState["stationed"] {
  * Une fois prise, seules les troupes que les membres de l'alliance y envoient la défendent :
  * sans garnison, le premier venu la prend.
  */
-function fortressDefense(f: FortressRow, entities: Map<string, Entity>): Army {
-  const army: Army = f.holder === null ? { ...armyFromBudget(troopBudget(entities) * FORTRESS_WALLS_POWER, FORTRESS_WALLS), garde: GUARDS_PER_DOMAIN } : {};
+/** A13 : murs d'une forteresse tenue, 25 % de leur valeur neutre à la prise, +25 % toutes les 2 h, 200 % au plus. */
+export function heldWallsFactor(capturedAt: number, now: number): number {
+  const held = Math.max(0, now - capturedAt);
+  return Math.min(FORTRESS_WALLS_MAX, FORTRESS_WALLS_START + FORTRESS_WALLS_STEP * Math.floor(held / FORTRESS_WALLS_STEP_MS));
+}
+
+function fortressDefense(f: FortressRow, entities: Map<string, Entity>, now = Date.now()): Army {
+  const neutral = troopBudget(entities) * FORTRESS_WALLS_POWER;
+  const army: Army =
+    f.holder === null
+      ? { ...armyFromBudget(neutral, FORTRESS_WALLS), garde: GUARDS_PER_DOMAIN }
+      : armyFromBudget(neutral * heldWallsFactor(f.capturedAt, now), FORTRESS_WALLS);
   for (const g of Object.values(garrisonOf(f))) {
     for (const [id, n] of Object.entries(g) as [UnitId, number][]) army[id] = (army[id] ?? 0) + n;
   }
@@ -1004,7 +1018,7 @@ async function runConflictAction(
     case "fortress_attack": {
       const blocked = fortressBlocker(me, current, f, now);
       if (blocked) return { error: blocked };
-      const defense = fortressDefense(f, entities);
+      const defense = fortressDefense(f, entities, now);
       const levels = { attackerLevels: current.levels, defenderLevels: fortressLevels(f, entities) };
       const chance = estimateChance(attackArmy(current), defense, levels);
       const fight = battle(attackArmy(current), defense, Math.random, levels);
@@ -1046,7 +1060,7 @@ async function runConflictAction(
 }
 
 function fortressView(me: Entity, state: PlayerState, f: FortressRow, entities: Map<string, Entity>, names: Map<number, string>, now: number, intelUntil: number | null): FortressView {
-  const defense = fortressDefense(f, entities);
+  const defense = fortressDefense(f, entities, now);
   const mine = f.holder !== null && f.holder === me.allianceId;
   const known = mine || (intelUntil !== null && intelUntil > now);
   const seen = known ? defense : fuzzyArmy(defense);

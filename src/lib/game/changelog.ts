@@ -131,4 +131,11 @@ export const CHANGELOG: ChangeEntry[] = [
       "🗿 Colosse : chaque assaut rapporte tout de suite 2 fois la valeur des pertes infligées. S'il tombe, chaque joueur qui l'a touché reçoit en plus 15 minutes de sa production. Le colosse en cours garde l'ancienne prime commune.",
     ],
   },
+  {
+    id: 17,
+    date: "10 novembre",
+    items: [
+      "🧱 Forteresse tenue : en plus des troupes postées par l'alliance, ses murs reviennent. Ils repartent à 25 % de leur valeur à la prise, puis gagnent 25 % toutes les 2 heures, jusqu'à 200 %.",
+    ],
+  },
 ];
