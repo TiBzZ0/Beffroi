@@ -35,6 +35,8 @@ export interface RivalView {
   /** Joueurs : rançon attendue en cas de victoire (E2), et coefficient d'équité (E3, 1 = plein). */
   ransom?: number;
   fairness?: number;
+  /** Joueurs : plafond du butin (2 h de ma production), pour que l'estimation en direct suive la même règle que le serveur. */
+  lootCap?: number;
   /** Son alliance est en guerre contre la mienne. */
   atWar: boolean;
   /** Membre de mon alliance : on ne peut pas le piller, on peut lui envoyer des renforts. */

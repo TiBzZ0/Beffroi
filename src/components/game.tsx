@@ -1111,7 +1111,7 @@ function Raids({ snap, live, now, run }: { snap: GameSnapshot; live: PlayerState
   const lords = snap.rivals.filter((r) => r.isLord && (level === null || r.difficulty === level));
   const sabotage = (target: string) => act(target, { type: "sabotage", target });
   const row = (r: RivalView) => (
-    <RivalRow key={r.id} r={r} now={now} busy={busy} onRaid={raid} onSpy={spy} spyPrice={spyPrice} stone={live.stone} onSabotage={sabotage} />
+    <RivalRow key={r.id} r={r} now={now} busy={busy} onRaid={raid} onSpy={spy} spyPrice={spyPrice} stone={live.stone} onSabotage={sabotage} stagesDone={stagesDoneAt(worldFrom(snap.worksite), now)} />
   );
   const views: [RaidView, string][] = [
     ["seigneurs", `Seigneurs (${snap.rivals.filter((r) => r.isLord).length})`],
@@ -1279,6 +1279,7 @@ function RivalRow({
   spyPrice,
   stone: myStone,
   onSabotage,
+  stagesDone = 0,
 }: {
   r: RivalView;
   now: number;
@@ -1288,12 +1289,14 @@ function RivalRow({
   spyPrice: number;
   stone: number;
   onSabotage: (id: string) => void;
+  stagesDone?: number;
 }) {
   const sabotagePrice = r.sabotageCost ?? 0;
   const intel = r.intelUntil > now;
   // La pierre du rival progresse en direct entre deux nouvelles du serveur.
   const stone = r.stone + (r.rate * Math.max(0, now - r.stoneAt)) / 1000;
-  const loot = lootOf(stone, r.rate, r.revenge);
+  // Mêmes règles que le serveur : plafond PvP, coefficient d'équité, stock à l'abri des étapes.
+  const loot = lootOf(stone, r.rate, r.revenge, { lord: r.isLord, cap: r.lootCap, factor: r.fairness, stagesDone });
   const shielded = r.shieldUntil > now;
   const blocked = r.blocker !== null;
   const pct = Math.round(r.chance * 100);

@@ -1576,6 +1576,7 @@ function rivalsFor(
       return {
         ransom,
         fairness: fair,
+        lootCap: e.isLord ? undefined : myRate * PVP_LOOT_CAP_SECONDS,
         id: e.id,
         name: e.name,
         isLord: e.isLord,
