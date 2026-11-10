@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { MAX_CLICKS_PER_SECOND } from "@/lib/game/config";
-import { advance, buyArmy, buyGenerator, buyUpgrade, clickValue, stagesDoneAt, type PlayerState } from "@/lib/game/engine";
+import { advance, buyAcademy, buyArmy, buyGenerator, buyUpgrade, clickValue, stagesDoneAt, startResearch, type PlayerState } from "@/lib/game/engine";
 import type { GeneratorId } from "@/lib/game/config";
 import { worksiteFromRow, worldFrom, type ActionResponse, type GameAction, type GameSnapshot, type Leaderboards } from "@/lib/game/types";
 import { getBrowserClient } from "@/lib/supabase/client";
@@ -344,6 +344,10 @@ function applyLocal(state: PlayerState, action: GameAction): PlayerState | null 
         ? buyArmy(state, action.kind, action.id, Number(action.qty))
         : action.type === "upgrade"
           ? buyUpgrade(state, action.upgrade)
-          : null;
+          : action.type === "academy"
+            ? buyAcademy(state)
+            : action.type === "research"
+              ? startResearch(state, action.id, state.lastUpdate)
+              : null;
   return r && r.ok ? r.value : null;
 }

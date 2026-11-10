@@ -31,6 +31,7 @@ import {
   RAID_COOLDOWN_MS,
   WAR_MS,
   type UnitId,
+  type CombatantId,
   GUARDS_PER_DOMAIN,
   COMBATANTS,
   SEASON_DAYS,
@@ -52,6 +53,7 @@ import {
   fuzzyArmy,
   spyCost,
   attackArmy,
+  defenseArmy,
   newPlayerState,
   splitTroopLosses,
   recallReinforcements,
@@ -64,6 +66,14 @@ import {
   raidBlocker,
   buyArmy,
   rateAt,
+  startResearch,
+  buyAcademy,
+  levelOf,
+  sabotageCost,
+  sabotageChance,
+  sabotageBlocker,
+  applySabotage,
+  RESEARCHABLE,
   rebuildRuin,
   resolveRaid,
   stagesDoneAt,
@@ -93,7 +103,7 @@ import {
   type SeasonHall,
   type Standing,
 } from "./types";
-import { armyFromBudget, armySize, armyValue, battle, cleanArmy, estimateChance, seededRng, type Army } from "./battle";
+import { armyFromBudget, armySize, armyValue, battle, cleanArmy, estimateChance, seededRng, type Army, type Levels } from "./battle";
 import { recordContribution, topContributors } from "@/lib/redis";
 
 // Toute la logique qui fait foi : charger l'état, le recalculer, appliquer l'intention
@@ -112,6 +122,7 @@ interface PlayerRow {
   upgrades: string[];
   total_produced: number;
   total_contributed: number;
+  military?: { levels?: Record<string, number>; research?: { id: string; endsAt: number } | null; academy?: number; sabotageImmuneUntil?: number } | null;
   total_clicks: number;
   last_update: string;
   last_click_at: string;
@@ -218,6 +229,10 @@ function toEntity(row: PlayerRow): Entity {
           .map(([owner, group]) => [owner, armyCounts(group, UNIT_IDS)] as const)
           .filter(([, g]) => Object.keys(g).length > 0),
       ),
+      levels: armyCounts(row.military?.levels ?? {}, [...UNIT_IDS, ...DEFENSE_IDS]),
+      research: row.military?.research ? { id: row.military.research.id as CombatantId, endsAt: Number(row.military.research.endsAt) } : null,
+      academy: Number(row.military?.academy ?? 0),
+      sabotageImmuneUntil: Number(row.military?.sabotageImmuneUntil ?? 0),
     },
   };
 }
@@ -245,6 +260,7 @@ function toJson(e: Entity, state: PlayerState, extra: Record<string, unknown> = 
     troops: state.troops,
     defenses: state.defenses,
     stationed: state.stationed,
+    military: { levels: state.levels, research: state.research, academy: state.academy, sabotageImmuneUntil: state.sabotageImmuneUntil },
     click_strikes: state.clickStrikes,
     click_paused_until: iso(state.clickPausedUntil),
     ...extra,
@@ -304,7 +320,21 @@ async function loadEntities(admin: SupabaseClient, seasonId: number, userId: str
     const catchUp = catchUpBonus(e.state.totalProduced, leader);
     if (catchUp > 0) e.state = { ...e.state, catchUp };
   }
+  // Les seigneurs suivent les améliorations des joueurs (niveau médian de chaque type).
+  const levels = medianLevels(entities);
+  for (const e of entities.values()) if (e.isLord) e.state = { ...e.state, levels, research: null };
   return entities;
+}
+
+/** Niveau médian de chaque type chez les vrais joueurs : celui des seigneurs, de la garnison neutre et des événements. */
+function medianLevels(entities: Map<string, Entity>): Levels {
+  const humans = [...entities.values()].filter((e) => !e.isLord);
+  const out: Levels = {};
+  for (const id of RESEARCHABLE) {
+    const m = Math.floor(median(humans.map((e) => e.state.levels?.[id] ?? 0)));
+    if (m > 0) out[id] = m;
+  }
+  return out;
 }
 
 /** Production de base d'un seigneur : médiane des vrais joueurs × son caractère. */
@@ -445,7 +475,7 @@ async function tickLords(admin: SupabaseClient, season: SeasonView, entities: Ma
       if (pick) {
         const ctx = { now, attackerId: lord.id, victimId: pick.e.id, victimRate: pick.rate, attackerIsLord: true, allowRepeat: lord.retaliateOnly, attackerArmy: army.attack };
         const armiesNow = raidArmies(state, pick.s, ctx);
-        const chance = estimateChance(armiesNow.attack, armiesNow.defense, { attackBonus: armiesNow.attackBonus });
+        const chance = estimateChance(armiesNow.attack, armiesNow.defense, armiesNow.opts);
         const r = resolveRaid(state, pick.s, { ...ctx, rng: Math.random });
         if (r.ok) {
           await admin.rpc("apply_raid", {
@@ -593,6 +623,17 @@ function fortressDefense(f: FortressRow, entities: Map<string, Entity>): Army {
   return army;
 }
 
+/** Niveaux des défenseurs : ceux de la garnison neutre, ou le meilleur niveau parmi les membres qui y ont posté ce type. */
+function fortressLevels(f: FortressRow, entities: Map<string, Entity>): Levels {
+  if (f.holder === null) return medianLevels(entities);
+  const out: Levels = {};
+  for (const [owner, group] of Object.entries(garrisonOf(f))) {
+    const lv = entities.get(owner)?.state.levels ?? {};
+    for (const id of Object.keys(group) as UnitId[]) out[id] = Math.max(out[id] ?? 0, lv[id] ?? 0);
+  }
+  return out;
+}
+
 function fortressBlocker(me: Entity, state: PlayerState, f: FortressRow, now: number): string | null {
   if (me.allianceId === null) return "Rejoins une alliance pour assiéger la forteresse.";
   if (f.holder === me.allianceId) return "Ton alliance tient déjà la forteresse.";
@@ -653,8 +694,9 @@ async function runConflictAction(
       const blocked = fortressBlocker(me, current, f, now);
       if (blocked) return { error: blocked };
       const defense = fortressDefense(f, entities);
-      const chance = estimateChance(attackArmy(current), defense);
-      const fight = battle(attackArmy(current), defense, Math.random);
+      const levels = { attackerLevels: current.levels, defenderLevels: fortressLevels(f, entities) };
+      const chance = estimateChance(attackArmy(current), defense, levels);
+      const fight = battle(attackArmy(current), defense, Math.random, levels);
       const mine = splitTroopLosses(current, fight.attackerLost);
       const theirs = splitTroopLosses(garrisonHost(f, now), fight.defenderLost);
       const after: PlayerState = { ...current, troops: mine.troops, stationed: mine.stationed, lastRaidAt: now, shieldUntil: 0 };
@@ -698,7 +740,7 @@ function fortressView(me: Entity, state: PlayerState, f: FortressRow, entities: 
     army: seen as Record<string, number>,
     exact: known,
     intelUntil: !mine && known ? intelUntil : null,
-    chance: vagueChance(estimateChance(attackArmy(state), defense), known),
+    chance: vagueChance(estimateChance(attackArmy(state), defense, { attackerLevels: state.levels, defenderLevels: fortressLevels(f, entities) }), known),
     blocker: fortressBlocker(me, state, f, now),
     garrison: mine ? Object.entries(garrison).map(([id, troops]) => ({ id, name: entities.get(id)?.name ?? "Inconnu", troops: troops as Record<string, number> })) : [],
     myGarrison: (garrison[me.id] ?? {}) as Record<string, number>,
@@ -737,6 +779,8 @@ const EVENT_INFO: Record<EventKind, { name: string; description: string }> = {
 
 interface EventState {
   active: EventRow | null;
+  /** Niveaux de l'escorte ou du colosse (médiane des joueurs). */
+  levels: Levels;
   /** Arrivée du prochain événement quand aucun n'est en cours. */
   nextAt: number;
   nextKind: EventKind;
@@ -763,14 +807,14 @@ async function loadEvent(admin: SupabaseClient, seasonId: number, now: number, e
   for (const raw of open ?? []) {
     const e = eventRow(raw);
     const finished = ms(e.ends_at) <= now || (e.kind === "caravane" && e.pool <= 0) || (e.kind === "colosse" && armySize(e.army) === 0);
-    if (!finished) return { active: e, nextAt: ms(e.ends_at), nextKind: e.kind === "caravane" ? "colosse" : "caravane" };
+    if (!finished) return { active: e, levels: medianLevels(entities), nextAt: ms(e.ends_at), nextKind: e.kind === "caravane" ? "colosse" : "caravane" };
     await admin.rpc("settle_event", { p_event: e.id });
   }
   const { data: last } = await admin.from("events").select("kind, ends_at").eq("season_id", seasonId).order("ends_at", { ascending: false }).limit(1).maybeSingle();
   const nextKind: EventKind = last?.kind === "caravane" ? "colosse" : "caravane";
   const nextAt = last ? ms(last.ends_at as string) + EVENT_GAP_MS : now;
   const humans = [...entities.values()].filter((e) => !e.isLord);
-  if (now < nextAt || humans.length === 0) return { active: null, nextAt, nextKind };
+  if (now < nextAt || humans.length === 0) return { active: null, levels: {}, nextAt, nextKind };
 
   let army: Army;
   let prize: number;
@@ -788,9 +832,9 @@ async function loadEvent(admin: SupabaseClient, seasonId: number, now: number, e
   // L'index unique empêche deux événements simultanés si deux joueurs arrivent en même temps.
   await admin.from("events").insert({ season_id: seasonId, kind: nextKind, ends_at: iso(now + duration), army, army_start: army, pool: prize, prize });
   const { data: created } = await admin.from("events").select("*").eq("season_id", seasonId).eq("settled", false).maybeSingle();
-  if (!created) return { active: null, nextAt: now + EVENT_GAP_MS, nextKind };
+  if (!created) return { active: null, levels: {}, nextAt: now + EVENT_GAP_MS, nextKind };
   const e = eventRow(created);
-  return { active: e, nextAt: ms(e.ends_at), nextKind };
+  return { active: e, levels: medianLevels(entities), nextAt: ms(e.ends_at), nextKind };
 }
 
 /** Défenseurs qu'affronte un assaut : l'escorte entière de la caravane, ou ce qu'il reste du colosse. */
@@ -811,7 +855,7 @@ async function runEventAttack(admin: SupabaseClient, seasonId: number, me: Entit
   if (!e) return { error: "Aucun événement en cours." };
   const blocked = eventBlocker(current, e, me.id, now);
   if (blocked) return { error: blocked };
-  const fight = battle(attackArmy(current), eventDefense(e), Math.random);
+  const fight = battle(attackArmy(current), eventDefense(e), Math.random, { attackerLevels: current.levels, defenderLevels: ev.levels });
   const mine = splitTroopLosses(current, fight.attackerLost);
   let after: PlayerState = { ...current, troops: mine.troops, stationed: mine.stationed, lastRaidAt: now };
   const attackers = { ...e.attackers };
@@ -877,7 +921,7 @@ function eventView(meId: string, state: PlayerState, ev: EventState, now: number
   const totalDealt = Object.values(e.attackers).reduce((a, b) => a + b, 0);
   let take: number;
   if (e.kind === "caravane") take = Math.floor(Math.min(e.pool, e.prize * CARAVAN_TAKE));
-  else take = armyValue(battle(attackArmy(state), defense, seededRng(0xc0105)).defenderLost);
+  else take = armyValue(battle(attackArmy(state), defense, seededRng(0xc0105), { attackerLevels: state.levels, defenderLevels: ev.levels }).defenderLost);
   return {
     id: e.id,
     kind: e.kind,
@@ -891,7 +935,7 @@ function eventView(meId: string, state: PlayerState, ev: EventState, now: number
     prize: e.prize,
     mine: e.kind === "caravane" ? (e.attackers[meId] ?? 0) : totalDealt > 0 ? (e.attackers[meId] ?? 0) / totalDealt : 0,
     attackers: Object.keys(e.attackers).length,
-    chance: estimateChance(attackArmy(state), defense),
+    chance: estimateChance(attackArmy(state), defense, { attackerLevels: state.levels, defenderLevels: ev.levels }),
     take,
     blocker: eventBlocker(state, e, meId, now),
   };
@@ -1107,13 +1151,14 @@ function rivalsFor(
         atWar,
         allianceName: e.allianceId !== null ? (allianceNames.get(e.allianceId) ?? null) : null,
         army: seen as Record<string, number>,
-        chance: vagueChance(estimateChance(fight.attack, fight.defense, { attackBonus: fight.attackBonus }), intelUntil > now || allied),
+        chance: vagueChance(estimateChance(fight.attack, fight.defense, fight.opts), intelUntil > now || allied),
         shieldUntil: s.shieldUntil,
         burnedUntil: s.burnedUntil,
         totalPlundered: s.totalPlundered,
         lastSeen: e.isLord ? undefined : e.lastSeen,
         revenge,
         blocker: raidBlocker(myState, s, ctx),
+        ...(e.isLord || allied ? {} : { academy: s.academy, researching: !!s.research, sabotageBlocker: sabotageBlocker(s, now) }),
       };
     })
     .sort((a, b) => Number(a.isLord) - Number(b.isLord) || (a.difficulty ?? 0) - (b.difficulty ?? 0) || b.loot - a.loot);
@@ -1166,6 +1211,14 @@ function applySimpleAction(state: PlayerState, action: GameAction, now: number, 
       const r = buyArmy(state, kind, String(action.id), Number(action.qty));
       return r.ok ? { ok: true, value: { state: r.value, log: { action: "army", details: { kind, id: action.id, qty: action.qty } } } } : r;
     }
+    case "research": {
+      const r = startResearch(state, String(action.id), now);
+      return r.ok ? { ok: true, value: { state: r.value, log: { action: "research", details: { id: action.id, level: levelOf(state, action.id as CombatantId) + 1 } } } } : r;
+    }
+    case "academy": {
+      const r = buyAcademy(state);
+      return r.ok ? { ok: true, value: { state: r.value, log: { action: "academy", details: { level: r.value.academy } } } } : r;
+    }
     case "upgrade": {
       const r = buyUpgrade(state, String(action.upgrade));
       return r.ok ? { ok: true, value: { state: r.value, log: { action: "upgrade", details: { upgrade: action.upgrade } } } } : r;
@@ -1186,7 +1239,7 @@ export type ActionResult = { ok: true; snapshot: GameSnapshot; message?: string 
 /** Exécute une intention du joueur et renvoie l'état qui fait foi. */
 export async function runAction(admin: SupabaseClient, userId: string, action: GameAction): Promise<ActionResult> {
   const season = await getActiveSeason(admin);
-  const wantsChronicle = action.type === "sync" || action.type === "raid" || action.type === "spy" || action.type === "event_attack";
+  const wantsChronicle = ["sync", "raid", "spy", "event_attack", "sabotage"].includes(action.type);
 
   for (let attempt = 0; attempt < MAX_ATTEMPTS; attempt++) {
     let [worksite, entities] = await Promise.all([loadWorksite(admin, season.id), loadEntities(admin, season.id, userId)]);
@@ -1240,6 +1293,28 @@ export async function runAction(admin: SupabaseClient, userId: string, action: G
       message = r.message;
       if (r.state) finalState = r.state;
       entities = await loadEntities(admin, season.id, userId);
+    } else if (action.type === "sabotage") {
+      const target = entities.get(String(action.target));
+      const cost = sabotageCost(current, world, now);
+      const targetState = target ? advanceEntity(target, now, world, flat) : null;
+      if (!target || !targetState || target.id === me.id || target.isLord) error = "Cible inconnue.";
+      else if (isAllied(me, target)) error = "On ne sabote pas un allié.";
+      else if (current.stone < cost) error = `Il faut ${Math.ceil(cost).toLocaleString("fr-FR")} pierres pour payer un saboteur.`;
+      else error = sabotageBlocker(targetState, now);
+      if (!error && target && targetState) {
+        const success = Math.random() < sabotageChance(defenseArmy(targetState));
+        const mine = { ...current, stone: current.stone - cost };
+        const list = success ? [{ e: me, state: mine }, { e: target, state: applySabotage(targetState, now) }] : [{ e: me, state: mine }];
+        if ((await writeStates(admin, season.id, list, "sabotage", { target: target.id, cost, success })) === "conflict") continue;
+        finalState = mine;
+        await addChronicle(admin, season.id, { kind: "sabotage", actor_id: me.id, target_id: target.id, details: { success } });
+        message = success
+          ? `🧨 Sabotage réussi : l'académie de ${target.name} perd un niveau et sa recherche prend du retard.`
+          : `🧨 Ton saboteur a été pris dans le domaine de ${target.name}.`;
+      } else {
+        const { data } = await admin.rpc("commit_state", { p_season: season.id, p_state: toJson(me, current, {}), p_touch: true, p_contribution: 0, p_stage_bases: STAGE_BASES, p_active_window_days: ACTIVE_WINDOW_DAYS, p_action: null, p_details: null });
+        if ((data as { conflict?: boolean } | null)?.conflict) continue;
+      }
     } else if (action.type === "spy") {
       const onFortress = String(action.target) === FORTRESS_INTEL;
       const target = onFortress ? undefined : entities.get(String(action.target));
@@ -1295,7 +1370,7 @@ export async function runAction(admin: SupabaseClient, userId: string, action: G
           atWar: !!warBetween(conflicts.wars, me.allianceId, victim.allianceId),
         };
         const armiesNow = raidArmies(current, victimState, ctx);
-        const chance = estimateChance(armiesNow.attack, armiesNow.defense, { attackBonus: armiesNow.attackBonus });
+        const chance = estimateChance(armiesNow.attack, armiesNow.defense, armiesNow.opts);
         const r = resolveRaid(current, victimState, { ...ctx, rng: Math.random });
         if (!r.ok) {
           error = r.error;

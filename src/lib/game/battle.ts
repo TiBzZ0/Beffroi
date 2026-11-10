@@ -3,9 +3,16 @@
 // (les arbalétriers s'abritent derrière les chevaliers, les murs encaissent), avec un
 // multiplicateur contre certaines catégories (les piques contre les chevaux, etc.).
 
-import { BATTLE_ROUNDS, CHANCE_SIMULATIONS, COMBATANTS, type CombatantDef, type CombatantId } from "./config";
+import { BATTLE_ROUNDS, CHANCE_SIMULATIONS, COMBATANTS, LEVEL_BONUS, type CombatantDef, type CombatantId } from "./config";
 
 export type Army = Partial<Record<CombatantId, number>>;
+/** Niveau d'amélioration de chaque type (+10 % d'attaque et de PV par niveau). */
+export type Levels = Partial<Record<CombatantId, number>>;
+
+/** Multiplicateur d'attaque et de PV d'un type à son niveau. */
+export function levelFactor(levels: Levels | undefined, id: CombatantId): number {
+  return 1 + LEVEL_BONUS * Math.max(0, levels?.[id] ?? 0);
+}
 
 export interface BattleResult {
   success: boolean;
@@ -19,6 +26,9 @@ export interface BattleResult {
 export interface BattleOptions {
   /** Multiplicateur des dégâts de l'attaquant (revanche). */
   attackBonus?: number;
+  /** Niveaux d'amélioration de chaque camp. */
+  attackerLevels?: Levels;
+  defenderLevels?: Levels;
 }
 
 function defOf(id: string): CombatantDef | undefined {
@@ -57,10 +67,10 @@ const MAX_OBSTACLE_SHARE = 0.5;
  * Les coups se répartissent selon les points de vie, mais les obstacles qui ne ripostent pas
  * n'en absorbent jamais plus de la moitié. Les engins de siège visent d'abord les fortifications.
  */
-function damageOn(shooters: Army, targets: Army, mult: number): Map<CombatantId, number> {
+function damageOn(shooters: Army, targets: Army, mult: number, shooterLv?: Levels, targetLv?: Levels): Map<CombatantId, number> {
   const out = new Map<CombatantId, number>();
   const alive = (Object.entries(targets) as [CombatantId, number][]).filter(([id, m]) => m > 0 && defOf(id));
-  const hpOf = (id: CombatantId, m: number) => m * defOf(id)!.hp;
+  const hpOf = (id: CombatantId, m: number) => m * defOf(id)!.hp * levelFactor(targetLv, id);
   const pool = (keep: (t: CombatantDef) => boolean) => alive.filter(([id]) => keep(defOf(id)!));
   const sumHp = (list: [CombatantId, number][]) => list.reduce((s, [id, m]) => s + hpOf(id, m), 0);
   const armed = pool((t) => t.attack > 0);
@@ -85,7 +95,7 @@ function damageOn(shooters: Army, targets: Army, mult: number): Map<CombatantId,
     const plan = s.bonus?.fortification ? siege : normal;
     for (const [tid, share] of plan) {
       const t = defOf(tid)!;
-      const dmg = n * s.attack * (s.bonus?.[t.category] ?? 1) * share * mult;
+      const dmg = n * s.attack * levelFactor(shooterLv, sid) * (s.bonus?.[t.category] ?? 1) * share * mult;
       out.set(tid, (out.get(tid) ?? 0) + dmg);
     }
   }
@@ -93,11 +103,11 @@ function damageOn(shooters: Army, targets: Army, mult: number): Map<CombatantId,
 }
 
 /** Transforme des dégâts en pertes : les fractions de PV tuent au hasard. */
-function casualties(army: Army, damage: Map<CombatantId, number>, rng: () => number): Army {
+function casualties(army: Army, damage: Map<CombatantId, number>, rng: () => number, levels?: Levels): Army {
   const lost: Army = {};
   for (const [id, dmg] of damage) {
     const n = army[id] ?? 0;
-    const hp = defOf(id)?.hp ?? 1;
+    const hp = (defOf(id)?.hp ?? 1) * levelFactor(levels, id);
     const exact = dmg / hp;
     const kills = Math.min(n, Math.floor(exact) + (rng() < exact - Math.floor(exact) ? 1 : 0));
     if (kills > 0) lost[id] = kills;
@@ -133,8 +143,10 @@ export function battle(attacker: Army, defender: Army, rng: () => number, opts: 
   const mult = opts.attackBonus ?? 1;
   while (rounds < BATTLE_ROUNDS && armySize(att) > 0 && canFight(def)) {
     rounds++;
-    const onDef = casualties(def, damageOn(att, def, mult), rng);
-    const onAtt = casualties(att, damageOn(def, att, 1), rng);
+    const aLv = opts.attackerLevels;
+    const dLv = opts.defenderLevels;
+    const onDef = casualties(def, damageOn(att, def, mult, aLv, dLv), rng, dLv);
+    const onAtt = casualties(att, damageOn(def, att, 1, dLv, aLv), rng, aLv);
     def = subtract(def, onDef);
     att = subtract(att, onAtt);
     defenderLost = add(defenderLost, onDef);

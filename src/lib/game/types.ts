@@ -50,6 +50,10 @@ export interface RivalView {
   lastSeen?: number;
   /** Titres gagnés à la saison précédente. */
   titles?: string[];
+  /** Joueurs rivaux : niveau d'académie, recherche en cours, et ce qui empêche de les saboter (null = possible). */
+  academy?: number;
+  researching?: boolean;
+  sabotageBlocker?: string | null;
   revenge: boolean;
   /** Raison pour laquelle on ne peut pas le raider maintenant, ou null. */
   blocker: string | null;
@@ -58,7 +62,7 @@ export interface RivalView {
 export interface ChronicleEntry {
   id: number;
   at: number;
-  kind: "raid" | "gift" | "spy" | "war" | "fortress" | "event";
+  kind: "raid" | "gift" | "spy" | "war" | "fortress" | "event" | "sabotage";
   actorId: string | null;
   actorName: string;
   targetId: string | null;
@@ -168,7 +172,10 @@ export type GameAction =
   | { type: "fortress_attack" }
   | { type: "fortress_station"; unit: string; qty: number }
   | { type: "fortress_recall" }
-  | { type: "event_attack" };
+  | { type: "event_attack" }
+  | { type: "research"; id: string }
+  | { type: "academy" }
+  | { type: "sabotage"; target: string };
 
 export interface EventView {
   id: number;

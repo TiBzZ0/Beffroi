@@ -16,6 +16,21 @@ import {
   OFFLINE_CAP_MS,
   PROTECTED_PER_TYPE,
   DEFENSE_IDS,
+  COMBATANTS,
+  RESEARCH_COST_FACTOR,
+  RESEARCH_COST_GROWTH,
+  RESEARCH_BASE_MS,
+  RESEARCH_TIME_GROWTH,
+  ACADEMY_SPEED,
+  ACADEMY_BASE_COST,
+  ACADEMY_COST_GROWTH,
+  SABOTAGE_COST_SECONDS,
+  SABOTAGE_MIN_COST,
+  SABOTAGE_BASE_SUCCESS,
+  SABOTAGE_PER_TOWER,
+  SABOTAGE_MIN_SUCCESS,
+  SABOTAGE_DELAY,
+  SABOTAGE_IMMUNITY_MS,
   UNIT_IDS,
   DEFENSE_REPAIR_RATE,
   DEFENSES,
@@ -49,7 +64,7 @@ import {
   type UnitId,
   type UpgradeDef,
 } from "./config";
-import { armySize, armyValue, battle, cleanArmy, type Army } from "./battle";
+import { armySize, armyValue, battle, cleanArmy, type Army, type BattleOptions, type Levels } from "./battle";
 
 export interface PlayerState {
   stone: number;
@@ -81,6 +96,12 @@ export interface PlayerState {
   clickPausedUntil: number;
   /** Troupes d'alliés postées ici : elles défendent et attaquent avec ce joueur. */
   stationed: Record<string, Partial<Record<UnitId, number>>>;
+  /** Améliorations militaires : niveau de chaque type, recherche en cours, académie. */
+  levels: Levels;
+  research: { id: CombatantId; endsAt: number } | null;
+  academy: number;
+  /** Protégé des sabotages jusqu'à cet horodatage. */
+  sabotageImmuneUntil: number;
   /** Son alliance tient la forteresse (bonus de production). Fixé par le serveur, jamais enregistré. */
   fortress?: boolean;
   /** Coup de pouce aux joueurs distancés (0.3 = +30 % de production et de défense). Fixé par le serveur, jamais enregistré. */
@@ -120,6 +141,10 @@ export function newPlayerState(now: number): PlayerState {
     clickStrikes: 0,
     clickPausedUntil: 0,
     stationed: {},
+    levels: {},
+    research: null,
+    academy: 0,
+    sabotageImmuneUntil: 0,
   };
 }
 
@@ -214,6 +239,7 @@ export function rateAt(state: PlayerState, world: WorldState, t: number, opts: A
  * événement survenu pendant l'absence (étape du chantier terminée, fin d'incendie).
  */
 export function advance(state: PlayerState, now: number, world: WorldState, opts: AdvanceOptions = {}): PlayerState {
+  state = settleResearch(state, now);
   if (now <= state.lastUpdate) return state;
   const start = Math.max(state.lastUpdate, now - OFFLINE_CAP_MS);
   const events = [...world.stageCompletedAt, state.burnedUntil];
@@ -535,11 +561,14 @@ export interface RaidReport {
 }
 
 export function raidArmies(attacker: PlayerState, victim: PlayerState, ctx: Pick<RaidContext, "attackerArmy" | "defenderArmy" | "victimId" | "now">) {
+  // Le coup de pouce de la victime rend ses défenseurs plus durs à abattre.
+  const attackBonus = (hasRevenge(attacker, ctx.victimId, ctx.now) ? REVENGE_ATTACK_BONUS : 1) / (1 + (victim.catchUp ?? 0));
+  const opts: BattleOptions = { attackBonus, attackerLevels: attacker.levels, defenderLevels: victim.levels };
   return {
     attack: ctx.attackerArmy ?? attackArmy(attacker),
     defense: ctx.defenderArmy ?? defenseArmy(victim),
-    // Le coup de pouce de la victime rend ses défenseurs plus durs à abattre.
-    attackBonus: (hasRevenge(attacker, ctx.victimId, ctx.now) ? REVENGE_ATTACK_BONUS : 1) / (1 + (victim.catchUp ?? 0)),
+    attackBonus,
+    opts,
   };
 }
 
@@ -583,7 +612,7 @@ export function resolveRaid(
   const { now, rng } = ctx;
   const revenge = hasRevenge(attacker, ctx.victimId, now);
   const armies = raidArmies(attacker, victim, ctx);
-  const fight = battle(armies.attack, armies.defense, rng, { attackBonus: armies.attackBonus });
+  const fight = battle(armies.attack, armies.defense, rng, armies.opts);
 
   // Pertes définitives du défenseur : troupes tombées, fortifications non réparées.
   const defenderLost: Army = {};
@@ -688,4 +717,76 @@ export function fuzzyArmy(army: Army): Army {
   const out: Army = {};
   for (const [id, n] of Object.entries(army) as [CombatantId, number][]) out[id] = id === "garde" ? n : fuzzyCount(n);
   return out;
+}
+
+// ---------------------------------------------------------------------------
+// Améliorations militaires
+// ---------------------------------------------------------------------------
+
+export function levelOf(state: PlayerState, id: CombatantId): number {
+  return state.levels?.[id] ?? 0;
+}
+
+/** Termine la recherche en cours si son heure est passée. */
+export function settleResearch(state: PlayerState, now: number): PlayerState {
+  const r = state.research;
+  if (!r || r.endsAt > now) return state;
+  return { ...state, research: null, levels: { ...state.levels, [r.id]: levelOf(state, r.id) + 1 } };
+}
+
+export function researchCost(state: PlayerState, id: CombatantId): number {
+  const def = COMBATANTS.get(id);
+  return Math.ceil((def?.cost ?? 0) * RESEARCH_COST_FACTOR * RESEARCH_COST_GROWTH ** levelOf(state, id));
+}
+
+export function researchTime(state: PlayerState, id: CombatantId): number {
+  return Math.ceil((RESEARCH_BASE_MS * RESEARCH_TIME_GROWTH ** levelOf(state, id)) / (1 + ACADEMY_SPEED * (state.academy ?? 0)));
+}
+
+/** Types qu'on peut améliorer : troupes et fortifications (pas les gardes). */
+export const RESEARCHABLE: readonly CombatantId[] = [...UNIT_IDS, ...DEFENSE_IDS];
+
+export function startResearch(state: PlayerState, id: string, now: number): Result<PlayerState> {
+  if (!RESEARCHABLE.includes(id as CombatantId)) return { ok: false, error: "Amélioration inconnue." };
+  const s = settleResearch(state, now);
+  if (s.research) return { ok: false, error: "Une recherche est déjà en cours." };
+  const cost = researchCost(s, id as CombatantId);
+  if (cost > s.stone) return { ok: false, error: "Pas assez de pierre." };
+  return { ok: true, value: { ...s, stone: s.stone - cost, research: { id: id as CombatantId, endsAt: now + researchTime(s, id as CombatantId) } } };
+}
+
+export function academyCost(state: PlayerState): number {
+  return Math.ceil(ACADEMY_BASE_COST * ACADEMY_COST_GROWTH ** (state.academy ?? 0));
+}
+
+export function buyAcademy(state: PlayerState): Result<PlayerState> {
+  const cost = academyCost(state);
+  if (cost > state.stone) return { ok: false, error: "Pas assez de pierre." };
+  return { ok: true, value: { ...state, stone: state.stone - cost, academy: (state.academy ?? 0) + 1 } };
+}
+
+export function sabotageCost(state: PlayerState, world: WorldState, now: number): number {
+  return Math.max(SABOTAGE_MIN_COST, Math.ceil(rateAt(state, world, now) * SABOTAGE_COST_SECONDS));
+}
+
+export function sabotageChance(defense: Army): number {
+  return Math.max(SABOTAGE_MIN_SUCCESS, SABOTAGE_BASE_SUCCESS - SABOTAGE_PER_TOWER * (defense.tour ?? 0));
+}
+
+/** Pourquoi on ne peut pas saboter cette cible, ou null. */
+export function sabotageBlocker(target: PlayerState, now: number): string | null {
+  if (target.sabotageImmuneUntil > now) return "Sa garde est sur le qui-vive après un sabotage récent.";
+  if ((target.academy ?? 0) === 0 && !target.research) return "Rien à saboter : pas d'académie ni de recherche en cours.";
+  return null;
+}
+
+/** Effet d'un sabotage réussi sur la cible. */
+export function applySabotage(target: PlayerState, now: number): PlayerState {
+  const r = target.research;
+  return {
+    ...target,
+    academy: Math.max(0, (target.academy ?? 0) - 1),
+    research: r && r.endsAt > now ? { ...r, endsAt: r.endsAt + Math.ceil((r.endsAt - now) * SABOTAGE_DELAY) } : r,
+    sabotageImmuneUntil: now + SABOTAGE_IMMUNITY_MS,
+  };
 }

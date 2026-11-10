@@ -9,6 +9,8 @@ import {
   ONLINE_MS,
   DIFFICULTY_LABELS,
   COMBATANTS,
+  LEVEL_BONUS,
+  ACADEMY_SPEED,
   DEFENSES,
   GENERATORS,
   RAID_COOLDOWN_MS,
@@ -17,6 +19,7 @@ import {
   UPGRADES,
   type Category,
   type CombatantDef,
+  type CombatantId,
   type GeneratorId,
 } from "@/lib/game/config";
 import {
@@ -27,6 +30,11 @@ import {
   generatorRate,
   lootOf,
   spyCost,
+  sabotageCost,
+  academyCost,
+  levelOf,
+  researchCost,
+  researchTime,
   maxAffordable,
   owned,
   productionMultiplier,
@@ -514,7 +522,7 @@ function Status({ state, now }: { state: PlayerState; now: number }) {
   );
 }
 
-type RaidView = "armee" | "seigneurs" | "joueurs" | "chronique";
+type RaidView = "armee" | "forge" | "seigneurs" | "joueurs" | "chronique";
 
 function Raids({ snap, live, now, run }: { snap: GameSnapshot; live: PlayerState; now: number; run: ReturnType<typeof useGame>["run"] }) {
   const [view, setView] = useState<RaidView>("seigneurs");
@@ -531,9 +539,14 @@ function Raids({ snap, live, now, run }: { snap: GameSnapshot; live: PlayerState
   const raid = (target: string) => act(target, { type: "raid", target });
   const players = snap.rivals.filter((r) => !r.isLord && !r.allied);
   const lords = snap.rivals.filter((r) => r.isLord && (level === null || r.difficulty === level));
-  const row = (r: RivalView) => <RivalRow key={r.id} r={r} now={now} busy={busy} onRaid={raid} onSpy={spy} spyPrice={spyPrice} stone={live.stone} />;
+  const sabotagePrice = sabotageCost(live, worldFrom(snap.worksite), now);
+  const sabotage = (target: string) => act(target, { type: "sabotage", target });
+  const row = (r: RivalView) => (
+    <RivalRow key={r.id} r={r} now={now} busy={busy} onRaid={raid} onSpy={spy} spyPrice={spyPrice} stone={live.stone} onSabotage={sabotage} sabotagePrice={sabotagePrice} />
+  );
   const views: [RaidView, string][] = [
     ["armee", "Armée"],
+    ["forge", live.research ? "Forge ⏳" : "Forge"],
     ["seigneurs", `Seigneurs (${snap.rivals.filter((r) => r.isLord).length})`],
     ["joueurs", `Joueurs (${players.length})`],
     ["chronique", "Chronique"],
@@ -573,6 +586,7 @@ function Raids({ snap, live, now, run }: { snap: GameSnapshot; live: PlayerState
           <Garrison live={live} run={run} />
         </>
       )}
+      {view === "forge" && <Forge live={live} now={now} run={run} />}
       {view === "seigneurs" && (
         <>
           <div className="qty level-filter" role="group" aria-label="Difficulté">
@@ -654,6 +668,8 @@ function RivalRow({
   onSpy,
   spyPrice,
   stone: myStone,
+  onSabotage,
+  sabotagePrice,
 }: {
   r: RivalView;
   now: number;
@@ -662,6 +678,8 @@ function RivalRow({
   onSpy: (id: string) => void;
   spyPrice: number;
   stone: number;
+  onSabotage: (id: string) => void;
+  sabotagePrice: number;
 }) {
   const intel = r.intelUntil > now;
   // La pierre du rival progresse en direct entre deux nouvelles du serveur.
@@ -717,8 +735,86 @@ function RivalRow({
             <span className="cost num">{formatNumber(spyPrice)} 🪨</span>
           </button>
         )}
+        {r.sabotageBlocker !== undefined && (
+          <button
+            className="btn"
+            disabled={busy !== null || r.sabotageBlocker !== null || myStone < sabotagePrice}
+            onClick={() => onSabotage(r.id)}
+            title={r.sabotageBlocker ?? "Abat un niveau de son académie et retarde sa recherche. Les tours d'archers gênent le saboteur."}
+          >
+            🧨 Saboter
+            <span className="cost num">{formatNumber(sabotagePrice)} 🪨</span>
+          </button>
+        )}
       </div>
     </div>
+  );
+}
+
+/** Forge : académie militaire et améliorations des troupes et fortifications (une recherche à la fois). */
+function Forge({ live, now, run }: { live: PlayerState; now: number; run: ReturnType<typeof useGame>["run"] }) {
+  const research = live.research && live.research.endsAt > now ? live.research : null;
+  const current = research ? COMBATANTS.get(research.id) : undefined;
+  const academyPrice = academyCost(live);
+  const rows = (defs: readonly CombatantDef<string>[]) =>
+    defs.map((d) => {
+      const id = d.id as CombatantId;
+      const lv = levelOf(live, id);
+      const cost = researchCost(live, id);
+      return (
+        <div key={d.id} className="row">
+          <div className="row-icon" aria-hidden>
+            {d.icon}
+          </div>
+          <div>
+            <div className="row-title">
+              {d.name}
+              <span className="badge">niv. {lv}</span>
+            </div>
+            <div className="row-desc num">
+              ⚔️ et ❤️ +{Math.round(lv * LEVEL_BONUS * 100)} % · niveau {lv + 1} en {duration(researchTime(live, id))}
+            </div>
+          </div>
+          <button className="btn btn-primary" disabled={research !== null || cost > live.stone} onClick={() => void run({ type: "research", id: d.id })}>
+            Améliorer
+            <span className="cost num">{formatNumber(cost)} 🪨</span>
+          </button>
+        </div>
+      );
+    });
+  return (
+    <>
+      <p className="note raid-intro">
+        Chaque niveau donne +{Math.round(LEVEL_BONUS * 100)} % d&apos;attaque et de points de vie au type amélioré, en attaque comme en défense. Une seule
+        recherche à la fois, et chaque niveau prend plus de temps que le précédent. L&apos;académie accélère les recherches, mais les rivaux peuvent la
+        saboter : les tours d&apos;archers gênent leurs saboteurs.
+      </p>
+      <div className="row">
+        <div className="row-icon" aria-hidden>
+          🎓
+        </div>
+        <div>
+          <div className="row-title">
+            Académie militaire <span className="badge">niv. {live.academy ?? 0}</span>
+          </div>
+          <div className="row-desc">
+            Recherches {Math.round((live.academy ?? 0) * ACADEMY_SPEED * 100)} % plus rapides (+{Math.round(ACADEMY_SPEED * 100)} % par niveau, pour les recherches lancées ensuite).
+            {live.sabotageImmuneUntil > now ? ` Garde renforcée contre les saboteurs encore ${duration(live.sabotageImmuneUntil - now)}.` : ""}
+          </div>
+        </div>
+        <button className="btn btn-primary" disabled={academyPrice > live.stone} onClick={() => void run({ type: "academy" })}>
+          Agrandir
+          <span className="cost num">{formatNumber(academyPrice)} 🪨</span>
+        </button>
+      </div>
+      <p className="raid-state">
+        {research && current ? `⏳ ${current.icon} ${current.name} niveau ${levelOf(live, research.id) + 1} : encore ${duration(research.endsAt - now)}.` : "🔨 Aucune recherche en cours."}
+      </p>
+      <h3 className="section-title">Troupes</h3>
+      <div className="list">{rows(UNITS)}</div>
+      <h3 className="section-title">Fortifications</h3>
+      <div className="list">{rows(DEFENSES)}</div>
+    </>
   );
 }
 
@@ -1148,6 +1244,13 @@ function Chronicle({ entries, me, now, rivals, alliances = [] }: { entries: Chro
           text = e.details.success
             ? `🏰 ${who(e.actorId, e.actorName, true)} ${e.actorId === me ? "as pris" : "a pris"} la forteresse pour ${allianceName(e.details.alliance)} !`
             : `🏰 ${who(e.actorId, e.actorName, true)} ${e.actorId === me ? "t'es brisé" : "s'est brisé"} sur les murs de la forteresse.`;
+        } else if (e.kind === "sabotage") {
+          const target = e.targetId === me ? "ton académie" : `l'académie de ${e.targetName}`;
+          text = e.details.success
+            ? e.actorId === me
+              ? `🧨 Tu as saboté ${target}.`
+              : `🧨 Un saboteur a frappé ${target}${e.targetId === me ? " : un niveau perdu et ta recherche retardée" : ""}.`
+            : `🧨 ${who(e.actorId, e.actorName, true)} ${e.actorId === me ? "as été pris" : "a été pris"} en train de saboter ${target}.`;
         } else if (e.kind === "spy") {
           text = `${who(e.actorId, e.actorName, true)} ${e.actorId === me ? "as été surpris" : "a été surpris"} à espionner ${e.details.fortress ? "la forteresse" : e.targetId === me ? "ton domaine" : e.targetName}.`;
         } else if (e.kind === "gift") {
@@ -1203,6 +1306,7 @@ function Garrison({ live, run }: { live: PlayerState; run: ReturnType<typeof use
             <div className="row-title">
               {d.name}
               {n > 0 && <span className="row-count num">{n}</span>}
+              {levelOf(live, d.id as CombatantId) > 0 && <span className="badge">niv. {levelOf(live, d.id as CombatantId)}</span>}
             </div>
             <div className="row-desc num">
               ⚔️ {d.attack} · ❤️ {d.hp} · {d.description}

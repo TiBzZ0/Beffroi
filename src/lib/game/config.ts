@@ -435,3 +435,26 @@ export const HALL: readonly { id: "builder" | "plunderer" | "producer" | "coloss
   { id: "war", icon: "🏆", label: "Guerres gagnées", title: "Seigneurs de guerre", unit: "count", alliance: true },
 ];
 export const HALL_PODIUM = 3;
+
+// Améliorations militaires : chaque niveau donne +10 % d'attaque et de PV au type amélioré.
+export const LEVEL_BONUS = 0.1;
+/** Prix d'un niveau : coût d'un exemplaire × 100 × 2,2^niveau actuel. */
+export const RESEARCH_COST_FACTOR = 100;
+export const RESEARCH_COST_GROWTH = 2.2;
+/** Durée d'un niveau : 2 min × 1,6^niveau actuel (niveau 10 ≈ 3 h 40, niveau 15 ≈ 39 h), divisée par l'académie. */
+export const RESEARCH_BASE_MS = 2 * 60 * 1000;
+export const RESEARCH_TIME_GROWTH = 1.6;
+/** Académie militaire : chaque niveau accélère la recherche de 25 % (durée ÷ (1 + 0,25 × niveau)). */
+export const ACADEMY_SPEED = 0.25;
+export const ACADEMY_BASE_COST = 50_000;
+export const ACADEMY_COST_GROWTH = 2.5;
+/** Sabotage de l'académie d'un rival : prix = 3 min de sa propre production (1 000 au moins). */
+export const SABOTAGE_COST_SECONDS = 180;
+export const SABOTAGE_MIN_COST = 1_000;
+/** Réussite : 60 %, −5 % par tour d'archers de la cible, 10 % au moins. */
+export const SABOTAGE_BASE_SUCCESS = 0.6;
+export const SABOTAGE_PER_TOWER = 0.05;
+export const SABOTAGE_MIN_SUCCESS = 0.1;
+/** Un sabotage réussi abat un niveau d'académie, retarde la recherche en cours de 20 % du temps restant, et protège la cible 1 h. */
+export const SABOTAGE_DELAY = 0.2;
+export const SABOTAGE_IMMUNITY_MS = 60 * 60 * 1000;
