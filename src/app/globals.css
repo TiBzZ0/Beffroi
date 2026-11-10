@@ -927,3 +927,13 @@ a {
   display: grid;
   gap: 6px;
 }
+
+.elan {
+  margin-top: 6px;
+  font-size: 0.85rem;
+  color: var(--ink-soft);
+}
+.elan .bar {
+  height: 6px;
+  margin-top: 3px;
+}

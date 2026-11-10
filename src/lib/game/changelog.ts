@@ -18,6 +18,7 @@ export const CHANGELOG: ChangeEntry[] = [
       "🩹 Un défenseur battu récupère tout de suite la moitié des troupes perdues. Après un raid qui a ruiné des bâtiments, plus aucune ruine pendant 24 heures.",
       "🏰 Les seigneurs produisent beaucoup moins, leur coffre est plafonné à 12 heures de production, et leur défense dépend de ce qu'ils ont dans le coffre : un raid gagné rapporte à la mesure de ce qu'il coûte. Les seigneurs faciles suivent les petits joueurs.",
       "⚔️ Guerre : elle commence 2 heures après la déclaration. Les boucliers restent levés entre ennemis, mais le repos de 5 minutes s'applique et on ne frappe pas deux fois de suite la même cible.",
+      "⚡ Élan : les deux marteaux ne rapportent plus un pourcentage de ta production par coup. À la place, chaque coup ajoute 1 seconde d'élan (30 secondes au plus), et tant qu'il en reste ta production est augmentée de 20 % (50 % avec le Marteau runique).",
     ],
   },
 ];

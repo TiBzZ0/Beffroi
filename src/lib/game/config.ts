@@ -69,7 +69,8 @@ export const GENERATOR_IDS = GENERATORS.map((g) => g.id);
 export type UpgradeEffect =
   | { kind: "generator"; generator: GeneratorId; multiplier: number }
   | { kind: "click"; multiplier: number }
-  | { kind: "clickFromProduction"; fraction: number }
+  /** Élan : tant que la réserve d'élan n'est pas vide, la production est augmentée de `bonus`. */
+  | { kind: "elan"; bonus: number }
   | { kind: "production"; multiplier: number };
 
 export interface UpgradeDef {
@@ -125,11 +126,11 @@ function generatorUpgrades(): UpgradeDef[] {
 export const UPGRADES: readonly UpgradeDef[] = [
   { id: "gants_cuir", name: "Gants de cuir", description: "Chaque coup de marteau rapporte ×2.", cost: 200, effect: { kind: "click", multiplier: 2 } },
   { id: "masse_bronze", name: "Masse de bronze", description: "Chaque coup de marteau rapporte ×3.", cost: 15_000, effect: { kind: "click", multiplier: 3 }, requires: { generator: "tailleur", count: 5 } },
-  { id: "marteau_maitre", name: "Marteau de maître", description: "Chaque coup rapporte en plus 5 % de ta production par seconde.", cost: 60_000, effect: { kind: "clickFromProduction", fraction: 0.05 }, requires: { generator: "charrette", count: 5 } },
+  { id: "marteau_maitre", name: "Marteau de maître", description: "Frapper donne de l'élan (1 s par coup, 30 s au plus) : tant qu'il dure, +20 % de production.", cost: 60_000, effect: { kind: "elan", bonus: 0.2 }, requires: { generator: "charrette", count: 5 } },
   { id: "benediction", name: "Bénédiction de l'évêque", description: "Toute la production +10 %.", cost: 2_000_000, effect: { kind: "production", multiplier: 1.1 }, requires: { generator: "four", count: 5 } },
   { id: "corvee_royale", name: "Corvée royale", description: "Toute la production +25 %.", cost: 80_000_000, effect: { kind: "production", multiplier: 1.25 }, requires: { generator: "grue", count: 10 } },
   { id: "foire", name: "Foire de la Saint-Jean", description: "Toute la production +25 %.", cost: 2_000_000_000, effect: { kind: "production", multiplier: 1.25 }, requires: { generator: "guilde", count: 10 } },
-  { id: "marteau_runique", name: "Marteau runique", description: "Chaque coup rapporte en plus 10 % de ta production par seconde.", cost: 5_000_000_000, effect: { kind: "clickFromProduction", fraction: 0.1 }, requires: { generator: "port", count: 5 } },
+  { id: "marteau_runique", name: "Marteau runique", description: "L'élan monte à +50 % de production (au lieu de +20 %).", cost: 5_000_000_000, effect: { kind: "elan", bonus: 0.3 }, requires: { generator: "port", count: 5 } },
   { id: "routes_pavees", name: "Routes pavées", description: "Toute la production +50 %.", cost: 100_000_000_000, effect: { kind: "production", multiplier: 1.5 }, requires: { generator: "marbre", count: 10 } },
   { id: "privilege_royal", name: "Privilège royal", description: "Toute la production +50 %.", cost: 5_000_000_000_000, effect: { kind: "production", multiplier: 1.5 }, requires: { generator: "cite", count: 10 } },
   { id: "age_or", name: "Âge d'or", description: "Toute la production ×2.", cost: 300_000_000_000_000, effect: { kind: "production", multiplier: 2 }, requires: { generator: "atelier_royal", count: 10 } },
@@ -482,3 +483,7 @@ export const LORD_COFFER_SECONDS = 12 * 60 * 60;
 /** A4 : valeur de la défense = part du coffre selon le niveau (plancher : la même part de 2 h de production). */
 export const LORD_DEFENSE_SHARE: Record<1 | 2 | 3 | 4, number> = { 1: 0.1, 2: 0.2, 3: 0.3, 4: 0.4 };
 export const LORD_DEFENSE_FLOOR_SECONDS = 2 * 60 * 60;
+
+/** A2 : chaque coup accepté ajoute 1 s d'élan, réserve de 30 s au plus. */
+export const ELAN_PER_CLICK_MS = 1000;
+export const ELAN_MAX_MS = 30_000;

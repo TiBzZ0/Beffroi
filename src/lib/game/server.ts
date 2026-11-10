@@ -131,7 +131,7 @@ interface PlayerRow {
   upgrades: string[];
   total_produced: number;
   total_contributed: number;
-  military?: { levels?: Record<string, number>; research?: { id: string; endsAt: number }[] | { id: string; endsAt: number } | null; academy?: number; sabotageImmuneUntil?: number; ruinImmuneUntil?: number } | null;
+  military?: { levels?: Record<string, number>; research?: { id: string; endsAt: number }[] | { id: string; endsAt: number } | null; academy?: number; sabotageImmuneUntil?: number; ruinImmuneUntil?: number; elanUntil?: number } | null;
   total_clicks: number;
   last_update: string;
   last_click_at: string;
@@ -244,6 +244,7 @@ function toEntity(row: PlayerRow): Entity {
       academy: Number(row.military?.academy ?? 0),
       sabotageImmuneUntil: Number(row.military?.sabotageImmuneUntil ?? 0),
       ruinImmuneUntil: Number(row.military?.ruinImmuneUntil ?? 0),
+      elanUntil: Number(row.military?.elanUntil ?? 0),
     },
   };
 }
@@ -271,7 +272,7 @@ function toJson(e: Entity, state: PlayerState, extra: Record<string, unknown> = 
     troops: state.troops,
     defenses: state.defenses,
     stationed: state.stationed,
-    military: { levels: state.levels, research: state.research, academy: state.academy, sabotageImmuneUntil: state.sabotageImmuneUntil, ruinImmuneUntil: state.ruinImmuneUntil },
+    military: { levels: state.levels, research: state.research, academy: state.academy, sabotageImmuneUntil: state.sabotageImmuneUntil, ruinImmuneUntil: state.ruinImmuneUntil, elanUntil: state.elanUntil },
     click_strikes: state.clickStrikes,
     click_paused_until: iso(state.clickPausedUntil),
     ...extra,

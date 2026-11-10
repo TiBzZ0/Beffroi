@@ -10,6 +10,8 @@ import {
   DIFFICULTY_LABELS,
   COMBATANTS,
   LEVEL_BONUS,
+  ELAN_MAX_MS,
+  ELAN_PER_CLICK_MS,
   ACADEMY_SPEED,
   RESEARCH_QUEUE_MAX,
   DEFENSES,
@@ -33,6 +35,7 @@ import {
   spyCost,
   academyCost,
   levelOf,
+  elanBonus,
   queuedLevel,
   researchCost,
   researchTime,
@@ -270,6 +273,12 @@ function Hero({ snap, rate, clickGain, game }: { snap: GameSnapshot; rate: numbe
             <div className="catch-up" title="Bonus accordé tant que tu es loin derrière le premier joueur. Il diminue à mesure que tu le rattrapes.">
               🤝 Coup de pouce : +{Math.round((snap.state.catchUp ?? 0) * 100)} % de production et de défense
             </div>
+          )}
+          {elanBonus(snap.state) > 0 && (
+            <ElanGauge
+              left={Math.min(ELAN_MAX_MS, Math.max(0, (snap.state.elanUntil ?? 0) - game.serverNow()) + game.pendingClicks() * ELAN_PER_CLICK_MS)}
+              bonus={elanBonus(snap.state)}
+            />
           )}
           <div className="hammer-hint">
             {paused ? `🔨 Marteau confisqué encore ${Math.ceil((snap.state.clickPausedUntil - game.serverNow()) / 1000)} s` : `Frappe la pierre : +${formatRate(clickGain)} par coup`}
@@ -574,6 +583,21 @@ function duration(msLeft: number): string {
   const m = Math.max(0, Math.ceil(msLeft / 60_000));
   if (m < 60) return `${m} min`;
   return `${Math.floor(m / 60)} h ${String(m % 60).padStart(2, "0")}`;
+}
+
+/** Jauge d'élan : tant qu'elle n'est pas vide, la production est augmentée. */
+function ElanGauge({ left, bonus }: { left: number; bonus: number }) {
+  const pct = Math.round((left / ELAN_MAX_MS) * 100);
+  return (
+    <div className="elan" title="Chaque coup ajoute 1 s d'élan (30 s au plus). Tant qu'il en reste, ta production est augmentée.">
+      <span>
+        ⚡ Élan {left > 0 ? `+${Math.round(bonus * 100)} % · ${Math.ceil(left / 1000)} s` : "vide : frappe pour l'allumer"}
+      </span>
+      <div className="bar">
+        <span style={{ width: `${pct}%` }} />
+      </div>
+    </div>
+  );
 }
 
 /** Améliorations en cours, sous le compteur de pierre. */

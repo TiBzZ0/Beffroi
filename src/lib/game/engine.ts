@@ -26,6 +26,8 @@ import {
   ACADEMY_COST_GROWTH,
   SABOTAGE_COST_SECONDS,
   SABOTAGE_MIN_COST,
+  ELAN_PER_CLICK_MS,
+  ELAN_MAX_MS,
   MIN_TARGET_SIZE,
   PVP_LOOT_CAP_SECONDS,
   DEFEATED_TROOP_RECOVERY,
@@ -111,6 +113,8 @@ export interface PlayerState {
   sabotageImmuneUntil: number;
   /** Plus de bâtiments ruinés par un raid avant cet horodatage. */
   ruinImmuneUntil: number;
+  /** Fin de la réserve d'élan (bonus de production tant qu'on frappe). */
+  elanUntil: number;
   /** Son alliance tient la forteresse (bonus de production). Fixé par le serveur, jamais enregistré. */
   fortress?: boolean;
   /** Coup de pouce aux joueurs distancés (0.3 = +30 % de production et de défense). Fixé par le serveur, jamais enregistré. */
@@ -155,6 +159,7 @@ export function newPlayerState(now: number): PlayerState {
     academy: 0,
     sabotageImmuneUntil: 0,
     ruinImmuneUntil: 0,
+    elanUntil: 0,
   };
 }
 
@@ -222,14 +227,15 @@ export function productionPerSecond(state: PlayerState, world: WorldState, stage
 
 /** Pierre rapportée par un coup de marteau. */
 export function clickValue(state: PlayerState, world: WorldState, stagesDone: number): number {
+  void world;
   let value = 1;
-  let fromProduction = 0;
-  for (const u of ownedUpgrades(state)) {
-    if (u.effect.kind === "click") value *= u.effect.multiplier;
-    if (u.effect.kind === "clickFromProduction") fromProduction += u.effect.fraction;
-  }
-  value *= stageMultiplier(stagesDone, "click");
-  return value + fromProduction * productionPerSecond(state, world, stagesDone);
+  for (const u of ownedUpgrades(state)) if (u.effect.kind === "click") value *= u.effect.multiplier;
+  return value * stageMultiplier(stagesDone, "click");
+}
+
+/** Bonus de production de l'élan (0 sans marteau) : +20 % avec le Marteau de maître, +50 % avec le runique en plus. */
+export function elanBonus(state: PlayerState): number {
+  return ownedUpgrades(state).reduce((sum, u) => sum + (u.effect.kind === "elan" ? u.effect.bonus : 0), 0);
 }
 
 export interface AdvanceOptions {
@@ -240,7 +246,8 @@ export interface AdvanceOptions {
 /** Production réelle à l'instant t (incendie compris). */
 export function rateAt(state: PlayerState, world: WorldState, t: number, opts: AdvanceOptions = {}): number {
   const base = opts.flatRate ?? productionPerSecond(state, world, stagesDoneAt(world, t));
-  return t < state.burnedUntil ? base * BURN_PRODUCTION_FACTOR : base;
+  const elan = !opts.flatRate && t < (state.elanUntil ?? 0) ? 1 + elanBonus(state) : 1;
+  return (t < state.burnedUntil ? base * BURN_PRODUCTION_FACTOR : base) * elan;
 }
 
 /**
@@ -252,7 +259,7 @@ export function advance(state: PlayerState, now: number, world: WorldState, opts
   state = settleResearch(state, now);
   if (now <= state.lastUpdate) return state;
   const start = Math.max(state.lastUpdate, now - OFFLINE_CAP_MS);
-  const events = [...world.stageCompletedAt, state.burnedUntil];
+  const events = [...world.stageCompletedAt, state.burnedUntil, state.elanUntil ?? 0];
   const breakpoints = events.filter((t) => t > start && t < now).sort((a, b) => a - b);
   let gain = 0;
   let cursor = start;
@@ -344,6 +351,7 @@ export function applyClicks(
       totalProduced: state.totalProduced + gain,
       totalClicks: state.totalClicks + accepted,
       lastClickAt: now,
+      elanUntil: Math.min(now + ELAN_MAX_MS, Math.max(state.elanUntil ?? 0, now) + accepted * ELAN_PER_CLICK_MS),
       // Frapper la pierre aide à éteindre l'incendie des ateliers.
       burnedUntil: state.burnedUntil > now ? Math.max(now, state.burnedUntil - accepted * BURN_CLICK_REDUCTION_MS) : state.burnedUntil,
     },

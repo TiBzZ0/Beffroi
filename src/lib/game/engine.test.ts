@@ -170,8 +170,18 @@ describe("clics", () => {
 
   it("les bonus de clic se cumulent", () => {
     const s = { ...withGenerators({ tailleur: 10 }), upgrades: ["gants_cuir", "marteau_maitre"] };
-    // 1 × 2 (gants) × 2 (étape 2) + 5 % de 10 × 1,1 (étape 1)
-    expect(clickValue(s, noWorld, 2)).toBeCloseTo(4 + 0.05 * 11);
+    // 1 × 2 (gants) × 2 (étape 2) ; le marteau de maître ne touche plus le coup.
+    expect(clickValue(s, noWorld, 2)).toBeCloseTo(4);
+  });
+
+  it("frapper donne de l'élan : +20 % de production pendant 1 s par coup, 30 s au plus", () => {
+    const s = { ...withGenerators({ tailleur: 10 }), upgrades: ["marteau_maitre"] };
+    const hit = applyClicks(s, 100, T0 + 10_000, noWorld).state;
+    expect(hit.elanUntil).toBe(T0 + 10_000 + 30_000);
+    const base = advance({ ...s, lastUpdate: T0 + 10_000 }, T0 + 70_000, noWorld).stone - s.stone;
+    const boosted = advance({ ...hit, lastUpdate: T0 + 10_000 }, T0 + 70_000, noWorld).stone - hit.stone;
+    // 30 s à +20 % sur 60 s : +10 %.
+    expect(boosted / base).toBeCloseTo(1.1);
   });
 });
 
