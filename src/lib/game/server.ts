@@ -46,6 +46,8 @@ import {
   NEW_PLAYER_TITHE,
   DONOR_TIER_BONUS,
   QUESTS,
+  WOUNDED_WINNER,
+  WOUNDED_ATTACKER_BEATEN,
   STAGES,
   DEFENSE_IDS,
   UNIT_IDS,
@@ -99,6 +101,8 @@ import {
   setCurfew,
   scheduleVein,
   claimQuest,
+  addWounded,
+  woundedOf,
   flagQuest,
   catchVein,
   stagesDoneAt,
@@ -149,7 +153,7 @@ interface PlayerRow {
   upgrades: string[];
   total_produced: number;
   total_contributed: number;
-  military?: { levels?: Record<string, number>; research?: { id: string; endsAt: number }[] | { id: string; endsAt: number } | null; academy?: number; sabotageImmuneUntil?: number; ruinImmuneUntil?: number; elanUntil?: number; tithe?: number; titheOwed?: number; titheSet?: boolean; share?: StageShare | null; donorTiers?: number; curfew?: Curfew | null; seen?: PlayerState["seen"] | null; veinAt?: number; frenzyUntil?: number; quest?: number | null; questFlags?: string[] } | null;
+  military?: { levels?: Record<string, number>; research?: { id: string; endsAt: number }[] | { id: string; endsAt: number } | null; academy?: number; sabotageImmuneUntil?: number; ruinImmuneUntil?: number; elanUntil?: number; tithe?: number; titheOwed?: number; titheSet?: boolean; share?: StageShare | null; donorTiers?: number; curfew?: Curfew | null; seen?: PlayerState["seen"] | null; veinAt?: number; frenzyUntil?: number; quest?: number | null; questFlags?: string[]; wounded?: Record<string, number>; healAt?: number } | null;
   total_clicks: number;
   last_update: string;
   last_click_at: string;
@@ -289,6 +293,8 @@ function toEntity(row: PlayerRow): Entity {
       frenzyUntil: Number(row.military?.frenzyUntil ?? 0) || 0,
       quest: Number.isInteger(row.military?.quest) ? Number(row.military?.quest) : null,
       questFlags: Array.isArray(row.military?.questFlags) ? row.military.questFlags.map(String) : [],
+      wounded: armyCounts(row.military?.wounded ?? {}, UNIT_IDS),
+      healAt: Number(row.military?.healAt ?? 0) || 0,
       ...(row.military?.seen ? { seen: { produced: Number(row.military.seen.produced ?? 0), contributed: Number(row.military.seen.contributed ?? 0), levels: armyCounts(row.military.seen.levels ?? {}, [...UNIT_IDS, ...DEFENSE_IDS]) } } : {}),
     },
   };
@@ -317,7 +323,7 @@ function toJson(e: Entity, state: PlayerState, extra: Record<string, unknown> = 
     troops: state.troops,
     defenses: state.defenses,
     stationed: state.stationed,
-    military: { levels: state.levels, research: state.research, academy: state.academy, sabotageImmuneUntil: state.sabotageImmuneUntil, ruinImmuneUntil: state.ruinImmuneUntil, elanUntil: state.elanUntil, tithe: state.tithe, titheOwed: state.titheOwed, titheSet: state.titheSet, share: state.share, donorTiers: state.donorTiers, curfew: state.curfew, seen: state.seen ?? null, veinAt: state.veinAt, frenzyUntil: state.frenzyUntil, quest: state.quest, questFlags: state.questFlags },
+    military: { levels: state.levels, research: state.research, academy: state.academy, sabotageImmuneUntil: state.sabotageImmuneUntil, ruinImmuneUntil: state.ruinImmuneUntil, elanUntil: state.elanUntil, tithe: state.tithe, titheOwed: state.titheOwed, titheSet: state.titheSet, share: state.share, donorTiers: state.donorTiers, curfew: state.curfew, seen: state.seen ?? null, veinAt: state.veinAt, frenzyUntil: state.frenzyUntil, quest: state.quest, questFlags: state.questFlags, wounded: state.wounded, healAt: state.healAt },
     click_strikes: state.clickStrikes,
     click_paused_until: iso(state.clickPausedUntil),
     ...extra,
@@ -809,7 +815,9 @@ async function runConflictAction(
       const fight = battle(attackArmy(current), defense, Math.random, levels);
       const mine = splitTroopLosses(current, fight.attackerLost);
       const theirs = splitTroopLosses(garrisonHost(f, now), fight.defenderLost);
-      const after: PlayerState = { ...current, troops: mine.troops, stationed: mine.stationed, lastRaidAt: now, shieldUntil: 0 };
+      // Infirmerie : une part de ses propres troupes tombées revient dans 30 minutes.
+      const healed = addWounded(current, woundedOf(mine.byOwner[""] ?? {}, fight.success ? WOUNDED_WINNER : WOUNDED_ATTACKER_BEATEN), now);
+      const after: PlayerState = { ...healed, troops: mine.troops, stationed: mine.stationed, lastRaidAt: now, shieldUntil: 0 };
       const details = { success: fight.success, chance, rounds: fight.rounds, alliance: me.allianceId, attackerLost: fight.attackerLost, defenderLost: fight.defenderLost };
       const r = await writeFortress(after, fight.success ? me.allianceId : f.holder, fight.success ? {} : theirs.stationed, fight.success, "fortress_attack", details);
       if (r === "conflict") return "conflict";
@@ -1625,7 +1633,8 @@ export async function runAction(admin: SupabaseClient, userId: string, action: G
               : { title: "🛡️ Raid repoussé", body: `Tes défenses ont repoussé ${me.name}.`, tag: "raid" });
           }
           const lost = Object.values(rep.destroyed).reduce((a, b) => a + (b ?? 0), 0);
-          const fallen = describeArmy(rep.attackerLost);
+          const healing = Object.values(rep.attackerWounded ?? {}).reduce((a, b) => a + (b ?? 0), 0);
+          const fallen = describeArmy(rep.attackerLost) + (healing ? ` (${healing} reviendront de l'infirmerie dans 30 min)` : "");
           const shared = Object.entries(rep.allyShares)
             .map(([id, n]) => `${Math.floor(n).toLocaleString("fr-FR")} pour ${entities.get(id)?.name ?? "un allié"}`)
             .join(", ");

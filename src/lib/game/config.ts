@@ -519,8 +519,14 @@ export const SABOTAGE_IMMUNITY_MS = 60 * 60 * 1000;
 export const PVP_LOOT_CAP_SECONDS = 2 * 60 * 60;
 /** A6 : on ne peut pas attaquer une cible dont la taille relative est sous 0,1 (sauf guerre et revanche). */
 export const MIN_TARGET_SIZE = 0.1;
-/** A7 : le défenseur battu récupère tout de suite la moitié des troupes perdues. */
-export const DEFEATED_TROOP_RECOVERY = 0.5;
+/**
+ * E1 : infirmerie. Une part des troupes perdues revient 30 minutes après la bataille :
+ * 60 % pour le vainqueur, 30 % pour l'attaquant battu, 50 % pour le défenseur battu (remplace A7).
+ */
+export const INFIRMARY_MS = 30 * 60_000;
+export const WOUNDED_WINNER = 0.6;
+export const WOUNDED_ATTACKER_BEATEN = 0.3;
+export const WOUNDED_DEFENDER_BEATEN = 0.5;
 /** A7 : après des ruines, plus aucune ruine pendant 24 h. */
 export const RUIN_IMMUNITY_MS = 24 * 60 * 60 * 1000;
 

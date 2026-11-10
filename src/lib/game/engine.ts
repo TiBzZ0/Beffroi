@@ -30,7 +30,10 @@ import {
   ELAN_MAX_MS,
   MIN_TARGET_SIZE,
   PVP_LOOT_CAP_SECONDS,
-  DEFEATED_TROOP_RECOVERY,
+  INFIRMARY_MS,
+  WOUNDED_WINNER,
+  WOUNDED_ATTACKER_BEATEN,
+  WOUNDED_DEFENDER_BEATEN,
   RUIN_IMMUNITY_MS,
   RESEARCH_QUEUE_MAX,
   SABOTAGE_LEVEL_SHARE,
@@ -156,6 +159,9 @@ export interface PlayerState {
   quest: number | null;
   /** Quêtes qui ne se lisent pas dans l'état (dîme réglée…), notées au passage. */
   questFlags: string[];
+  /** Infirmerie (E1) : blessés qui reviendront à `healAt` ; ils ne se battent pas. */
+  wounded: Partial<Record<UnitId, number>>;
+  healAt: number;
   /** Le joueur a déjà réglé sa dîme (sinon on lui montre le bandeau « Règle ta dîme »). */
   titheSet: boolean;
   /** Son alliance tient la forteresse (bonus de production). Fixé par le serveur, jamais enregistré. */
@@ -220,6 +226,8 @@ export function newPlayerState(now: number): PlayerState {
     tithe: 0,
     titheOwed: 0,
     titheSet: false,
+    wounded: {},
+    healAt: 0,
     quest: null,
     questFlags: [],
     veinAt: 0,
@@ -324,7 +332,7 @@ export function rateAt(state: PlayerState, world: WorldState, t: number, opts: A
  * événement survenu pendant l'absence (étape du chantier terminée, fin d'incendie).
  */
 export function advance(state: PlayerState, now: number, world: WorldState, opts: AdvanceOptions = {}): PlayerState {
-  state = settleCurfew(settleResearch(state, now), now);
+  state = settleWounded(settleCurfew(settleResearch(state, now), now), now);
   if (now <= state.lastUpdate) return state;
   const start = Math.max(state.lastUpdate, now - OFFLINE_CAP_MS);
   const events = [...world.stageCompletedAt, state.burnedUntil, state.elanUntil ?? 0, state.frenzyUntil ?? 0];
@@ -656,6 +664,32 @@ export function defenseArmy(state: PlayerState): Army {
  * Répartit des pertes de troupes entre le joueur et ses renforts, au prorata de ce que chacun
  * a engagé (le reste des arrondis tombe sur les plus gros contingents).
  */
+/** Part des troupes tombées qui reviendra de l'infirmerie (arrondi au plus proche). */
+export function woundedOf(lost: Army, share: number): Army {
+  const out: Army = {};
+  for (const id of UNIT_IDS) {
+    const n = Math.round((lost[id] ?? 0) * share);
+    if (n > 0) out[id] = n;
+  }
+  return out;
+}
+
+/** Ajoute des blessés à l'infirmerie ; le retour est repoussé à 30 minutes. */
+export function addWounded(state: PlayerState, wounded: Army, now: number): PlayerState {
+  if (Object.keys(wounded).length === 0) return state;
+  const w: PlayerState["wounded"] = { ...(state.wounded ?? {}) };
+  for (const [id, n] of Object.entries(wounded) as [UnitId, number][]) w[id] = (w[id] ?? 0) + n;
+  return { ...state, wounded: w, healAt: now + INFIRMARY_MS };
+}
+
+/** Les blessés guéris rejoignent la garnison. */
+export function settleWounded(state: PlayerState, now: number): PlayerState {
+  if (!(state.healAt > 0) || state.healAt > now) return state;
+  const troops = { ...state.troops };
+  for (const [id, n] of Object.entries(state.wounded ?? {}) as [UnitId, number][]) if (n > 0) troops[id] = (troops[id] ?? 0) + n;
+  return { ...state, troops, wounded: {}, healAt: 0 };
+}
+
 export function splitTroopLosses(state: PlayerState, lost: Army): { troops: PlayerState["troops"]; stationed: PlayerState["stationed"]; byOwner: Record<string, Army> } {
   const troops = { ...state.troops };
   const stationed: PlayerState["stationed"] = Object.fromEntries(Object.entries(state.stationed ?? {}).map(([o, g]) => [o, { ...g }]));
@@ -810,8 +844,11 @@ export interface RaidReport {
   destroyed: Partial<Record<GeneratorId, number>>;
   /** Pertes de l'attaquant. */
   attackerLost: Army;
-  /** Pertes définitives du défenseur (après réparation des fortifications). */
+  /** Pertes du défenseur (après réparation des fortifications), blessés compris. */
   defenderLost: Army;
+  /** Blessés qui reviendront dans 30 minutes, de chaque côté (troupes propres seulement). */
+  attackerWounded: Army;
+  defenderWounded: Army;
   revenge: boolean;
 }
 
@@ -884,21 +921,14 @@ export function resolveRaid(
     }
     if (lost > 0) defenderLost[id] = lost;
   }
-  // Défenseur battu : la moitié de ses troupes tombées se relève tout de suite (arrondi au supérieur).
-  if (fight.success) {
-    for (const id of UNIT_IDS) {
-      const n = defenderLost[id] ?? 0;
-      if (n <= 0) continue;
-      const kept = n - Math.ceil(n * DEFEATED_TROOP_RECOVERY);
-      if (kept > 0) defenderLost[id] = kept;
-      else delete defenderLost[id];
-    }
-  }
   const attackerSplit = ctx.attackerArmy ? null : splitTroopLosses(attacker, fight.attackerLost);
   const victimSplit = ctx.defenderArmy ? null : splitTroopLosses(victim, defenderLost);
+  // Infirmerie : une part de ses propres troupes tombées revient dans 30 minutes.
+  const attackerWounded = attackerSplit ? woundedOf(attackerSplit.byOwner[""] ?? {}, fight.success ? WOUNDED_WINNER : WOUNDED_ATTACKER_BEATEN) : {};
+  const defenderWounded = victimSplit ? woundedOf(victimSplit.byOwner[""] ?? {}, fight.success ? WOUNDED_DEFENDER_BEATEN : WOUNDED_WINNER) : {};
 
   const attackerAfter: PlayerState = {
-    ...attacker,
+    ...addWounded(attacker, attackerWounded, now),
     ...(attackerSplit ? { troops: attackerSplit.troops, stationed: attackerSplit.stationed } : {}),
     lastRaidAt: now,
     lastRaidTarget: ctx.victimId,
@@ -907,7 +937,7 @@ export function resolveRaid(
   };
   const victimArmyAfter: PlayerState = ctx.defenderArmy
     ? victim
-    : { ...victim, troops: victimSplit!.troops, stationed: victimSplit!.stationed, defenses: withoutLosses(victim.defenses, defenderLost) };
+    : { ...addWounded(victim, defenderWounded, now), troops: victimSplit!.troops, stationed: victimSplit!.stationed, defenses: withoutLosses(victim.defenses, defenderLost) };
   const base: RaidReport = {
     success: fight.success,
     rounds: fight.rounds,
@@ -916,6 +946,8 @@ export function resolveRaid(
     destroyed: {},
     attackerLost: fight.attackerLost,
     defenderLost: ctx.defenderArmy ? fight.defenderLost : defenderLost,
+    attackerWounded,
+    defenderWounded,
     revenge,
   };
   if (!fight.success) return { ok: true, value: { attacker: attackerAfter, victim: victimArmyAfter, report: base } };

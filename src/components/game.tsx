@@ -1669,6 +1669,9 @@ function Garrison({ live, run }: { live: PlayerState; run: ReturnType<typeof use
             <div className="row-title">
               {d.name}
               {n > 0 && <span className="row-count num">{n}</span>}
+              {kind === "unit" && (live.wounded as Record<string, number> | undefined)?.[d.id] ? (
+                <span className="badge" title="À l'infirmerie : ils reviennent bientôt">🩹 {(live.wounded as Record<string, number>)[d.id]}</span>
+              ) : null}
               {levelOf(live, d.id as CombatantId) > 0 && <span className="badge">niv. {levelOf(live, d.id as CombatantId)}</span>}
             </div>
             <div className="row-desc num">
@@ -1691,6 +1694,12 @@ function Garrison({ live, run }: { live: PlayerState; run: ReturnType<typeof use
           valeur {formatNumber(armyWorth(live))} 🪨
         </span>
       </div>
+      {live.healAt > 0 && Object.keys(live.wounded ?? {}).length > 0 && (
+        <p className="note num">
+          🩹 Infirmerie : {formatNumber(Object.values(live.wounded ?? {}).reduce((a, b) => a + (b ?? 0), 0))} blessés reviennent{" "}
+          {new Date(live.healAt).toLocaleTimeString("fr-FR", { hour: "2-digit", minute: "2-digit" })}. Ils ne se battent pas d&apos;ici là.
+        </p>
+      )}
       <div className="qty" role="group" aria-label="Quantité">
         {presets.map((q) => (
           <button

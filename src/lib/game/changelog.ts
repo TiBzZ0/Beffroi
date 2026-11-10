@@ -71,4 +71,11 @@ export const CHANGELOG: ChangeEntry[] = [
       "📜 Accueil guidé : les nouveaux venus suivent dix quêtes, une à la fois, chacune récompensée par 5 minutes de production.",
     ],
   },
+  {
+    id: 9,
+    date: "10 novembre",
+    items: [
+      "🩹 Infirmerie : après chaque bataille (raid ou forteresse), une part de tes troupes tombées revient 30 minutes plus tard : 60 % si tu as gagné, 30 % si ton attaque a échoué, 50 % si tu as été battu en défense. Cela remplace le retour immédiat de la moitié des troupes. Les blessés ne se battent pas, les fortifications gardent leur réparation à 70 %.",
+    ],
+  },
 ];

@@ -1,7 +1,8 @@
 import { describe, expect, it } from "vitest";
-import { BURN_MS, GUARDS_PER_DOMAIN, LORD_SHIELD_MS, RAID_COOLDOWN_MS, SECURED_SECONDS, SHIELD_MS } from "./config";
+import { BURN_MS, GUARDS_PER_DOMAIN, INFIRMARY_MS, LORD_SHIELD_MS, RAID_COOLDOWN_MS, SECURED_SECONDS, SHIELD_MS } from "./config";
 import { armyFromBudget, battle, estimateChance, seededRng } from "./battle";
 import {
+  settleWounded,
   advance,
   applyClicks,
   armyWorth,
@@ -77,12 +78,18 @@ describe("raids", () => {
     expect(relativeSize({ army: 10, rate: 50 }, { army: 1000, rate: 100 })).toBe(0.5);
   });
 
-  it("le défenseur battu récupère la moitié de ses troupes, et ne subit plus de ruines pendant 24 h", () => {
-    const victim = player({ troops: { milicien: 3 }, generators: { manoeuvre: 30, tailleur: 30 } });
+  it("le défenseur battu retrouve la moitié de ses troupes après 30 min d'infirmerie, et ne subit plus de ruines pendant 24 h", () => {
+    const victim = player({ troops: { milicien: 4 }, generators: { manoeuvre: 30, tailleur: 30 } });
     const r = resolveRaid(player(), victim, ctx());
     if (!r.ok) throw new Error(r.error);
     expect(r.value.report.success).toBe(true);
-    expect(r.value.victim.troops.milicien).toBe(2);
+    expect(r.value.victim.troops.milicien ?? 0).toBe(0);
+    expect(r.value.victim.wounded).toEqual({ milicien: 2 });
+    expect(r.value.victim.healAt).toBe(NOW + INFIRMARY_MS);
+    expect(settleWounded(r.value.victim, NOW + INFIRMARY_MS).troops.milicien).toBe(2);
+    // L'attaquant vainqueur récupère 60 % de ses pertes.
+    const lost = r.value.report.attackerLost.chevalier ?? 0;
+    expect(r.value.attacker.wounded.chevalier ?? 0).toBe(Math.round(lost * 0.6));
     expect(r.value.victim.ruinImmuneUntil).toBeGreaterThan(NOW);
     const again = resolveRaid(player({ lastRaidAt: 0 }), { ...r.value.victim, shieldUntil: 0 }, ctx({ victimId: "v2" }));
     expect(again.ok && again.value.report.destroyed).toEqual({});
@@ -141,11 +148,11 @@ describe("raids", () => {
     const r = resolveRaid(player(), player({ troops: { milicien: 1 }, defenses: { palissade: 10 } }), ctx());
     if (!r.ok) throw new Error(r.error);
     expect(r.value.report.success).toBe(true);
-    // Le milicien tombé se relève (la moitié, arrondie au supérieur).
-    expect(r.value.victim.troops.milicien).toBe(1);
+    // Le milicien tombé passe à l'infirmerie (la moitié, arrondie au plus proche).
+    expect(r.value.victim.wounded).toEqual({ milicien: 1 });
     // 7 palissades abattues, 70 % relevées : 2 perdues pour de bon.
     expect(r.value.victim.defenses.palissade).toBe(8);
-    expect(r.value.report.defenderLost).toEqual({ palissade: 2 });
+    expect(r.value.report.defenderLost).toEqual({ palissade: 2, milicien: 1 });
     expect(defenseArmy(r.value.victim).garde).toBe(GUARDS_PER_DOMAIN);
   });
 
