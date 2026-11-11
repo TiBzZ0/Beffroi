@@ -239,7 +239,7 @@ export function extraSecured(state: PlayerState, t: number): number {
 
 /** V15 : prix du marchand, 30 minutes de sa production. */
 export function merchantPrice(state: PlayerState, world: WorldState, now: number): number {
-  return Math.ceil(rateAt(state, world, now) * MERCHANT_PRICE_SECONDS);
+  return Math.ceil(baseRate(state, world, now) * MERCHANT_PRICE_SECONDS);
 }
 
 /** V15 : achète un bonus au marchand ; l'état doit être avancé jusqu'à `now`. */
@@ -543,6 +543,15 @@ export function elanBonus(state: PlayerState): number {
 export interface AdvanceOptions {
   /** Production de base fixe (seigneurs voisins), à la place des bâtiments. */
   flatRate?: number;
+}
+
+/**
+ * Production de base à l'instant t : bâtiments et bonus durables, sans les coups de pouce passagers
+ * (élan des clics, frénésie, coffre, marchand, maître d'œuvre, trêve) ni l'incendie.
+ * C'est elle qui fixe les prix : cliquer ne doit pas faire monter la note.
+ */
+export function baseRate(state: PlayerState, world: WorldState, t: number): number {
+  return productionPerSecond(state, world, stagesDoneAt(world, t));
 }
 
 /** Production réelle à l'instant t (incendie compris). */
@@ -1312,7 +1321,7 @@ export function resolveRaid(
 
 export function spyCost(state: PlayerState, world: WorldState, now: number): number {
   const fog = eventActive(state, "brouillard", now) ? FOG_SPY_FACTOR : 1;
-  return Math.max(SPY_MIN_COST, Math.ceil(rateAt(state, world, now) * SPY_COST_SECONDS * fog));
+  return Math.max(SPY_MIN_COST, Math.ceil(baseRate(state, world, now) * SPY_COST_SECONDS * fog));
 }
 
 /** Risque que l'espion soit repéré, selon les tours d'archers de la cible. */
@@ -1402,7 +1411,7 @@ export function buyAcademy(state: PlayerState): Result<PlayerState> {
 export function sabotageCost(saboteur: PlayerState, target: PlayerState, world: WorldState, now: number): number {
   const level = target.academy ?? 0;
   const levelPrice = level > 0 ? ACADEMY_BASE_COST * ACADEMY_COST_GROWTH ** (level - 1) : 0;
-  return Math.max(SABOTAGE_MIN_COST, Math.ceil(rateAt(saboteur, world, now) * SABOTAGE_COST_SECONDS), Math.ceil(levelPrice * SABOTAGE_LEVEL_SHARE));
+  return Math.max(SABOTAGE_MIN_COST, Math.ceil(baseRate(saboteur, world, now) * SABOTAGE_COST_SECONDS), Math.ceil(levelPrice * SABOTAGE_LEVEL_SHARE));
 }
 
 export function sabotageChance(defense: Army): number {

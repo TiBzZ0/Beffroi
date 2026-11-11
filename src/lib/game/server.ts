@@ -118,7 +118,7 @@ import {
 } from "./config";
 import { banditSpot, caravanPath, caravanPos, colossusPos, fixedPlaces, pickSpawn } from "./map";
 import { drawNextEvent, tourneyPodium } from "./events";
-import { cleanWings, hallSpots, hallStageCost, maxStages, placedLevels, wingBlocker, wingLevel, type Wings } from "./hall";
+import { cleanWings, hallSpots, maxStages, placedLevels, wingBlocker, wingLevel, type Wings } from "./hall";
 import { chestBonus, claimDaily, dailyDay, dailyProgress, dailyStart, openChest, rollDaily, seedOf, swapDaily, type DailyContext, type DailyCounts, type DailyState } from "./daily";
 import {
   advance,
@@ -189,6 +189,7 @@ import {
   type Result,
   type WorldState,
   armySpeedBonus,
+  baseRate,
 } from "./engine";
 import {
   worksiteFromRow,
@@ -1573,8 +1574,8 @@ async function runEventAttack(admin: SupabaseClient, seasonId: number, me: Entit
   return { state: after, message, settle: finished ? e.id : undefined };
 }
 
-function eventView(meId: string, state: PlayerState, ev: EventState, now: number, rate: number, positions?: Map<string, MapPos>, names?: Map<string, string>, entities?: Map<string, Entity>): EventView | null {
-  const view = eventViewInner(meId, state, ev, now, rate);
+function eventView(meId: string, state: PlayerState, ev: EventState, now: number, rate: number, positions?: Map<string, MapPos>, names?: Map<string, string>, entities?: Map<string, Entity>, priceRate = rate): EventView | null {
+  const view = eventViewInner(meId, state, ev, now, rate, priceRate);
   const e = ev.active;
   if (view && e && GROUP_EVENTS.includes(e.kind)) {
     const nameOf = (id: string) => (id === meId ? "toi" : (names?.get(id) ?? "un joueur"));
@@ -1615,7 +1616,7 @@ function eventView(meId: string, state: PlayerState, ev: EventState, now: number
   return { ...view, pos: [p[0], p[1]], ...(e.kind === "caravane" ? { path: (({ from, to }) => ({ from: [from[0], from[1]] as [number, number], to: [to[0], to[1]] as [number, number] }))(caravanPath(e.id)) } : {}) };
 }
 
-function eventViewInner(meId: string, state: PlayerState, ev: EventState, now: number, rate: number): EventView | null {
+function eventViewInner(meId: string, state: PlayerState, ev: EventState, now: number, rate: number, priceRate = rate): EventView | null {
   const e = ev.active;
   if (!e) {
     const info = EVENT_INFO[ev.nextKind];
@@ -1639,7 +1640,7 @@ function eventViewInner(meId: string, state: PlayerState, ev: EventState, now: n
       chance: 0,
       take: 0,
       blocker: null,
-      ...(e.kind === "marchand" ? { merchantPrice: Math.ceil(rate * MERCHANT_PRICE_SECONDS), merchantBought: state.merchantEvent === e.id } : {}),
+      ...(e.kind === "marchand" ? { merchantPrice: Math.ceil(priceRate * MERCHANT_PRICE_SECONDS), merchantBought: state.merchantEvent === e.id } : {}),
     };
   }
   const defense = eventDefense(e, state);
@@ -2500,7 +2501,7 @@ export async function runAction(admin: SupabaseClient, userId: string, action: G
       ...info,
       alliances: [...allianceNames].map(([id, name]) => ({ id, name, size: [...entities.values()].filter((e) => e.allianceId === id).length })),
       war: warView(meNow, conflicts.wars, allianceNames),
-      event: eventView(userId, finalState, events, now, currentRate(meNow, finalState, now, worldFrom(worksite), flat), positions, new Map([...entities.values()].map((x) => [x.id, x.name])), entities),
+      event: eventView(userId, finalState, events, now, currentRate(meNow, finalState, now, worldFrom(worksite), flat), positions, new Map([...entities.values()].map((x) => [x.id, x.name])), entities, baseRate(finalState, worldFrom(worksite), now)),
       fortress: fortressView(meNow, finalState, conflicts.fortress, entities, allianceNames, now, intel.get(FORTRESS_INTEL) ?? null),
       chronicle,
       map: { ...mapView(positions), halls: guildPlaces(entities, names) },
@@ -3320,6 +3321,7 @@ function allianceSize(allianceId: number, entities: Map<string, Entity>, world: 
 
 function hallSiegeBlocker(me: Entity, state: PlayerState, g: Guild, wars: WarRow[], now: number, army?: Army): string | null {
   if (g.allianceId === null) return "Une loge ne s'assiège pas.";
+  if (g.stage < 0) return "Cette halle n'est pas encore fondée.";
   if (me.allianceId === null) return "Rejoins une alliance pour assiéger une halle.";
   if (g.allianceId === me.allianceId) return "C'est la halle de ton alliance.";
   if (!warBetween(wars, me.allianceId, g.allianceId, now)) return "On n'assiège une halle qu'en guerre contre son alliance.";
@@ -3429,7 +3431,8 @@ function masterLevelsOf(g: Guild, lots: Lot[]): number {
 /** Production cumulée (par seconde) des membres d'une halle. */
 function guildRate(allianceId: number | null, me: Entity, entities: Map<string, Entity>, world: WorldState, now: number): number {
   const members = allianceId === null ? [me] : [...entities.values()].filter((e) => !e.isLord && e.allianceId === allianceId);
-  return members.reduce((s, e) => s + rateAt(e.state, world, now), 0);
+  // Prix : production de base, sans élan ni autres coups de pouce passagers.
+  return members.reduce((s, e) => s + baseRate(e.state, world, now), 0);
 }
 
 async function loadChiefs(admin: SupabaseClient, seasonId: number): Promise<Map<number, string | null>> {
@@ -3454,7 +3457,14 @@ async function giveToGuild(admin: SupabaseClient, g: Guild, userId: string, amou
   const done = Number(r?.completed ?? 0);
   if (done > 0) {
     const to = lodge ? [g.userId!] : [...entities.values()].filter((e) => !e.isLord && e.allianceId === g.allianceId).map((e) => e.id);
-    notify(admin, to, { title: lodge ? "🏛️ Ta loge grandit" : "🏛️ La halle grandit", body: `Étape ${r?.stage} terminée : un niveau d'aile à placer.`, tag: "hall" });
+    const stage = Number(r?.stage ?? 0);
+    const founded = g.stage < 0;
+    const levels = founded ? stage : done;
+    notify(admin, to, {
+      title: founded ? (lodge ? "🏛️ Ta loge est fondée" : "🏛️ La halle est fondée !") : lodge ? "🏛️ Ta loge grandit" : "🏛️ La halle grandit",
+      body: levels > 0 ? `Étape ${stage} terminée : ${levels > 1 ? `${levels} niveaux` : "un niveau"} d'aile à placer.` : "Prochaine étape : un premier niveau d'aile.",
+      tag: "hall",
+    });
   }
   return done;
 }
@@ -3493,10 +3503,10 @@ async function runHallAction(
   const perSecond = guildRate(me.allianceId, me, entities, world, now);
   switch (action.op) {
     case "found": {
+      // La fondation se finance en commun : on ouvre le chantier (étape « -1 ») et chacun y verse, dîme comprise.
       if (mine) return { error: lodge ? "Tu as déjà une loge." : "Ton alliance a déjà sa halle." };
-      if (!isChief) return { error: "Seul le chef de l'alliance fonde la halle." };
-      const cost = Math.ceil(HALL_FOUND_HOURS * perSecond * 3600);
-      if (current.stone < cost) return { error: `Il faut ${cost.toLocaleString("fr-FR")} pierres pour fonder ${lodge ? "ta loge" : "la halle"}.` };
+      if (!isChief) return { error: "Seul le chef de l'alliance ouvre le chantier de la halle." };
+      const cost = Math.max(1, Math.ceil(HALL_FOUND_HOURS * perSecond * 3600));
       const positions = await loadPositions(admin, seasonId, entities);
       const home = positions.get(me.id);
       if (!home) return { error: "Ton domaine n'est pas encore sur la carte." };
@@ -3504,23 +3514,22 @@ async function runHallAction(
       const taken = [...fixedPlaces(), ...positions.values(), ...guilds.map((g) => g.pos)];
       const spot = hallSpots(home, members, taken)[0];
       if (!spot) return { error: "Aucune case libre près de ton domaine." };
-      const paid = { ...current, stone: current.stone - cost };
-      if ((await commit(paid, "hall_found", { cost, x: spot[0], y: spot[1] })) === "conflict") return "conflict";
       const { error } = await admin.from("guild_halls").insert({
         season_id: seasonId,
         alliance_id: lodge ? null : me.allianceId,
         user_id: lodge ? me.id : null,
         x: spot[0],
         y: spot[1],
-        cost: hallStageCost(1, perSecond),
+        stage: -1,
+        cost,
       });
-      if (error) {
-        // Fondée entre-temps par un autre, ou case prise : on rend la pierre.
-        await commit({ ...paid, stone: paid.stone + cost }, "hall_refund", { cost });
-        return { error: "La halle n'a pas pu être fondée, réessaie.", state: { ...paid, stone: paid.stone + cost } };
+      if (error) return { error: "Le chantier n'a pas pu être ouvert, réessaie." };
+      if (!lodge) {
+        await addChronicle(admin, seasonId, { kind: "hall", actor_id: me.id, details: { alliance: me.allianceId } });
+        const others = [...entities.values()].filter((e) => !e.isLord && e.allianceId === me.allianceId && e.id !== me.id).map((e) => e.id);
+        notify(admin, others, { title: "🏛️ Chantier de la halle ouvert", body: `${me.name} a ouvert le chantier de la halle : versez ensemble ${cost.toLocaleString("fr-FR")} pierres pour la fonder.`, tag: "hall" });
       }
-      if (!lodge) await addChronicle(admin, seasonId, { kind: "hall", actor_id: me.id, details: { alliance: me.allianceId } });
-      return { message: lodge ? "🏛️ Ta loge est fondée. Verse-lui de la pierre pour la faire grandir." : "🏛️ La halle de guilde est fondée ! Chaque membre peut y verser de la pierre, et une part de sa dîme.", state: paid };
+      return { message: `🏛️ Chantier ouvert : ${cost.toLocaleString("fr-FR")} pierres à réunir pour fonder ${lodge ? "ta loge" : "la halle"}${lodge ? "" : ", à verser ensemble (dons et part de dîme)"}.` };
     }
     case "give": {
       if (!mine) return { error: lodge ? "Fonde d'abord ta loge." : "Ton alliance n'a pas encore de halle." };
@@ -3530,7 +3539,11 @@ async function runHallAction(
       const paid = { ...current, stone: current.stone - amount };
       if ((await commit(paid, "hall_give", { amount })) === "conflict") return "conflict";
       const done = await giveToGuild(admin, mine, me.id, amount, perSecond, entities);
-      return { message: done > 0 ? `🏛️ Versé ! Étape terminée : un niveau d'aile à placer.` : `🏛️ ${amount.toLocaleString("fr-FR")} pierres versées à ${lodge ? "ta loge" : "la halle"}.`, state: paid };
+      const founding = mine.stage < 0;
+      return {
+        message: done > 0 ? (founding ? `🏛️ Versé ! ${lodge ? "Ta loge" : "La halle"} est fondée.` : "🏛️ Versé ! Étape terminée : un niveau d'aile à placer.") : `🏛️ ${amount.toLocaleString("fr-FR")} pierres versées à ${lodge ? "ta loge" : "la halle"}.`,
+        state: paid,
+      };
     }
     case "tithe": {
       const percent = Number(action.percent);
@@ -3541,6 +3554,7 @@ async function runHallAction(
     }
     case "station": {
       if (!mine || lodge) return { error: "Seule une halle d'alliance reçoit une garnison." };
+      if (mine.stage < 0) return { error: "Fondez d'abord la halle." };
       const sending = sendTroops(current, { [String(action.unit)]: Number(action.qty) } as Army);
       if (!sending.ok) return { error: sending.error };
       const outMs = await travelToHall(admin, seasonId, entities, me.id, mine, sending.value.sent);
@@ -3584,7 +3598,7 @@ async function runHallAction(
       if (!mine) return { error: "Pas de halle." };
       if (!isChief) return { error: "Seul le chef place les niveaux d'aile. Propose ton choix dans le canal d'alliance." };
       const wing = String(action.wing) as WingId;
-      const available = mine.stage + masterLevelsOf(mine, lotsOf.get(entities) ?? []);
+      const available = Math.max(0, mine.stage) + masterLevelsOf(mine, lotsOf.get(entities) ?? []);
       const blocked = wingBlocker(mine.wings, wing, available, lodge);
       if (blocked) return { error: blocked };
       const { data } = await admin.rpc("hall_place", { p_hall: mine.id, p_wing: wing, p_available: available, p_max_kinds: lodge ? LODGE_MAX_WINGS : WING_IDS.length });
@@ -3631,7 +3645,7 @@ function guildView(me: Entity, state: PlayerState, entities: Map<string, Entity>
             .map(([id, amount]) => ({ id, name: entities.get(id)?.name ?? "Ancien membre", amount }))
             .sort((a, b) => b.amount - a.amount),
           wings: g.wings,
-          available: g.stage + masterLevels,
+          available: Math.max(0, g.stage) + masterLevels,
           placed: placedLevels(g.wings),
           masterLevels,
           garrison: Object.entries(g.garrison).map(([id, troops]) => ({ id, name: entities.get(id)?.name ?? "?", troops })),

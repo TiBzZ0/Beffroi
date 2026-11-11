@@ -1882,9 +1882,14 @@ function GuildHall({ snap, live, now, run }: { snap: GameSnapshot; live: PlayerS
         </p>
         {g.dormantLodge && <p className="note">Ta loge attend : la moitié de ce que tu lui as versé rejoindra la halle dès qu&apos;elle sera fondée.</p>}
         {g.chief ? (
-          <button className="btn btn-primary" disabled={busy || live.stone < g.foundCost} onClick={() => act({ type: "hall", op: "found" })}>
-            Fonder {g.lodge ? "ma loge" : "la halle"} · <span className="num">{formatNumber(g.foundCost)} 🪨</span>
-          </button>
+          <>
+            <p className="note num">
+              {g.lodge ? "Ouvre le chantier, puis verse-lui" : "Ouvre le chantier : toute l'alliance pourra y verser, dons et part de dîme compris,"} environ {formatNumber(g.foundCost)} pierres pour la fonder.
+            </p>
+            <button className="btn btn-primary" disabled={busy} onClick={() => act({ type: "hall", op: "found" })}>
+              Ouvrir le chantier {g.lodge ? "de ma loge" : "de la halle"}
+            </button>
+          </>
         ) : (
           <p className="note">Seul le chef{g.chiefName ? ` (${g.chiefName})` : ""} peut la fonder.</p>
         )}
@@ -1893,6 +1898,7 @@ function GuildHall({ snap, live, now, run }: { snap: GameSnapshot; live: PlayerS
     );
   }
   const done = h.stage >= h.maxStages;
+  const founding = h.stage < 0;
   const pct = done ? 100 : Math.min(100, (h.progress / Math.max(1, h.cost)) * 100);
   const free = h.available - h.placed;
   const tithe = Math.round((live.hallTithe ?? 0.25) * 100);
@@ -1909,7 +1915,7 @@ function GuildHall({ snap, live, now, run }: { snap: GameSnapshot; live: PlayerS
       </div>
       <div className="bar-caption num">
         <span>{done ? `${formatNumber(h.received)} pierres reçues` : `${formatNumber(h.progress)} / ${formatNumber(h.cost)}`}</span>
-        <span>{done ? `achevée (${h.maxStages}/${h.maxStages})` : `étape ${h.stage + 1}/${h.maxStages}`}</span>
+        <span>{founding ? "fondation" : done ? `achevée (${h.maxStages}/${h.maxStages})` : `étape ${h.stage + 1}/${h.maxStages}`}</span>
       </div>
       <form
         className="alliance-form"
@@ -1940,6 +1946,7 @@ function GuildHall({ snap, live, now, run }: { snap: GameSnapshot; live: PlayerS
         Le reste de ta dîme ({Math.round((live.tithe ?? 0) * 100)} % de ta production) continue d&apos;aller au beffroi. Ce qui est versé ici ne compte ni pour le beffroi, ni
         pour les lots, ni pour les paliers de don, et ne peut être ni repris ni pillé.
       </p>
+      {founding && <p className="note">Chantier de fondation : versez ensemble la somme affichée. Une fois fondée, chaque étape donnera un niveau d&apos;aile.</p>}
       <h4 className="hall-sub">
         Ailes · {h.placed}/{h.available} niveaux placés{h.masterLevels > 0 ? ` (dont ${h.masterLevels} offert${h.masterLevels > 1 ? "s" : ""} par le beffroi)` : ""}
       </h4>
@@ -1977,7 +1984,7 @@ function GuildHall({ snap, live, now, run }: { snap: GameSnapshot; live: PlayerS
       {h.gifts.length > 0 && (
         <p className="note num">Versements : {h.gifts.map((x) => `${x.id === snap.userId ? "toi" : x.name} ${formatNumber(x.amount)}`).join(" · ")}</p>
       )}
-      {!g.lodge && (
+      {!g.lodge && !founding && (
         <>
           <h4 className="hall-sub">🛡️ Garnison</h4>
           <p className="row-desc num">

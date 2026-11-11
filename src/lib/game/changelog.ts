@@ -341,4 +341,12 @@ export const CHANGELOG: ChangeEntry[] = [
       "🐛 Correction : une armée envoyée vers un événement pouvait faire demi-tour sans combattre. C'est réglé.",
     ],
   },
+  {
+    id: 41,
+    date: "11 novembre",
+    items: [
+      "🏛️ La fondation de la halle se paie en commun : le chef ouvre le chantier, puis tous les membres y versent (dons et part de dîme) jusqu'à la somme demandée. Même chose pour la loge d'un joueur seul.",
+      "🪙 Les prix calculés sur ta production (marchand, espion, saboteur, halle) se basent maintenant sur ta production de base. L'élan des clics, la frénésie, le coffre du jour et les autres coups de pouce passagers ne les font plus monter.",
+    ],
+  },
 ];

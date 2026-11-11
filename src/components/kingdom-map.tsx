@@ -68,13 +68,13 @@ export interface BoardHall {
 
 /** Une halle à colombages : échafaudage à la fondation, puis nef, tours et bannière à mesure des étapes. */
 function HallGlyph({ h }: { h: BoardHall }) {
-  const f = h.maxStages > 0 ? h.stage / h.maxStages : 0;
+  const f = h.maxStages > 0 ? Math.max(0, h.stage) / h.maxStages : 0;
   const w = 9 + Math.round(f * 7);
   const towers = h.lodge ? (h.stage >= 3 ? 1 : 0) : h.stage >= 7 ? 2 : h.stage >= 4 ? 1 : 0;
   return (
     <g>
       <ellipse cy="10" rx={w + 5} ry="4" className="g-shadow" />
-      {h.stage === 0 ? (
+      {h.stage <= 0 ? (
         <g>
           <rect x={-w} y="2" width={2 * w} height="7" className="g-stone" />
           <path d={`M${-w + 2} 2 V-10 M${w - 2} 2 V-10 M${-w + 2} -10 H${w - 2} M${-w + 2} -3 L${w - 2} -10`} className="g-pole" />
@@ -615,7 +615,7 @@ export function MapBoard(props: BoardProps) {
       {/* Halles de guilde et loges */}
       {halls.map((h) => (
         <g key={`hall-${h.id}`} transform={`translate(${sx(h.pos)} ${sy(h.pos) - 4}) scale(${h.lodge ? 0.85 : 1.1})`} style={{ ["--roof" as string]: h.color ?? "var(--map-roof)", ["--banner" as string]: h.color ?? "var(--map-neutral-banner)" }} className="map-hall">
-          <title>{`${h.name} · étape ${h.stage}/${h.maxStages}`}</title>
+          <title>{h.stage < 0 ? `${h.name} · en fondation` : `${h.name} · étape ${h.stage}/${h.maxStages}`}</title>
           {h.mine && <ellipse cy="10" rx="20" ry="7" className="map-me-ring" />}
           <HallGlyph h={h} />
         </g>
