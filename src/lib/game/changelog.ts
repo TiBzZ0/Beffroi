@@ -286,4 +286,13 @@ export const CHANGELOG: ChangeEntry[] = [
       "🔍 Bouton Agrandir pour jouer la carte au doigt sur téléphone, et bouton Noms pour afficher tout le monde. Toucher un lieu montre la durée de marche depuis chez toi.",
     ],
   },
+  {
+    id: 35,
+    date: "11 novembre",
+    items: [
+      "🎪 Plus d'événements : le suivant commence 1 heure après la fin du précédent, au lieu de 2.",
+      "🏕️ Les camps de bandits et le filon géant sortent deux fois plus souvent.",
+      "💰 Le trésor enfoui vaut maintenant 4 heures de la production médiane, au lieu de 2.",
+    ],
+  },
 ];

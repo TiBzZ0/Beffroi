@@ -485,7 +485,7 @@ export const STRONG_LORD_TOP_SHARE = 0.25;
 
 // Événements : une caravane marchande ou un colosse apparaît régulièrement pour tout le monde.
 /** Pause entre deux événements. */
-export const EVENT_GAP_MS = 2 * 60 * 60 * 1000;
+export const EVENT_GAP_MS = 60 * 60 * 1000;
 /** Caravane : 1 h pour la piller, une fois par joueur. A14 : chacun affronte sa propre escorte. */
 export const CARAVAN_MS = 60 * 60 * 1000;
 /** Une victoire rapporte 45 min de sa propre production. */
@@ -626,7 +626,7 @@ export function mapDistance(a: MapPos, b: MapPos): number {
 
 // Événements sans carte (V3 à V6, V15). Un événement toutes les 2 heures, tiré au sort selon ces poids, jamais deux fois de suite le même.
 export type EventKind = "caravane" | "colosse" | "foire" | "fete" | "etoiles" | "treve" | "marchand" | "lune" | "brouillard" | "filon" | "bandits" | "tresor" | "convoi" | "siege" | "tournoi";
-export const EVENT_WEIGHTS: Record<EventKind, number> = { caravane: 3, colosse: 2, foire: 2, fete: 2, etoiles: 2, treve: 1, marchand: 2, lune: 1, brouillard: 1, filon: 2, bandits: 3, tresor: 2, convoi: 2, siege: 1, tournoi: 1 };
+export const EVENT_WEIGHTS: Record<EventKind, number> = { caravane: 3, colosse: 2, foire: 2, fete: 2, etoiles: 2, treve: 1, marchand: 2, lune: 1, brouillard: 1, filon: 4, bandits: 6, tresor: 2, convoi: 2, siege: 1, tournoi: 1 };
 export const EVENT_DURATIONS_MS: Record<EventKind, number> = {
   caravane: 60 * 60 * 1000,
   colosse: 6 * 60 * 60 * 1000,
@@ -665,8 +665,8 @@ export const MINE_MAX_SECONDS = 30 * 60;
 /** V7 : un camp de bandits par joueur actif, à 2 ou 3 cases, défendu par 30 % de son armée ; 40 minutes de production pour le vainqueur. */
 export const BANDIT_ARMY_SHARE = 0.3;
 export const BANDIT_PRIZE_SECONDS = 40 * 60;
-/** V8 : le trésor vaut 2 heures de la production médiane. */
-export const TREASURE_PRIZE_SECONDS = 2 * 60 * 60;
+/** V8 : le trésor vaut 4 heures de la production médiane. */
+export const TREASURE_PRIZE_SECONDS = 4 * 60 * 60;
 /** V13 : un raid de seigneur repoussé pendant la lune rouge rapporte 30 % de la valeur de son armée. */
 export const RED_MOON_RANSOM = 0.3;
 /** V14 : l'espion coûte moitié prix dans le brouillard. */

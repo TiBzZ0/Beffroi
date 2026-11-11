@@ -1280,7 +1280,7 @@ const EVENT_INFO: Record<EventKind, { name: string; description: string }> = {
   brouillard: { name: "Le brouillard", description: "Pendant 2 heures, aucune alerte d'approche, les chances sont masquées sans espion, et l'espion coûte moitié prix." },
   filon: { name: "Le filon géant", description: "Une mine s'ouvre sur la carte pendant 2 heures. Poste-y une armée : elle ne se bat pas et extrait 3 minutes de ta production par tranche de 10 minutes sur place, 30 minutes au plus." },
   bandits: { name: "Les camps de bandits", description: "Pendant 3 heures, un camp de bandits se dresse près de chaque joueur actif, défendu par 30 % de son armée. Le premier qui le vide emporte 40 minutes de la production du joueur le plus proche." },
-  tresor: { name: "Le trésor enfoui", description: "Une case est révélée pendant 90 minutes. Les armées qui y arrivent se battent dans l'ordre d'arrivée ; celle qui tient la case à la fin emporte 2 heures de la production médiane." },
+  tresor: { name: "Le trésor enfoui", description: "Une case est révélée pendant 90 minutes. Les armées qui y arrivent se battent dans l'ordre d'arrivée ; celle qui tient la case à la fin emporte 4 heures de la production médiane." },
   marchand: { name: "Le marchand ambulant", description: "Pendant 1 heure, il vend un bonus au choix pour 30 minutes de ta production. Un seul achat par passage." },
   caravane: {
     name: "Caravane marchande",
