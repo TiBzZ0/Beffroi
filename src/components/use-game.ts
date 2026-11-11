@@ -9,10 +9,29 @@ import { worksiteFromRow, worldFrom, type ActionResponse, type AwaySummary, type
 import { getBrowserClient } from "@/lib/supabase/client";
 
 /** Les clics partent par lots : moins d'appels au serveur (la pierre s'affiche déjà en local). */
-const CLICK_FLUSH_MS = 8_000;
+const CLICK_FLUSH_MS = 15_000;
 const SYNC_MS = 60_000;
 /** Délai minimal entre deux synchronisations déclenchées par l'activité des rivaux. */
-const LIVE_SYNC_MS = 5_000;
+const LIVE_SYNC_MS = 15_000;
+/** Sans clic ni touche pendant ce temps, le joueur est « en veille » : plus d'appels de fond. */
+const IDLE_MS = 5 * 60_000;
+
+// Dernière action du joueur (clic, touche, toucher). Partagé par tous les hooks de la page.
+let lastInputAt = Date.now();
+const wakeListeners = new Set<() => void>();
+if (typeof window !== "undefined") {
+  const onInput = () => {
+    const wasIdle = Date.now() - lastInputAt >= IDLE_MS;
+    lastInputAt = Date.now();
+    if (wasIdle) wakeListeners.forEach((f) => f());
+  };
+  for (const ev of ["pointerdown", "keydown", "touchstart", "wheel"]) window.addEventListener(ev, onInput, { passive: true, capture: true });
+}
+
+/** Onglet visible et joueur présent : seuls cas où l'on interroge le serveur en fond (quota Vercel). */
+function awake(): boolean {
+  return document.visibilityState === "visible" && Date.now() - lastInputAt < IDLE_MS;
+}
 
 /** Ce qui change l'armée, le statut ou la production d'un rival (hors pierre, suivie à part). */
 function rivalSignature(row: Record<string, unknown>): string {
@@ -169,19 +188,24 @@ export function useGame() {
     const flush = setInterval(() => {
       if (pending.current > 0) void run("flush-clicks");
     }, CLICK_FLUSH_MS);
-    // Onglet caché : pas de synchronisation de fond, on rattrape au retour.
+    // Onglet caché ou joueur en veille : pas de synchronisation de fond, on rattrape au retour.
     const sync = setInterval(() => {
-      if (document.visibilityState === "visible") void run({ type: "sync" });
+      if (awake()) void run({ type: "sync" });
     }, SYNC_MS);
     const onVisible = () => {
-      if (document.visibilityState === "visible") void run({ type: "sync" });
-      else if (pending.current > 0) void run("flush-clicks");
+      if (document.visibilityState === "visible") {
+        lastInputAt = Date.now();
+        void run({ type: "sync" });
+      } else if (pending.current > 0) void run("flush-clicks");
     };
+    const onWake = () => void run({ type: "sync" });
     document.addEventListener("visibilitychange", onVisible);
+    wakeListeners.add(onWake);
     return () => {
       clearInterval(flush);
       clearInterval(sync);
       document.removeEventListener("visibilitychange", onVisible);
+      wakeListeners.delete(onWake);
     };
   }, [run]);
 
@@ -213,10 +237,11 @@ export function useGame() {
 
   /** Synchronise bientôt (au plus une fois toutes les 5 s), si l'onglet Raids est ouvert. */
   const scheduleLiveSync = useCallback(() => {
-    if (!watching.current || liveTimer.current) return;
+    if (!watching.current || liveTimer.current || !awake()) return;
     const wait = Math.max(0, lastLiveSync.current + LIVE_SYNC_MS - Date.now());
     liveTimer.current = setTimeout(() => {
       liveTimer.current = null;
+      if (!awake()) return;
       lastLiveSync.current = Date.now();
       void run({ type: "sync" });
     }, wait);
@@ -308,7 +333,10 @@ export function useGame() {
             showToast(repelled ? `🛡️ Tu as repoussé le raid de ${attacker} !` : `⚔️ ${attacker} vient de piller tes greniers !`);
           }
           // On ne se resynchronise que si ça me concerne ; le reste attend la prochaine synchro.
-          if (s && (payload.new.target_id === s.userId || payload.new.actor_id === s.userId)) void run({ type: "sync" });
+          // Onglet caché : la synchronisation du retour suffit.
+          if (s && (payload.new.target_id === s.userId || payload.new.actor_id === s.userId)) {
+            if (document.visibilityState === "visible") void run({ type: "sync" });
+          }
           else scheduleLiveSync();
         },
       )
@@ -434,7 +462,7 @@ export function usePush() {
   return { state, enable, disable };
 }
 
-/** B11 : messages d'un canal, relus toutes les 12 secondes tant que l'onglet est ouvert et visible. */
+/** B11 : messages d'un canal, relus toutes les 12 secondes tant que l'onglet est visible et le joueur présent. */
 export function useChat(channel: ChatChannel) {
   const [view, setView] = useState<ChatView | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -450,7 +478,7 @@ export function useChat(channel: ChatChannel) {
     };
     void load();
     const id = setInterval(() => {
-      if (document.visibilityState === "visible") void load();
+      if (awake()) void load();
     }, 12_000);
     return () => {
       alive = false;
