@@ -2018,3 +2018,15 @@ use.g-enemy {
   border: 1px solid var(--gold);
   background: rgba(212, 164, 58, 0.15);
 }
+
+/* Corps de métier et compagnonnage */
+.mastery-line {
+  margin: 0 0 8px;
+  font-size: 0.85rem;
+  color: var(--ink-soft);
+}
+.row-tier {
+  margin-top: 2px;
+  font-size: 0.78rem;
+  color: var(--ink-soft);
+}

@@ -312,4 +312,13 @@ export const CHANGELOG: ChangeEntry[] = [
       "🎁 Les trois prises, le coffre s'ouvre : +10 % de production pendant 4 heures. Chaque jour complet d'affilée l'améliore, jusqu'à +20 % au cinquième. Un jour manqué fait redescendre d'un cran.",
     ],
   },
+  {
+    id: 38,
+    date: "11 novembre",
+    items: [
+      "🛠️ Corps de métier : chaque lot complet de 50 bâtiments d'un même type donne +2 % à toute ta production. Les 13 types comptent, et ça s'additionne. Les ruines ne comptent pas.",
+      "🤝 Compagnonnage : chaque lot de 10 petits bâtiments renforce un grand de +1 %. Manœuvres → Merveilles, tailleurs → ateliers royaux, charrettes → architectes, carrières → cités, fours → mines de marbre, grues → ports.",
+      "⭐ Chaque bâtiment affiche son prochain palier, et le conseil « le plus rentable » en tient compte : il peut te suggérer d'en prendre plusieurs d'un coup pour compléter un lot.",
+    ],
+  },
 ];

@@ -12,6 +12,11 @@ import {
   CLICK_WINDOW_MAX_MS,
   SUSPICIOUS_CLICK_RATE,
   COST_GROWTH,
+  COMPANIONS,
+  COMPANION_BONUS,
+  COMPANION_TRANCHE,
+  MASTERY_BONUS,
+  MASTERY_TRANCHE,
   GENERATORS,
   MAX_CLICKS_PER_SECOND,
   OFFLINE_CAP_MS,
@@ -441,7 +446,35 @@ export function generatorRate(state: PlayerState, id: GeneratorId): number {
   for (const u of ownedUpgrades(state)) {
     if (u.effect.kind === "generator" && u.effect.generator === id) rate *= u.effect.multiplier;
   }
-  return rate;
+  return rate * (1 + companionBonus(state, id));
+}
+
+/** Corps de métier : +2 % de production totale par tranche complète de 50 bâtiments d'un même type. */
+export function masteryBonus(state: PlayerState): number {
+  let tranches = 0;
+  for (const g of GENERATORS) tranches += Math.floor(owned(state, g.id) / MASTERY_TRANCHE);
+  return tranches * MASTERY_BONUS;
+}
+
+/** Compagnonnage : bonus d'un grand bâtiment grâce aux tranches de 10 de son petit compagnon. */
+export function companionBonus(state: PlayerState, id: GeneratorId): number {
+  const small = companionOf(id);
+  return small ? Math.floor(owned(state, small) / COMPANION_TRANCHE) * COMPANION_BONUS : 0;
+}
+
+/** Le petit bâtiment dont les tranches profitent à `id`. */
+export function companionOf(id: GeneratorId): GeneratorId | undefined {
+  return (Object.entries(COMPANIONS) as [GeneratorId, GeneratorId][]).find(([, big]) => big === id)?.[0];
+}
+
+/** Prochain palier d'un bâtiment : combien en acheter, et ce que ça rapporte (en part de production). */
+export function nextTiers(state: PlayerState, id: GeneratorId): { mastery: { missing: number; bonus: number }; companion: { missing: number; bonus: number; target: GeneratorId } | null } {
+  const n = owned(state, id);
+  const big = COMPANIONS[id];
+  return {
+    mastery: { missing: MASTERY_TRANCHE - (n % MASTERY_TRANCHE), bonus: MASTERY_BONUS },
+    companion: big ? { missing: COMPANION_TRANCHE - (n % COMPANION_TRANCHE), bonus: COMPANION_BONUS, target: big } : null,
+  };
 }
 
 /**
@@ -460,7 +493,7 @@ export function productionMultiplier(state: PlayerState, world: WorldState, stag
   for (const u of ownedUpgrades(state)) {
     if (u.effect.kind === "production") m *= u.effect.multiplier;
   }
-  return m * stageMultiplier(stagesDone, "production");
+  return m * (1 + masteryBonus(state)) * stageMultiplier(stagesDone, "production");
 }
 
 /** Production de pierre par seconde pour un nombre d'étapes terminées donné. */

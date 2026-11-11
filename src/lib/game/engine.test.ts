@@ -2,6 +2,9 @@ import { describe, expect, it } from "vitest";
 import { CLICK_PAUSE_MS, OFFLINE_CAP_MS, STAGE_MIN_SIZE } from "./config";
 import {
   advance,
+  generatorRate,
+  masteryBonus,
+  nextTiers,
   applyClicks,
   buyGenerator,
   buyUpgrade,
@@ -402,5 +405,22 @@ describe("durée des étapes", () => {
     expect(stageHours(6)).toBe(12);
     expect(stageHours(7)).toBe(24);
     expect(size([1e6], stageHours(6))).toBe(3 * size([1e6], stageHours(5)));
+  });
+});
+
+describe("corps de métier et compagnonnage", () => {
+  const base = (generators: Partial<Record<import("./config").GeneratorId, number>>, ruins = {}) => ({ ...newPlayerState(0), generators, ruins });
+  it("donne +2 % par tranche complète de 50, ruines exclues", () => {
+    expect(masteryBonus(base({ manoeuvre: 49 }))).toBe(0);
+    expect(masteryBonus(base({ manoeuvre: 100, tailleur: 50 }))).toBeCloseTo(0.06);
+    expect(masteryBonus(base({ manoeuvre: 45 }, { manoeuvre: 10 }))).toBe(0);
+  });
+  it("donne +1 % au grand bâtiment par tranche de 10 du petit", () => {
+    expect(generatorRate(base({ manoeuvre: 25 }), "merveille")).toBeCloseTo(430_000_000 * 1.02);
+    expect(generatorRate(base({ manoeuvre: 25 }), "manoeuvre")).toBeCloseTo(0.1);
+    const t = nextTiers(base({ manoeuvre: 25 }), "manoeuvre");
+    expect(t.mastery.missing).toBe(25);
+    expect(t.companion).toEqual({ missing: 5, bonus: 0.01, target: "merveille" });
+    expect(nextTiers(base({}), "guilde").companion).toBeNull();
   });
 });

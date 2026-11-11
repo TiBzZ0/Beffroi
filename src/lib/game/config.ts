@@ -66,6 +66,21 @@ export const GENERATORS: readonly GeneratorDef[] = [
 
 export const GENERATOR_IDS = GENERATORS.map((g) => g.id);
 
+/** Corps de métier : chaque tranche complète de 50 bâtiments d'un type donne +2 % de production totale (ruines exclues). */
+export const MASTERY_TRANCHE = 50;
+export const MASTERY_BONUS = 0.02;
+/** Compagnonnage : chaque tranche de 10 petits bâtiments donne +1 % à la production d'un grand. */
+export const COMPANION_TRANCHE = 10;
+export const COMPANION_BONUS = 0.01;
+export const COMPANIONS: Partial<Record<GeneratorId, GeneratorId>> = {
+  manoeuvre: "merveille",
+  tailleur: "atelier_royal",
+  charrette: "architectes",
+  carriere: "cite",
+  four: "marbre",
+  grue: "port",
+};
+
 export type UpgradeEffect =
   | { kind: "generator"; generator: GeneratorId; multiplier: number }
   | { kind: "click"; multiplier: number }

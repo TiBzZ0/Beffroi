@@ -322,7 +322,7 @@ describe("espions", () => {
 
   it("un espion coûte une minute de production, 200 pierres au moins", () => {
     expect(spyCost(player(), world, NOW)).toBe(200);
-    expect(spyCost(player({ generators: { tailleur: 100 } }), world, NOW)).toBe(6_000);
+    expect(spyCost(player({ generators: { tailleur: 100 } }), world, NOW)).toBe(6_240); // 100 tailleurs : deux tranches de maîtrise, +4 %
   });
 });
 

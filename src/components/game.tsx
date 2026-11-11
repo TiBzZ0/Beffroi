@@ -53,6 +53,8 @@ import {
   clickValue,
   generatorCost,
   generatorRate,
+  masteryBonus,
+  nextTiers,
   lootOf,
   spyCost,
   academyCost,
@@ -682,12 +684,20 @@ function Generators({ live, stagesDone, snap, run }: { live: PlayerState; stages
   // On montre les bâtiments possédés, plus le prochain à découvrir.
   const visibleCount = Math.min(GENERATORS.length, Math.max(1, GENERATORS.findIndex((g) => owned(live, g.id) === 0 && live.totalProduced < g.baseCost * 0.5) + 1 || GENERATORS.length));
 
-  // B9 : l'achat le plus rentable (production gagnée par pierre dépensée) parmi les bâtiments connus.
+  // B9 : l'achat le plus rentable (production gagnée par pierre dépensée) parmi les bâtiments connus,
+  // paliers de corps de métier et de compagnonnage compris : on regarde aussi l'achat qui complète la tranche.
   const rate = productionPerSecond(live, world, stagesDone);
   const best = GENERATORS.slice(0, visibleCount)
     .filter((g) => owned(live, g.id) > 0 || live.totalProduced >= g.baseCost * 0.5)
-    .map((g) => ({ id: g.id, value: (generatorRate(live, g.id) * mult) / generatorCost(live, g.id, 1) }))
-    .sort((a, b) => b.value - a.value)[0]?.id;
+    .flatMap((g) => {
+      const t = nextTiers(live, g.id);
+      return [...new Set([1, t.mastery.missing, t.companion?.missing ?? 1])].map((q) => {
+        const after = { ...live, generators: { ...live.generators, [g.id]: owned(live, g.id) + q } };
+        return { id: g.id, qty: q, value: (productionPerSecond(after, world, stagesDone) - rate) / generatorCost(live, g.id, q) };
+      });
+    })
+    .sort((a, b) => b.value - a.value)[0];
+  const mastery = masteryBonus(live);
   // L'achat s'affiche tout de suite (voir useGame) : pas besoin de bloquer le bouton.
   const buy = (id: GeneratorId, n: number) => void run({ type: "buy", generator: id, qty: n });
   const rebuild = async (id: GeneratorId) => {
@@ -705,6 +715,11 @@ function Generators({ live, stagesDone, snap, run }: { live: PlayerState; stages
           </button>
         ))}
       </div>
+      {mastery > 0 && (
+        <p className="mastery-line num">
+          🛠️ Corps de métier : +{Math.round(mastery * 100)} % de production (une tranche par lot complet de 50 bâtiments d&apos;un type)
+        </p>
+      )}
       <div className="list">
         {GENERATORS.slice(0, visibleCount).map((g, i) => {
           const n = owned(live, g.id);
@@ -721,12 +736,17 @@ function Generators({ live, stagesDone, snap, run }: { live: PlayerState; stages
                 <div className="row-title">
                   {hidden ? "???" : g.name}
                   {n > 0 && <span className="row-count num">{n}</span>}
-                  {!hidden && g.id === best && <span className="badge badge-best" title="La meilleure production gagnée par pierre dépensée">⭐ le plus rentable</span>}
+                  {!hidden && g.id === best?.id && (
+                    <span className="badge badge-best" title="La meilleure production gagnée par pierre dépensée, paliers compris">
+                      ⭐ le plus rentable{best.qty > 1 ? ` : prends-en ${best.qty}` : ""}
+                    </span>
+                  )}
                 </div>
                 <div className="row-desc num">
                   {hidden ? "Continue de bâtir pour le découvrir." : `${g.description} ${formatRate(each)}/s chacun${n > 0 ? ` · total ${formatRate(each * n)}/s` : ""}`}
                   {!hidden && cost > live.stone && rate > 0 ? ` · à toi dans ${duration(((cost - live.stone) / rate) * 1000)}` : ""}
                 </div>
+                {!hidden && n > 0 && <TierLine live={live} id={g.id} />}
               </div>
               <button className="btn btn-primary" disabled={hidden || cost > live.stone} onClick={() => buy(g.id, count)}>
                 +{count}
@@ -747,6 +767,19 @@ function Generators({ live, stagesDone, snap, run }: { live: PlayerState; stages
         })}
       </div>
     </>
+  );
+}
+
+/** Prochains paliers d'un bâtiment : corps de métier et compagnonnage. */
+function TierLine({ live, id }: { live: PlayerState; id: GeneratorId }) {
+  const t = nextTiers(live, id);
+  const companion = t.companion;
+  const big = companion ? GENERATORS.find((g) => g.id === companion.target) : undefined;
+  return (
+    <div className="row-tier num">
+      🛠️ encore {t.mastery.missing} pour +{t.mastery.bonus * 100} % de production
+      {companion && big && ` · 🤝 encore ${companion.missing} pour +${companion.bonus * 100} % aux ${big.plural}`}
+    </div>
   );
 }
 
