@@ -147,6 +147,18 @@ export interface ChronicleEntry {
 }
 
 /** T5 : une armée approche (on ne voit l'attaquant que si les tours l'ont repéré). */
+/** Quêtes du jour (trois par jour, renouvelées à 4 h UTC). */
+export interface DailyView {
+  quests: { id: string; icon: string; label: string; family: string; progress: number; goal: number; claimed: boolean }[];
+  swapped: boolean;
+  chest: boolean;
+  /** Jours complets d'affilée, et bonus du coffre (celui du jour, ou celui obtenu). */
+  streak: number;
+  chestBonus: number;
+  boostUntil: number;
+  resetAt: number;
+}
+
 export interface IncomingView {
   id: string;
   arriveAt: number;
@@ -191,6 +203,7 @@ export interface GameSnapshot {
   chronicle?: ChronicleEntry[];
   map?: MapView;
   incoming?: IncomingView[];
+  daily?: DailyView;
 }
 
 export interface LeaderboardRow {
@@ -249,6 +262,7 @@ export type GameAction =
   | { type: "merchant"; choice: MerchantChoice }
   | { type: "march_recall"; id: string }
   | { type: "tournament_join"; troops: Record<string, number> }
+  | { type: "daily"; op: "claim" | "swap" | "chest"; index: number }
   | { type: "academy" }
   | { type: "tithe"; percent: number }
   | { type: "curfew"; start: number | null }

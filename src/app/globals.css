@@ -1935,3 +1935,86 @@ use.g-enemy {
     animation: none;
   }
 }
+
+/* Quêtes du jour */
+.daily {
+  margin: 10px 0 0;
+  border: 1px solid var(--gold);
+  border-radius: var(--radius);
+  background: var(--panel-2);
+  text-align: left;
+  overflow: hidden;
+}
+.daily-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: 4px 10px;
+  width: 100%;
+  padding: 8px 10px;
+  border: 0;
+  background: none;
+  color: var(--ink);
+  font: inherit;
+  font-weight: 600;
+  text-align: left;
+  cursor: pointer;
+}
+.daily-head .dot {
+  display: inline-block;
+  margin-left: 6px;
+  vertical-align: middle;
+}
+.daily-head .note {
+  font-weight: 400;
+  margin: 0;
+}
+.daily-list {
+  list-style: none;
+  margin: 0;
+  padding: 0 10px;
+  display: grid;
+  gap: 6px;
+}
+.daily-list li {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 8px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--panel);
+}
+.daily-list li.ready {
+  border-color: var(--gold);
+  box-shadow: 0 0 0 1px var(--gold) inset;
+}
+.daily-list li.claimed {
+  opacity: 0.6;
+}
+.daily-icon {
+  font-size: 1.2rem;
+}
+.daily-text {
+  flex: 1;
+  min-width: 0;
+}
+.daily-text .note {
+  margin: 2px 0 0;
+}
+.daily-chest {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 8px;
+  margin: 8px 10px 10px;
+  padding: 6px 8px;
+  border-radius: 8px;
+  border: 1px dashed var(--line);
+  font-size: 0.92rem;
+}
+.daily-chest.ready {
+  border: 1px solid var(--gold);
+  background: rgba(212, 164, 58, 0.15);
+}

@@ -202,6 +202,82 @@ function QuestCard({ snap }: { snap: GameSnapshot }) {
   );
 }
 
+/** Quêtes du jour : trois quêtes, une récompense chacune, puis le coffre. */
+function DailyCard({ daily, now, run }: { daily: GameSnapshot["daily"]; now: number; run: ReturnType<typeof useGame>["run"] }) {
+  const [busy, setBusy] = useState<string | null>(null);
+  const [open, setOpen] = useState(true);
+  if (!daily || daily.quests.length === 0) return null;
+  const act = async (key: string, op: "claim" | "swap" | "chest", index = 0) => {
+    setBusy(key);
+    await run({ type: "daily", op, index });
+    setBusy(null);
+  };
+  const claimable = daily.quests.filter((q) => !q.claimed && q.progress >= q.goal).length;
+  const allClaimed = daily.quests.every((q) => q.claimed);
+  const chestReady = allClaimed && !daily.chest;
+  const done = daily.quests.filter((q) => q.claimed).length;
+  return (
+    <div className="daily">
+      <button className="daily-head" onClick={() => setOpen((o) => !o)} aria-expanded={open}>
+        <span>
+          📅 Quêtes du jour <span className="num">{done}/{daily.quests.length}</span>
+          {(claimable > 0 || chestReady) && <span className="dot" aria-label="récompense à prendre" />}
+        </span>
+        <span className="note">
+          {daily.streak > 0 ? `🔥 Série : ${daily.streak} j · ` : ""}nouvelles dans {duration(Math.max(0, daily.resetAt - now))}
+        </span>
+      </button>
+      {open && (
+        <>
+          <ul className="daily-list">
+            {daily.quests.map((q, i) => {
+              const ready = !q.claimed && q.progress >= q.goal;
+              return (
+                <li key={`${q.id}-${i}`} className={q.claimed ? "claimed" : ready ? "ready" : undefined}>
+                  <span className="daily-icon" aria-hidden>
+                    {q.claimed ? "✅" : q.icon}
+                  </span>
+                  <div className="daily-text">
+                    <div>{q.label}</div>
+                    {q.goal > 1 && !q.claimed && (
+                      <div className="bar bar-thin">
+                        <span style={{ width: `${Math.min(100, (q.progress / q.goal) * 100)}%` }} />
+                      </div>
+                    )}
+                    <div className="note num">
+                      {q.claimed ? "Récompense prise" : `${q.goal > 1 ? `${formatNumber(q.progress)} / ${formatNumber(q.goal)} · ` : ""}20 min de production`}
+                    </div>
+                  </div>
+                  {ready ? (
+                    <button className="btn btn-primary" disabled={busy !== null} onClick={() => void act(`c${i}`, "claim", i)}>
+                      Prendre
+                    </button>
+                  ) : !q.claimed && !daily.swapped ? (
+                    <button className="btn btn-ghost" disabled={busy !== null} onClick={() => void act(`s${i}`, "swap", i)} title="Une fois par jour">
+                      🔄
+                    </button>
+                  ) : null}
+                </li>
+              );
+            })}
+          </ul>
+          <div className={`daily-chest${chestReady ? " ready" : ""}`}>
+            <span>
+              🎁 Coffre : +{Math.round(daily.chestBonus * 100)} % de production pendant 4 h
+              {daily.chest ? (daily.boostUntil > now ? ` · encore ${duration(daily.boostUntil - now)}` : " · ouvert") : allClaimed ? "" : " · après les trois quêtes"}
+            </span>
+            {chestReady && (
+              <button className="btn btn-primary" disabled={busy !== null} onClick={() => void act("chest", "chest")}>
+                Ouvrir
+              </button>
+            )}
+          </div>
+        </>
+      )}
+    </div>
+  );
+}
+
 /** C1 : la veine d'or apparaît 12 secondes ; le serveur décide de l'heure et de ce qu'elle rapporte. */
 function Vein({ veinAt, now, run }: { veinAt: number; now: number; run: ReturnType<typeof useGame>["run"] }) {
   const [taken, setTaken] = useState(0);
@@ -551,6 +627,11 @@ function Hero({ snap, rate, clickGain, game }: { snap: GameSnapshot; rate: numbe
           {snap.state.masterBonus && snap.state.masterBonus.until > game.serverNow() && snap.state.masterBonus.from <= game.serverNow() && (
             <div className="catch-up">👑 Maître d&apos;œuvre : {MASTER_BONUSES[snap.state.masterBonus.kind].label} encore {duration(snap.state.masterBonus.until - game.serverNow())}</div>
           )}
+          {(snap.state.dailyBoostUntil ?? 0) > game.serverNow() && (
+            <div className="catch-up">
+              🎁 Coffre du jour : +{Math.round((snap.state.dailyBoost ?? 0) * 100)} % de production encore {duration((snap.state.dailyBoostUntil ?? 0) - game.serverNow())}
+            </div>
+          )}
           {(snap.state.frenzyUntil ?? 0) > game.serverNow() && (
             <div className="catch-up">✨ Frénésie : production doublée encore {Math.ceil((snap.state.frenzyUntil - game.serverNow()) / 1000)} s</div>
           )}
@@ -570,6 +651,7 @@ function Hero({ snap, rate, clickGain, game }: { snap: GameSnapshot; rate: numbe
           ))}
         </div>
       </div>
+      <DailyCard daily={snap.daily} now={game.serverNow()} run={game.run} />
       <Incoming snap={snap} now={game.serverNow()} />
       <EventBanner e={snap.event} now={game.serverNow()} stone={snap.state.stone} run={game.run} />
       <Status state={snap.state} now={game.serverNow()} />

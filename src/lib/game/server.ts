@@ -37,6 +37,9 @@ import {
   SIEGE_PRIZE_SECONDS,
   SIEGE_STAGE_LOSS,
   TOURNEY_PRIZES_SECONDS,
+  DAILY_QUESTS,
+  UPGRADES,
+  DAILY_STREAK_MAX,
   ONLINE_WINDOW_MS,
   UNITS,
   RED_MOON_RANSOM,
@@ -105,6 +108,7 @@ import {
 } from "./config";
 import { banditSpot, caravanPath, caravanPos, colossusPos, fixedPlaces, pickSpawn } from "./map";
 import { drawNextEvent, tourneyPodium } from "./events";
+import { chestBonus, claimDaily, dailyDay, dailyProgress, dailyStart, openChest, rollDaily, seedOf, swapDaily, type DailyContext, type DailyCounts, type DailyState } from "./daily";
 import {
   advance,
   applyClicks,
@@ -195,6 +199,7 @@ import {
   type FortressView,
   type WarView,
   type EventView,
+  type DailyView,
   type HallCategory,
   type SeasonHall,
   type Standing,
@@ -219,7 +224,7 @@ interface PlayerRow {
   upgrades: string[];
   total_produced: number;
   total_contributed: number;
-  military?: { levels?: Record<string, number>; research?: { id: string; endsAt: number }[] | { id: string; endsAt: number } | null; academy?: number; sabotageImmuneUntil?: number; ruinImmuneUntil?: number; elanUntil?: number; tithe?: number; titheOwed?: number; titheSet?: boolean; share?: StageShare | null; donorTiers?: number; curfew?: Curfew | null; seen?: PlayerState["seen"] | null; veinAt?: number; frenzyUntil?: number; quest?: number | null; questFlags?: string[]; wounded?: Record<string, number>; healAt?: number; marches?: unknown; boostProdUntil?: number; boostSafeUntil?: number; merchantEvent?: number } | null;
+  military?: { levels?: Record<string, number>; research?: { id: string; endsAt: number }[] | { id: string; endsAt: number } | null; academy?: number; sabotageImmuneUntil?: number; ruinImmuneUntil?: number; elanUntil?: number; tithe?: number; titheOwed?: number; titheSet?: boolean; share?: StageShare | null; donorTiers?: number; curfew?: Curfew | null; seen?: PlayerState["seen"] | null; veinAt?: number; frenzyUntil?: number; quest?: number | null; questFlags?: string[]; wounded?: Record<string, number>; healAt?: number; marches?: unknown; boostProdUntil?: number; boostSafeUntil?: number; merchantEvent?: number; daily?: unknown; dailyBoostUntil?: number; dailyBoost?: number } | null;
   total_clicks: number;
   last_update: string;
   last_click_at: string;
@@ -365,6 +370,9 @@ function toEntity(row: PlayerRow): Entity {
       boostProdUntil: Number(row.military?.boostProdUntil ?? 0) || 0,
       boostSafeUntil: Number(row.military?.boostSafeUntil ?? 0) || 0,
       merchantEvent: Number(row.military?.merchantEvent ?? 0) || 0,
+      daily: cleanDaily(row.military?.daily),
+      dailyBoostUntil: Number(row.military?.dailyBoostUntil ?? 0) || 0,
+      dailyBoost: Number(row.military?.dailyBoost ?? 0) || 0,
       eventMods: currentEventMods,
       ...(row.military?.seen ? { seen: { produced: Number(row.military.seen.produced ?? 0), contributed: Number(row.military.seen.contributed ?? 0), levels: armyCounts(row.military.seen.levels ?? {}, [...UNIT_IDS, ...DEFENSE_IDS]) } } : {}),
     },
@@ -394,7 +402,7 @@ function toJson(e: Entity, state: PlayerState, extra: Record<string, unknown> = 
     troops: state.troops,
     defenses: state.defenses,
     stationed: state.stationed,
-    military: { levels: state.levels, research: state.research, academy: state.academy, sabotageImmuneUntil: state.sabotageImmuneUntil, ruinImmuneUntil: state.ruinImmuneUntil, elanUntil: state.elanUntil, tithe: state.tithe, titheOwed: state.titheOwed, titheSet: state.titheSet, share: state.share, donorTiers: state.donorTiers, curfew: state.curfew, seen: state.seen ?? null, veinAt: state.veinAt, frenzyUntil: state.frenzyUntil, quest: state.quest, questFlags: state.questFlags, wounded: state.wounded, healAt: state.healAt, marches: state.marches ?? [], boostProdUntil: state.boostProdUntil, boostSafeUntil: state.boostSafeUntil, merchantEvent: state.merchantEvent },
+    military: { levels: state.levels, research: state.research, academy: state.academy, sabotageImmuneUntil: state.sabotageImmuneUntil, ruinImmuneUntil: state.ruinImmuneUntil, elanUntil: state.elanUntil, tithe: state.tithe, titheOwed: state.titheOwed, titheSet: state.titheSet, share: state.share, donorTiers: state.donorTiers, curfew: state.curfew, seen: state.seen ?? null, veinAt: state.veinAt, frenzyUntil: state.frenzyUntil, quest: state.quest, questFlags: state.questFlags, wounded: state.wounded, healAt: state.healAt, marches: state.marches ?? [], boostProdUntil: state.boostProdUntil, boostSafeUntil: state.boostSafeUntil, merchantEvent: state.merchantEvent, daily: state.daily ?? null, dailyBoostUntil: state.dailyBoostUntil, dailyBoost: state.dailyBoost },
     click_strikes: state.clickStrikes,
     click_paused_until: iso(state.clickPausedUntil),
     ...extra,
@@ -2102,7 +2110,10 @@ export async function runAction(admin: SupabaseClient, userId: string, action: G
     // La part de chantier de l'étape en cours s'ouvre la première fois qu'on voit le joueur pendant l'étape.
     const stageAtLoad = worksite.stage;
     const myLotShare = (lotsOf.get(entities) ?? []).find((l) => l.stage === worksite.stage && l.members[userId])?.members[userId]?.share;
-    const current = openShare(advance(me.state, now, world), worksite.stage, world, now, myLotShare);
+    const opened = openShare(advance(me.state, now, world), worksite.stage, world, now, myLotShare);
+    // Quêtes du jour : nouveau tirage à 4 h UTC.
+    const dailyCtx = dailyContextOf(me, opened, entities, worksite.stage);
+    const current: PlayerState = { ...opened, daily: rollDaily(opened.daily, now, seedOf(userId, dailyDay(now)), dailyCtx) };
     let finalState = current;
     let ecus = me.ecus;
     let away: AwaySummary | undefined;
@@ -2145,6 +2156,28 @@ export async function runAction(admin: SupabaseClient, userId: string, action: G
         entities = await loadEntities(admin, season.id, userId);
       }
       events = await loadEvent(admin, season.id, now, entities, world, flat);
+    } else if (action.type === "daily") {
+      const counts = await loadDailyCounts(admin, season.id, userId, now);
+      const op = String(action.op);
+      const index = Number(action.index);
+      const rate = currentRate(me, current, now, world, flat);
+      const r =
+        op === "claim"
+          ? claimDaily(current, index, counts, levelSum(current), rate)
+          : op === "swap"
+            ? swapDaily(current, index, seedOf(userId, dailyDay(now)), dailyCtx)
+            : op === "chest"
+              ? openChest(current, now)
+              : ({ ok: false, error: "Action inconnue." } as const);
+      if (!r.ok) error = r.error;
+      else {
+        finalState = "state" in r.value ? r.value.state : r.value;
+        if (op === "claim" && "reward" in r.value) message = `📜 Quête du jour accomplie : +${Math.floor(r.value.reward).toLocaleString("fr-FR")} pierres.`;
+        if (op === "chest" && "bonus" in r.value) message = `🎁 Coffre ouvert : +${Math.round(r.value.bonus * 100)} % de production pendant 4 heures.`;
+        if (op === "swap") message = "🔄 Quête échangée.";
+        const { data } = await admin.rpc("commit_state", { p_season: season.id, p_state: toJson(me, finalState, {}), p_touch: true, p_contribution: 0, p_stage_bases: stageSizes, p_active_window_days: ACTIVE_WINDOW_DAYS, p_action: `daily_${op}`, p_details: { index } });
+        if ((data as { conflict?: boolean } | null)?.conflict) continue;
+      }
     } else if (action.type === "tournament_join") {
       // V12 : l'armée du tournoi est fictive ; mes troupes ne bougent pas.
       const e = events.active;
@@ -2155,6 +2188,7 @@ export async function runAction(admin: SupabaseClient, userId: string, action: G
         const { error: rpcError } = await admin.rpc("apply_event_data", { p_season: season.id, p_states: [toJson(me, current, {})], p_event: e.id, p_version: e.version, p_data: { ...e.data, entries: { ...(e.data.entries ?? {}), [me.id]: entry.army } }, p_attackers: null });
         if (rpcError?.message.includes("beffroi_conflict")) continue;
         if (rpcError) throw new Error(`Inscription impossible : ${rpcError.message}`);
+        if (!again) await admin.from("action_log").insert({ user_id: me.id, season_id: season.id, action: "tournament_join", details: { event: e.id } });
         message = again ? "🏆 Ton armée de tournoi est modifiée." : "🏆 Tu es inscrit au tournoi. Résultats à la fin de l'heure.";
         entities = await loadEntities(admin, season.id, userId);
         events = await loadEvent(admin, season.id, now, entities, world, flat);
@@ -2384,13 +2418,14 @@ export async function runAction(admin: SupabaseClient, userId: string, action: G
     const meNow = entities.get(userId) ?? me;
     // Les dernières lectures partent ensemble (les noms d'alliance ne changent qu'avec une action d'alliance).
     const namesP = ALLIANCE_ACTIONS.has(action.type) || CONFLICT_ACTIONS.has(action.type) ? loadAllianceNames(admin, season.id) : Promise.resolve(allianceNames);
-    const [intel, names, info, chronicle, hall, positions] = await Promise.all([
+    const [intel, names, info, chronicle, hall, positions, dailyCounts] = await Promise.all([
       loadIntel(admin, season.id, userId, now),
       namesP,
       namesP.then((n) => allianceInfo(admin, season.id, meNow, finalState, entities, n)),
       wantsChronicle ? loadChronicle(admin, season.id, entities) : Promise.resolve(undefined),
       loadHall(admin),
       loadPositions(admin, season.id, entities),
+      loadDailyCounts(admin, season.id, userId, now),
     ]);
     const titles = titlesFrom(hall);
     allianceNames = names;
@@ -2415,6 +2450,7 @@ export async function runAction(admin: SupabaseClient, userId: string, action: G
       chronicle,
       map: mapView(positions),
       incoming: incomingFor(userId, entities, now),
+      daily: dailyView(finalState, dailyCounts, now),
     };
     return error ? { ok: false, error, snapshot } : { ok: true, snapshot, message };
   }
@@ -3087,3 +3123,56 @@ export async function getLeaderboards(admin: SupabaseClient, limit = 20): Promis
   };
 }
 
+
+// ---------------------------------------------------------------------------
+// Quêtes du jour
+// ---------------------------------------------------------------------------
+
+function cleanDaily(raw: unknown): DailyState | null {
+  const d = raw as Partial<DailyState> | null | undefined;
+  if (!d || typeof d !== "object" || !Number.isInteger(d.day) || !Array.isArray(d.quests)) return null;
+  const quests = d.quests
+    .filter((q) => DAILY_QUESTS.some((x) => x.id === q?.id))
+    .map((q) => ({ id: q.id, goal: Math.max(1, Number(q.goal) || 1), claimed: !!q.claimed }));
+  return { day: Number(d.day), quests, swapped: !!d.swapped, chest: !!d.chest, streak: Math.max(0, Number(d.streak) || 0), lastFull: Number.isInteger(d.lastFull) ? Number(d.lastFull) : null, levels: Number(d.levels) || 0 };
+}
+
+function levelSum(state: PlayerState): number {
+  return Object.values(state.levels ?? {}).reduce<number>((a, b) => a + (Number(b) || 0), 0);
+}
+
+function dailyContextOf(me: Entity, state: PlayerState, entities: Map<string, Entity>, stage: number): DailyContext {
+  return {
+    shareSize: stage < STAGES.length && state.share?.stage === stage ? state.share.size : null,
+    troops: armySize(attackArmy(state)),
+    allies: me.allianceId === null ? 0 : [...entities.values()].filter((e) => !e.isLord && e.id !== me.id && e.allianceId === me.allianceId).length,
+    upgradesLeft: UPGRADES.filter((u) => !state.upgrades.includes(u.id)).length,
+    levels: levelSum(state),
+  };
+}
+
+async function loadDailyCounts(admin: SupabaseClient, seasonId: number, userId: string, now: number): Promise<DailyCounts> {
+  const { data, error } = await admin.rpc("daily_counts", { p_season: seasonId, p_user: userId, p_since: iso(dailyStart(dailyDay(now))), p_lords: LORDS.map((l) => l.id) });
+  if (error || !data) return {};
+  return Object.fromEntries(Object.entries(data as Record<string, unknown>).map(([k, v]) => [k, Number(v) || 0])) as DailyCounts;
+}
+
+function dailyView(state: PlayerState, counts: DailyCounts, _now: number): DailyView | undefined {
+  const d = state.daily;
+  if (!d) return undefined;
+  const levels = levelSum(state);
+  const quests = d.quests.map((q) => {
+    const def = DAILY_QUESTS.find((x) => x.id === q.id)!;
+    return { id: q.id, icon: def.icon, label: q.id === "don" ? `Verse ${q.goal.toLocaleString("fr-FR")} pierres au chantier` : def.label, family: def.family, progress: dailyProgress(d, q, counts, levels), goal: q.goal, claimed: q.claimed };
+  });
+  const next = Math.min(DAILY_STREAK_MAX, d.lastFull === d.day - 1 ? d.streak + 1 : 1);
+  return {
+    quests,
+    swapped: d.swapped,
+    chest: d.chest,
+    streak: d.streak,
+    chestBonus: d.chest ? (state.dailyBoost ?? 0) : chestBonus(next),
+    boostUntil: state.dailyBoostUntil ?? 0,
+    resetAt: dailyStart(d.day + 1),
+  };
+}

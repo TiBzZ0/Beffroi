@@ -221,6 +221,30 @@ export const QUESTS = [
   { id: "push", label: "Active les notifications", goal: 1 },
 ] as const;
 export type QuestId = (typeof QUESTS)[number]["id"];
+/** Quêtes du jour : trois par jour (une par famille), tirées à 4 h UTC. Aucune ne demande d'attaquer un joueur. */
+export type DailyFamily = "batir" | "combattre" | "participer";
+export const DAILY_QUESTS = [
+  { id: "don", family: "batir", icon: "🧱", label: "Verse un quart de ta part de chantier" },
+  { id: "ateliers", family: "batir", icon: "🏭", label: "Achète 20 ateliers", goal: 20 },
+  { id: "savoir", family: "batir", icon: "📜", label: "Achète un savoir", goal: 1 },
+  { id: "seigneur", family: "combattre", icon: "🏰", label: "Gagne un raid contre un seigneur", goal: 1 },
+  { id: "repousser", family: "combattre", icon: "🛡️", label: "Repousse un raid", goal: 1 },
+  { id: "renforts", family: "combattre", icon: "🤝", label: "Envoie des renforts à un allié", goal: 1 },
+  { id: "recherche", family: "combattre", icon: "⚗️", label: "Termine une recherche", goal: 1 },
+  { id: "veines", family: "participer", icon: "✨", label: "Prends 5 veines d'or", goal: 5 },
+  { id: "evenement", family: "participer", icon: "🎪", label: "Prends part à un événement", goal: 1 },
+  { id: "message", family: "participer", icon: "💬", label: "Écris un message dans le chat", goal: 1 },
+] as const;
+export type DailyQuestId = (typeof DAILY_QUESTS)[number]["id"];
+export const DAILY_FAMILIES: readonly DailyFamily[] = ["batir", "combattre", "participer"];
+export const DAILY_RESET_HOUR_UTC = 4;
+/** Chaque quête rapporte 20 minutes de production ; les trois ouvrent un coffre de 4 h de production en plus. */
+export const DAILY_REWARD_SECONDS = 20 * 60;
+export const DAILY_CHEST_MS = 4 * 60 * 60 * 1000;
+/** Coffre : +10 % le premier jour, puis +2,5 % par jour complet d'affilée, +20 % au cinquième. */
+export const DAILY_CHEST_BASE = 0.1;
+export const DAILY_CHEST_STEP = 0.025;
+export const DAILY_STREAK_MAX = 5;
 /** Récompense d'une quête : 5 minutes de production, 100 pierres au moins ; la dernière donne aussi 5 écus. */
 export const QUEST_REWARD_SECONDS = 300;
 export const QUEST_MIN_REWARD = 100;

@@ -303,4 +303,13 @@ export const CHANGELOG: ChangeEntry[] = [
       "🧱 Les parts de chantier, les lots d'alliance et leurs paliers grandissent de la même façon pour ces deux étapes.",
     ],
   },
+  {
+    id: 37,
+    date: "11 novembre",
+    items: [
+      "📜 Nouveau : les quêtes du jour, en haut de l'écran principal. Chaque matin à 5 h (4 h UTC), trois petites quêtes : une pour bâtir, une pour combattre, une pour participer. Aucune ne demande d'attaquer un joueur.",
+      "⏳ Chaque quête accomplie rapporte 20 minutes de production. Tu peux échanger une quête par jour contre une autre de la même famille.",
+      "🎁 Les trois prises, le coffre s'ouvre : +10 % de production pendant 4 heures. Chaque jour complet d'affilée l'améliore, jusqu'à +20 % au cinquième. Un jour manqué fait redescendre d'un cran.",
+    ],
+  },
 ];

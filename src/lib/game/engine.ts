@@ -1,6 +1,7 @@
 // Moteur idle de Beffroi : fonctions pures, sans accès réseau ni base.
 // Le serveur s'en sert pour calculer l'état qui fait foi ; le navigateur pour animer le compteur.
 
+import type { DailyState } from "./daily";
 import {
   BURN_CLICK_REDUCTION_MS,
   BURN_MS,
@@ -208,6 +209,10 @@ export interface PlayerState {
   boostProdUntil?: number;
   boostSafeUntil?: number;
   merchantEvent?: number;
+  /** Quêtes du jour, et bonus du coffre (production en plus jusqu'à `dailyBoostUntil`). */
+  daily?: DailyState | null;
+  dailyBoostUntil?: number;
+  dailyBoost?: number;
 }
 
 /** V15 : secondes de stock à l'abri achetées au marchand. */
@@ -501,7 +506,8 @@ export function rateAt(state: PlayerState, world: WorldState, t: number, opts: A
   // V6 : la trêve des cloches profite à tous, seigneurs compris ; V15 : le bonus du marchand.
   const truce = eventActive(state, "treve", t) ? 1 + TRUCE_PRODUCTION : 1;
   const boost = !opts.flatRate && t < (state.boostProdUntil ?? 0) ? 1 + MERCHANT_PRODUCTION : 1;
-  return (t < state.burnedUntil ? base * BURN_PRODUCTION_FACTOR : base) * elan * frenzy * master * truce * boost;
+  const chest = !opts.flatRate && t < (state.dailyBoostUntil ?? 0) ? 1 + (state.dailyBoost ?? 0) : 1;
+  return (t < state.burnedUntil ? base * BURN_PRODUCTION_FACTOR : base) * elan * frenzy * master * truce * boost * chest;
 }
 
 /**
@@ -513,7 +519,7 @@ export function advance(state: PlayerState, now: number, world: WorldState, opts
   state = settleWounded(settleCurfew(settleResearch(state, now), now), now);
   if (now <= state.lastUpdate) return state;
   const start = Math.max(state.lastUpdate, now - OFFLINE_CAP_MS);
-  const events = [...world.stageCompletedAt, state.burnedUntil, state.elanUntil ?? 0, state.frenzyUntil ?? 0, state.masterBonus?.from ?? 0, state.masterBonus?.until ?? 0, state.boostProdUntil ?? 0, ...(state.eventMods ?? []).flatMap((e) => [e.from, e.until])];
+  const events = [...world.stageCompletedAt, state.burnedUntil, state.elanUntil ?? 0, state.frenzyUntil ?? 0, state.masterBonus?.from ?? 0, state.masterBonus?.until ?? 0, state.boostProdUntil ?? 0, state.dailyBoostUntil ?? 0, ...(state.eventMods ?? []).flatMap((e) => [e.from, e.until])];
   const breakpoints = events.filter((t) => t > start && t < now).sort((a, b) => a - b);
   let gain = 0;
   let tithed = 0;
