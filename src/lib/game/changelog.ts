@@ -349,4 +349,14 @@ export const CHANGELOG: ChangeEntry[] = [
       "🪙 Les prix calculés sur ta production (marchand, espion, saboteur, halle) se basent maintenant sur ta production de base. L'élan des clics, la frénésie, le coffre du jour et les autres coups de pouce passagers ne les font plus monter.",
     ],
   },
+  {
+    id: 42,
+    date: "11 novembre",
+    items: [
+      "🕵️ L'espionnage est refait. Nouvelle recherche « Espionnage » à la Forge, 10 niveaux. Seul compte l'écart entre ton niveau et celui de ta cible : il décide de ce que voit ton espion et de son risque d'être repéré.",
+      "👁️ Sans rapport d'espion, l'armée d'un autre joueur ne s'affiche plus qu'en ordre de grandeur (bien plus faible, comparable, plus forte, écrasante) et ta chance en un mot (favorable, incertaine, risquée). Même chose pour les seigneurs, sauf les faciles. Tes alliés restent à découvert.",
+      "🏇 L'espion voyage sur la carte (vite, une minute au moins) et son rapport arrive avec lui. Il dure 1 heure et profite à toute ton alliance. Selon l'écart, il montre l'armée, puis ses mouvements et ses renforts, puis le stock à piller, puis la Forge, les blessés et le couvre-feu.",
+      "🗼 Les tours d'archers ne repèrent plus les espions et ne gênent plus les saboteurs : c'est le niveau d'espionnage qui compte. Une armée qui approche dévoile le nom de son chef si ton niveau d'espionnage vaut au moins le sien.",
+    ],
+  },
 ];

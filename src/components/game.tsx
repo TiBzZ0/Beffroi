@@ -31,6 +31,7 @@ import {
   STAGES,
   UNITS,
   UPGRADES,
+  SPY_LEVEL_MAX,
   WINGS,
   type Category,
   type CombatantDef,
@@ -54,6 +55,9 @@ import {
   clickValue,
   generatorCost,
   generatorRate,
+  baseRate,
+  spyRisk,
+  spyTravelMs,
   armySpeedBonus,
   masteryBonus,
   nextTiers,
@@ -818,6 +822,35 @@ function TierLine({ live, id }: { live: PlayerState; id: GeneratorId }) {
   );
 }
 
+/** E1 : la recherche Espionnage, à la Forge. */
+function SpyResearchRow({ live, base, stagesDone, full, queued, run }: { live: PlayerState; base: number; stagesDone: number; full: boolean; queued: boolean; run: ReturnType<typeof useGame>["run"] }) {
+  const lv = live.spyLevel ?? 0;
+  const next = queuedLevel(live, "espionnage") + 1;
+  const cost = researchCost(live, "espionnage", base);
+  const maxed = next > SPY_LEVEL_MAX;
+  return (
+    <div className="row">
+      <div className="row-icon" aria-hidden>
+        🕵️
+      </div>
+      <div>
+        <div className="row-title">
+          Espionnage <span className="badge">niv. {lv}</span>
+        </div>
+        <div className="row-desc num">
+          Sert à espionner et à se protéger : seul compte l&apos;écart avec la cible.{maxed ? " Niveau maximal." : ` Niveau ${next} en ${duration(researchTime(live, "espionnage", stagesDone))}.`}
+        </div>
+      </div>
+      {!maxed && (
+        <button className="btn btn-primary" disabled={full || cost > live.stone} onClick={() => void run({ type: "research", id: "espionnage" })}>
+          {queued ? "En file" : "Améliorer"}
+          <span className="cost num">{formatNumber(cost)} 🪨</span>
+        </button>
+      )}
+    </div>
+  );
+}
+
 function Upgrades({ live, run }: { live: PlayerState; run: ReturnType<typeof useGame>["run"] }) {
   const available = UPGRADES.filter((u) => !live.upgrades.includes(u.id) && upgradeUnlocked(live, u)).sort((a, b) => a.cost - b.cost);
   const bought = UPGRADES.filter((u) => live.upgrades.includes(u.id));
@@ -1197,8 +1230,8 @@ function ResearchLine({ state, now }: { state: PlayerState; now: number }) {
       <h3>Améliorations en cours</h3>
       <ul className="num">
       {queue.map((r, i) => {
-        const def = COMBATANTS.get(r.id);
-        const level = levelOf(state, r.id) + (state.research ?? []).filter((q) => q.endsAt <= now && q.id === r.id).length + queue.slice(0, i + 1).filter((q) => q.id === r.id).length;
+        const def = r.id === "espionnage" ? SPY_RESEARCH : COMBATANTS.get(r.id);
+        const level = (r.id === "espionnage" ? (state.spyLevel ?? 0) : levelOf(state, r.id)) + (state.research ?? []).filter((q) => q.endsAt <= now && q.id === r.id).length + queue.slice(0, i + 1).filter((q) => q.id === r.id).length;
         return (
           <li key={`${r.id}-${r.endsAt}`}>
             {i === 0 ? "⏳" : "⌛"} {def?.icon} {def?.name} niv. {level} · {duration(r.endsAt - now)}
@@ -1254,11 +1287,12 @@ function Army({ snap, live, now, run }: { snap: GameSnapshot; live: PlayerState;
             riposte en face. Une partie des troupes perdues revient de l&apos;infirmerie au bout de 30 minutes.
           </p>
           <Marches snap={snap} now={now} run={run} />
+          <Spies snap={snap} live={live} now={now} />
           <Garrison live={live} run={run} />
           <CurfewCard live={live} now={now} run={run} />
         </>
       )}
-      {view === "forge" && <Forge live={live} now={now} run={run} stagesDone={stagesDoneAt(worldFrom(snap.worksite), now)} />}
+      {view === "forge" && <Forge live={live} now={now} run={run} stagesDone={stagesDoneAt(worldFrom(snap.worksite), now)} base={baseRate(live, worldFrom(snap.worksite), now)} />}
     </>
   );
 }
@@ -1313,9 +1347,10 @@ function Raids({ snap, live, now, run }: { snap: GameSnapshot; live: PlayerState
         <p className="note raid-intro">
           Un raid réussi vole 25 % (40 % en revanche) de la pierre non sécurisée (les 2 dernières heures de production sont à l&apos;abri, mais jamais plus
           de la moitié du stock), incendie les ateliers 30 min et ruine quelques bâtiments ; la victime reçoit 4 h de bouclier (10 min pour un seigneur) et un
-          droit de revanche (+50 % de dégâts). Les seigneurs difficiles ne frappent que ceux qui les ont attaqués. De loin, tu ne vois qu&apos;une estimation
-          (≈) des armées : un espion révèle l&apos;armée exacte pendant 1 h, mais il peut être repéré (surtout par les tours d&apos;archers). Ta garnison et
-          la Forge sont dans l&apos;onglet Armée.
+          droit de revanche (+50 % de dégâts). Les seigneurs difficiles ne frappent que ceux qui les ont attaqués. De loin, tu ne vois qu&apos;un ordre de grandeur
+          des armées et ta chance en un mot. Un espion part sur la route et rapporte ce qu&apos;il a vu pendant 1 h, à toute ton alliance : plus ton niveau
+          d&apos;espionnage dépasse celui de la cible, plus il en voit (armée, mouvements, stock, Forge) et moins il risque d&apos;être repéré. Ta garnison,
+          tes espions et la Forge sont dans l&apos;onglet Armée.
         </p>
       )}
       {view === "seigneurs" && (
@@ -1501,17 +1536,22 @@ function RivalRow({
         <div className="row-desc num">
           {r.temper ? `${r.temper} · ` : ""}
           {r.retaliateOnly ? "ne frappe qu'en représailles · " : ""}
-          {formatNumber(stone)} pierres · {formatRate(r.rate)}/s
+          {r.stoneKnown === false ? "stock inconnu" : `${formatNumber(stone)} pierres`} · {formatRate(r.rate)}/s
           {shielded ? ` · bouclier ${duration(r.shieldUntil - now)}` : ""}
           {r.burnedUntil > now ? " · 🔥" : ""}
         </div>
-        <div className="row-desc army-line num" title={intel ? "Armée exacte (rapport d'espion)" : "Estimation de loin : envoie un espion pour voir l'armée exacte"}>
-          {intel ? `🕵️ ${armyIcons(r.army)} (rapport encore ${duration(r.intelUntil - now)})` : `≈ ${armyIcons(r.army)}`}
+        <div className="row-desc army-line num" title={r.armyHint ? "Vue de loin : envoie un espion pour voir l'armée exacte" : "Armée exacte"}>
+          {r.armyHint
+            ? `Armée ${r.armyHint} que la tienne${intel ? " (ton espion n'a rien pu voir de plus)" : ""}`
+            : intel
+              ? `🕵️ ${armyIcons(r.army)} (rapport encore ${duration(r.intelUntil - now)})`
+              : armyIcons(r.army)}
         </div>
+        {intel && <SpyReport r={r} now={now} />}
         <div className="row-desc">
           {r.blocker ??
             [
-              loot > 0 ? `Butin estimé : ${formatNumber(loot)} pierres` : "Rien à piller pour l'instant",
+              r.stoneKnown === false ? "Butin inconnu (il faut un espion plus fort que sa garde)" : loot > 0 ? `Butin estimé : ${formatNumber(loot)} pierres` : "Rien à piller pour l'instant",
               (r.ransom ?? 0) > 0 ? `rançon ≈ ${formatNumber(r.ransom ?? 0)}` : null,
               (r.fairness ?? 1) < 1 ? `équité ×${(r.fairness ?? 1).toLocaleString("fr-FR", { maximumFractionDigits: 2 })} (cible plus petite)` : null,
             ]
@@ -1539,17 +1579,25 @@ function RivalRow({
       <div className="row-actions">
         <button className="btn btn-primary" disabled={blocked || busy !== null} onClick={() => (me ? setComposing(!composing) : onRaid(r.id))}>
           Raider
-          <span className="cost num">{r.chance < 0 ? "chance cachée 🌫️" : `${intel ? "" : "~"}${pct} % de succès`}</span>
+          <span className="cost num">{r.chance >= 0 ? `${pct} % de succès` : r.chanceWord ? `chance ${r.chanceWord}` : "chance cachée 🌫️"}</span>
         </button>
         {me && sim === null && r.chance >= 0 && (
           <button className="btn" onClick={() => setSim(1)} title="Joue une bataille pour de faux avec ton armée contre celle que tu vois en face.">
             🎲 Simuler
           </button>
         )}
-        {!intel && (
-          <button className="btn" disabled={busy !== null || myStone < spyPrice} onClick={() => onSpy(r.id)} title="Révèle l'armée exacte pendant 1 h. Il peut être repéré.">
+        {!r.allied && !(r.isLord && r.difficulty === 1) && (
+          <button
+            className="btn"
+            disabled={busy !== null || myStone < spyPrice}
+            onClick={() => onSpy(r.id)}
+            title="L'espion part sur la route ; son rapport dure 1 h et profite à ton alliance. Ce qu'il voit dépend de l'écart entre ton niveau d'espionnage et celui de la cible."
+          >
             🕵️ Espionner
-            <span className="cost num">{formatNumber(spyPrice)} 🪨</span>
+            <span className="cost num">
+              {formatNumber(spyPrice)} 🪨 · {Math.max(1, Math.round(spyTravelMs(distance ?? MAP_SPAWN_RADIUS) / 60_000))} min
+              {r.spyGap !== null && r.spyGap !== undefined ? ` · repéré ${Math.round(spyRisk(r.spyGap, distance ?? MAP_SPAWN_RADIUS) * 100)} %` : ""}
+            </span>
           </button>
         )}
         {r.sabotageBlocker !== undefined && (
@@ -1557,7 +1605,7 @@ function RivalRow({
             className="btn"
             disabled={busy !== null || r.sabotageBlocker !== null || myStone < sabotagePrice}
             onClick={() => onSabotage(r.id)}
-            title={r.sabotageBlocker ?? "Abat un niveau de son académie et retarde sa recherche. Les tours d'archers gênent le saboteur."}
+            title={r.sabotageBlocker ?? "Abat un niveau de son académie et retarde sa recherche. La réussite dépend de l'écart de niveau d'espionnage."}
           >
             🧨 Saboter
             <span className="cost num">{formatNumber(sabotagePrice)} 🪨</span>
@@ -1616,7 +1664,11 @@ function SendArmy({
       ))}
       {UNITS.every((u) => (have[u.id] ?? 0) === 0) && <p className="note">Toutes tes troupes sont en route ou à l&apos;infirmerie.</p>}
       <p className="note">
-        {r.chance < 0 ? "Chance cachée par le brouillard : envoie un espion." : `Chance estimée ${intel ? "" : "(sans espion, sur une estimation) "}: ${Math.round(chance * 100)} %.`} Les troupes envoyées ne défendent plus ton domaine pendant le trajet.
+        {r.chance < 0
+          ? r.chanceWord
+            ? `Chance ${r.chanceWord} (avec toute ton armée). Pour un pourcentage précis, envoie un espion.`
+            : "Chance cachée par le brouillard : envoie un espion."
+          : `Chance estimée : ${Math.round(chance * 100)} %.`} Les troupes envoyées ne défendent plus ton domaine pendant le trajet.
         {away > 0 ? ` Armées déjà en route : ${away}/${MAX_MARCHES}.` : ""}
       </p>
       <div className="qty">
@@ -1702,6 +1754,61 @@ function Incoming({ snap, now }: { snap: GameSnapshot; now: number }) {
   );
 }
 
+/** E7 : bloc Espionnage de l'onglet Armée : niveau, espions en route, espions surpris chez moi. */
+function Spies({ snap, live, now }: { snap: GameSnapshot; live: PlayerState; now: number }) {
+  const out = (live.spies ?? []).filter((sp) => sp.arriveAt > now);
+  const caught = (snap.chronicle ?? []).filter((e) => e.kind === "spy" && e.targetId === snap.userId).slice(0, 5);
+  const nameOf = (key: string) => (key === "fortress" ? snap.fortress.name : key.startsWith("hall:") ? "une halle" : (snap.rivals.find((r) => r.id === key)?.name ?? "?"));
+  return (
+    <div className="spies">
+      <h3 className="section-title">🕵️ Espionnage · niveau {live.spyLevel ?? 0}</h3>
+      {out.length === 0 ? (
+        <p className="note">Aucun espion en route. Envoie-en un depuis la fiche d&apos;une cible ; le niveau se monte à la Forge.</p>
+      ) : (
+        <ul className="num">
+          {out.map((sp) => (
+            <li key={sp.id}>
+              🕵️ vers {nameOf(sp.target)} : arrivée dans {duration(sp.arriveAt - now)}
+            </li>
+          ))}
+        </ul>
+      )}
+      {caught.length > 0 && (
+        <p className="note">
+          Surpris chez toi : {caught.map((e) => ((e.details as { named?: boolean }).named === false ? "un espion inconnu" : e.actorName)).join(", ")}.
+        </p>
+      )}
+    </div>
+  );
+}
+
+/** Ce que montre le rapport d'espion, selon l'écart de niveau (E4). */
+function SpyReport({ r, now }: { r: RivalView; now: number }) {
+  const gap = r.spyGap;
+  if (gap === null || gap === undefined) return null;
+  const lines: string[] = [];
+  lines.push(`Écart de niveau d'espionnage : ${gap > 0 ? "+" : ""}${gap}`);
+  if (r.moves) {
+    lines.push(r.moves.length ? `Armées dehors : ${r.moves.map((m) => `${armyIcons(m.troops, "?")} vers ${m.target}, ${m.status === "back" ? `retour dans ${duration(m.returnAt - now)}` : m.status === "camp" ? "postée" : `arrivée dans ${duration(m.arriveAt - now)}`}`).join(" ; ")}` : "Aucune armée dehors");
+    if (r.guests && Object.keys(r.guests).length) lines.push(`Renforts reçus : ${armyIcons(r.guests)}`);
+  }
+  if (r.stoneKnown && !r.isLord && r.shieldUntil > now) lines.push(`Bouclier encore ${duration(r.shieldUntil - now)}`);
+  if (r.levels) {
+    const lv = Object.entries(r.levels).filter(([, n]) => n > 0).map(([id, n]) => `${COMBATANTS.get(id as CombatantId)?.icon ?? id} ${n}`);
+    lines.push(`Forge : ${lv.length ? lv.join("  ") : "aucun niveau"} · espionnage ${r.spyLevel ?? 0}`);
+    if (r.researchQueue?.length) lines.push(`Recherches : ${r.researchQueue.map((q) => `${q.id === "espionnage" ? "🕵️" : (COMBATANTS.get(q.id as CombatantId)?.icon ?? q.id)} fin dans ${duration(q.endsAt - now)}`).join(", ")}`);
+    if (r.wounded && Object.keys(r.wounded).length && (r.healAt ?? 0) > now) lines.push(`Blessés : ${armyIcons(r.wounded)}, de retour dans ${duration((r.healAt ?? 0) - now)}`);
+    if (r.curfewStart !== null && r.curfewStart !== undefined) lines.push(`Couvre-feu de ${localTime(r.curfewStart)} à ${localTime((r.curfewStart + CURFEW_MINUTES) % 1440)}`);
+  }
+  return (
+    <div className="row-desc spy-report num">
+      {lines.map((l) => (
+        <div key={l}>🕵️ {l}</div>
+      ))}
+    </div>
+  );
+}
+
 /** B7 : simulateur avant l'attaque, une bataille pour de faux contre l'armée vue en face (rien n'est perdu). */
 function Simulator({ me, army, r, intel, seed, onReplay, onClose }: { me: PlayerState; army: Army; r: RivalView; intel: boolean; seed: number; onReplay: () => void; onClose: () => void }) {
   const attack = army;
@@ -1730,8 +1837,10 @@ function Simulator({ me, army, r, intel, seed, onReplay, onClose }: { me: Player
   );
 }
 
+const SPY_RESEARCH = { icon: "🕵️", name: "Espionnage" };
+
 /** Forge : académie militaire et améliorations des troupes et fortifications (une recherche à la fois). */
-function Forge({ live, now, run, stagesDone }: { live: PlayerState; now: number; run: ReturnType<typeof useGame>["run"]; stagesDone: number }) {
+function Forge({ live, now, run, stagesDone, base }: { live: PlayerState; now: number; run: ReturnType<typeof useGame>["run"]; stagesDone: number; base: number }) {
   // File de recherche : l'état local n'est pas encore « réglé », on ignore ce qui est déjà fini.
   const queue = live.research.filter((r) => r.endsAt > now);
   const full = queue.length >= RESEARCH_QUEUE_MAX;
@@ -1768,7 +1877,7 @@ function Forge({ live, now, run, stagesDone }: { live: PlayerState; now: number;
       <p className="note raid-intro">
         Chaque niveau donne +{Math.round(LEVEL_BONUS * 100)} % d&apos;attaque et de points de vie au type amélioré, en attaque comme en défense. Jusqu&apos;à 3
         recherches en file, et chaque niveau prend plus de temps que le précédent. L&apos;académie accélère les recherches, mais les rivaux peuvent la
-        saboter : les tours d&apos;archers gênent leurs saboteurs.
+        saboter : un bon niveau d&apos;espionnage les en dissuade.
       </p>
       <div className="row">
         <div className="row-icon" aria-hidden>
@@ -1788,6 +1897,7 @@ function Forge({ live, now, run, stagesDone }: { live: PlayerState; now: number;
           <span className="cost num">{formatNumber(academyPrice)} 🪨</span>
         </button>
       </div>
+      <SpyResearchRow live={live} base={base} stagesDone={stagesDone} full={full} queued={queue.length > 0} run={run} />
       <h3 className="section-title">
         File de recherche ({queue.length}/{RESEARCH_QUEUE_MAX})
       </h3>
@@ -1796,8 +1906,8 @@ function Forge({ live, now, run, stagesDone }: { live: PlayerState; now: number;
       ) : (
         <ol className="research-queue">
           {queue.map((r, i) => {
-            const def = COMBATANTS.get(r.id);
-            const level = levelOf(live, r.id) + queue.slice(0, i + 1).filter((q) => q.id === r.id).length;
+            const def = r.id === "espionnage" ? SPY_RESEARCH : COMBATANTS.get(r.id);
+            const level = (r.id === "espionnage" ? (live.spyLevel ?? 0) : levelOf(live, r.id)) + queue.slice(0, i + 1).filter((q) => q.id === r.id).length;
             return (
               <li key={`${r.id}-${r.endsAt}`}>
                 {i === 0 ? "⏳" : "⌛"} {def?.icon} {def?.name} niveau {level} : {i === 0 ? `encore ${duration(r.endsAt - now)}` : `fini dans ${duration(r.endsAt - now)}`}
@@ -2227,7 +2337,7 @@ function Fortress({ snap, live, now, run }: { snap: GameSnapshot; live: PlayerSt
               </span>
             </button>
             {!intel && (
-              <button className="btn" disabled={busy || live.stone < spyPrice} onClick={() => act({ type: "spy", target: "fortress" })} title="Révèle les défenses exactes pendant 1 h. Il peut être repéré.">
+              <button className="btn" disabled={busy || live.stone < spyPrice} onClick={() => act({ type: "spy", target: "fortress" })} title="L'espion part sur la route ; son rapport montre la garnison et les murs pendant 1 h. Il peut être repéré.">
                 🕵️ Espionner
                 <span className="cost num">{formatNumber(spyPrice)} 🪨</span>
               </button>
@@ -2663,7 +2773,9 @@ function Chronicle({ entries, me, now, rivals, alliances = [] }: { entries: Chro
               : `🧨 Un saboteur a frappé ${target}${e.targetId === me ? " : un niveau perdu et ta recherche retardée" : ""}.`
             : `🧨 ${who(e.actorId, e.actorName, true)} ${e.actorId === me ? "as été pris" : "a été pris"} en train de saboter ${target}.`;
         } else if (e.kind === "spy") {
-          text = `${who(e.actorId, e.actorName, true)} ${e.actorId === me ? "as été surpris" : "a été surpris"} à espionner ${e.details.fortress ? "la forteresse" : e.targetId === me ? "ton domaine" : e.targetName}.`;
+          const d = e.details as { fortress?: boolean; hall?: string };
+          const where = d.fortress ? "la forteresse" : d.hall ? d.hall : e.targetId === me ? "ton domaine" : e.targetName || "un seigneur";
+          text = e.actorId === me ? `🕵️ Ton espion a été surpris chez ${where}.` : `🕵️ ${e.actorId ? who(e.actorId, e.actorName, true) : "Un espion inconnu"} a été surpris à espionner ${where}.`;
         } else if (e.kind === "lot") {
           const d = e.details as { stage?: number; name?: string; master?: boolean };
           const stageName = STAGES[d.stage ?? 0]?.name ?? "l'étape";
@@ -2837,6 +2949,16 @@ function KingdomMap({ snap, live, now, run }: { snap: GameSnapshot; live: Player
               : Math.min(1, Math.max(0, (m.returnAt - now) / Math.max(1, m.arriveAt - m.departAt)));
         return [{ id: m.id, from: [mine[0], mine[1]], to: [target[0], target[1]], f, status: m.status }];
       });
+  // E7 : mes espions en route, comme de petites armées.
+  const spyMarches: BoardMarch[] = !mine
+    ? []
+    : (live.spies ?? []).flatMap((sp) => {
+        const to = sp.target === "fortress" ? map.fortress : sp.target.startsWith("hall:") ? map.halls?.find((h) => `hall:${h.id}` === sp.target)?.pos : map.places[sp.target];
+        if (!to || sp.arriveAt <= now) return [];
+        const f = Math.min(1, Math.max(0, (now - sp.departAt) / Math.max(1, sp.arriveAt - sp.departAt)));
+        return [{ id: `spy-${sp.id}`, from: [mine[0], mine[1]] as [number, number], to: [to[0], to[1]] as [number, number], f, status: "out" as const }];
+      });
+  marches.push(...spyMarches);
   const incoming = (snap.incoming ?? []).map((i) => {
     const from = i.from ? snap.rivals.find((r) => r.name === i.from) : undefined;
     const at = from ? map.places[from.id] : undefined;

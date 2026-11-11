@@ -13,7 +13,11 @@ import {
   fuzzyCount,
   generatorCost,
   spyCost,
-  spyDetectChance,
+  spyRisk,
+  spyTravelMs,
+  sabotageChance,
+  researchCost,
+  startResearch,
   newPlayerState,
   rebuildRuin,
   productionPerSecond,
@@ -314,10 +318,34 @@ describe("espions", () => {
     expect(fuzzyArmy({ milicien: 37, garde: 3 })).toEqual({ milicien: 40, garde: 3 });
   });
 
-  it("les tours d'archers repèrent les espions", () => {
-    expect(spyDetectChance({})).toBeCloseTo(0.3);
-    expect(spyDetectChance({ tour: 4 })).toBeCloseTo(0.5);
-    expect(spyDetectChance({ tour: 100 })).toBeCloseTo(0.9);
+  it("le risque d'être repéré dépend de l'écart de niveau et de la distance, plus des tours", () => {
+    expect(spyRisk(0, 0)).toBeCloseTo(0.5);
+    expect(spyRisk(2, 5)).toBeCloseTo(0.4);
+    expect(spyRisk(10, 0)).toBeCloseTo(0.05);
+    expect(spyRisk(-10, 10)).toBeCloseTo(0.95);
+    expect(sabotageChance(0)).toBeCloseTo(0.5);
+    expect(sabotageChance(-9)).toBeCloseTo(0.1);
+    expect(sabotageChance(3)).toBeCloseTo(0.8);
+  });
+
+  it("l'espion voyage vite, une minute au moins", () => {
+    expect(spyTravelMs(0)).toBeGreaterThanOrEqual(60_000);
+    expect(spyTravelMs(10)).toBeGreaterThan(spyTravelMs(2));
+  });
+
+  it("la recherche Espionnage monte de 1 à 10 et coûte 60 h de production en tout", () => {
+    let total = 0;
+    let s = { ...player(), stone: 1e15 };
+    for (let n = 1; n <= 10; n++) {
+      total += researchCost(s, "espionnage", 1);
+      const r = startResearch(s, "espionnage", NOW + n * 1e9, 0, 1);
+      if (!r.ok) throw new Error(r.error);
+      s = advance(r.value, NOW + (n + 1) * 1e9 - 1, world);
+    }
+    expect(s.spyLevel).toBe(10);
+    expect(total / 3600).toBeGreaterThan(59);
+    expect(total / 3600).toBeLessThan(62);
+    expect(startResearch(s, "espionnage", NOW + 2e10, 0, 1).ok).toBe(false);
   });
 
   it("un espion coûte une minute de production, 200 pierres au moins", () => {

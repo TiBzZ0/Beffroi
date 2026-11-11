@@ -48,6 +48,23 @@ export interface RivalView {
   allianceName: string | null;
   /** Rapport d'espion valable jusqu'à cet instant (0 = aucun : armée et chance sont alors floues). */
   intelUntil: number;
+  /** E1 : écart de niveau d'espionnage du meilleur rapport valable (le mien ou celui d'un allié), null sans rapport. */
+  spyGap?: number | null;
+  /** E2 : sans rapport, l'armée en ordre de grandeur et la chance en un mot (absente dans le brouillard). */
+  armyHint?: "bien plus faible" | "comparable" | "plus forte" | "écrasante";
+  chanceWord?: "favorable" | "incertaine" | "risquée";
+  /** Le stock exposé est connu (rapport +2, +1 pour un seigneur) : sinon pierre et butin valent 0. */
+  stoneKnown?: boolean;
+  /** Rapport +1 : armées parties et renforts reçus. */
+  moves?: { target: string; troops: Record<string, number>; status: "out" | "back" | "camp"; arriveAt: number; returnAt: number }[];
+  guests?: Record<string, number>;
+  /** Rapport +3 : Forge, recherches, blessés et couvre-feu. */
+  levels?: Record<string, number>;
+  spyLevel?: number;
+  researchQueue?: { id: string; endsAt: number }[];
+  wounded?: Record<string, number>;
+  healAt?: number;
+  curfewStart?: number | null;
   /** Armée qui défendrait le domaine (troupes, fortifications, gardes), et ta chance estimée de l'emporter. */
   army: Record<string, number>;
   chance: number;
@@ -204,7 +221,7 @@ export interface HallView {
     immuneUntil: number;
   } | null;
   /** Halles ennemies (en guerre) qu'on peut assiéger. */
-  targets: { id: number; name: string; wings: Partial<Record<string, number>>; chance: number; blocker: string | null; immuneUntil: number }[];
+  targets: { id: number; name: string; wings: Partial<Record<string, number>>; chance: number; blocker: string | null; immuneUntil: number; intelUntil: number }[];
   /** Ma loge qui attend d'être versée dans la halle de mon alliance. */
   dormantLodge: boolean;
 }

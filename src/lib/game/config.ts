@@ -474,9 +474,6 @@ export const SPY_COST_SECONDS = 60;
 /** Durée pendant laquelle un rapport montre l'armée exacte (et à jour) de la cible. */
 export const SPY_INTEL_MS = 60 * 60 * 1000;
 /** Risque que l'espion soit repéré : 30 %, +5 % par tour d'archers de la cible, 90 % au plus. */
-export const SPY_DETECT_BASE = 0.3;
-export const SPY_DETECT_PER_TOWER = 0.05;
-export const SPY_DETECT_MAX = 0.9;
 
 /**
  * Armée des seigneurs : valeur = valeur médiane des armées des joueurs × `power`
@@ -586,9 +583,11 @@ export const SABOTAGE_LEVEL_SHARE = 0.5;
 export const SABOTAGE_COST_SECONDS = 180;
 export const SABOTAGE_MIN_COST = 1_000;
 /** Réussite : 60 %, −5 % par tour d'archers de la cible, 10 % au moins. */
-export const SABOTAGE_BASE_SUCCESS = 0.6;
-export const SABOTAGE_PER_TOWER = 0.05;
+/** Refonte de l'espionnage (E4) : réussite 50 % + 10 % par niveau d'écart, entre 10 et 90 %. */
+export const SABOTAGE_BASE_SUCCESS = 0.5;
+export const SABOTAGE_PER_GAP = 0.1;
 export const SABOTAGE_MIN_SUCCESS = 0.1;
+export const SABOTAGE_MAX_SUCCESS = 0.9;
 /** Un sabotage réussi abat un niveau d'académie, retarde la recherche en cours de 20 % du temps restant, et protège la cible 1 h. */
 export const SABOTAGE_DELAY = 0.2;
 export const SABOTAGE_IMMUNITY_MS = 60 * 60 * 1000;
@@ -750,8 +749,6 @@ export const TRAVEL_MAX_MIN = 20;
 /** Trois armées en route au plus par joueur. */
 export const MAX_MARCHES = 3;
 /** T5 : chaque tour d'archers donne 5 % de chance de voir le nom de l'attaquant, 90 % au plus. */
-export const TOWER_REVEAL_CHANCE = 0.05;
-export const TOWER_REVEAL_MAX = 0.9;
 /** T6 : un seigneur vise de préférence un joueur à moins de 8 cases. */
 export const LORD_TARGET_RADIUS = 8;
 
@@ -805,3 +802,28 @@ export const WING_HEAL_MS = [30, 25, 20, 15].map((m) => m * 60_000);
 export const HALL_WALLS_SHARE = 0.1;
 export const HALL_WING_DOWN_MS = 24 * 3_600_000;
 export const HALL_SIEGE_IMMUNITY_MS = 24 * 3_600_000;
+
+// ---------------------------------------------------------------------------
+// Espionnage (E1 à E3)
+// ---------------------------------------------------------------------------
+
+/** Recherche « Espionnage » : 10 niveaux, le niveau n coûte 20 min de production de base × 1,6^(n−1). */
+export const SPY_LEVEL_MAX = 10;
+export const SPY_LEVEL_SECONDS = 20 * 60;
+export const SPY_LEVEL_GROWTH = 1.6;
+/** Niveau des seigneurs selon leur difficulté (1 facile à 4 redoutable). */
+export const LORD_SPY_LEVEL: Record<1 | 2 | 3 | 4, number> = { 1: 0, 2: 2, 3: 4, 4: 6 };
+/** L'espion voyage comme une armée de vitesse 3, aller simple, 1 minute au moins ; 3 en route au plus. */
+export const SPY_SPEED = 3;
+export const SPY_MIN_MS = 60_000;
+export const SPY_MAX_ACTIVE = 3;
+/** Risque d'être repéré : 50 % − 10 % par niveau d'écart + 2 % par case, entre 5 et 95 %. */
+export const SPY_RISK_BASE = 0.5;
+export const SPY_RISK_PER_GAP = 0.1;
+export const SPY_RISK_PER_CELL = 0.02;
+export const SPY_RISK_MIN = 0.05;
+export const SPY_RISK_MAX = 0.95;
+/** E5 : trois espions repérés chez la même cible en 24 h, et ils n'y entrent plus pendant 6 h. */
+export const SPY_BAN_COUNT = 3;
+export const SPY_BAN_WINDOW_MS = 24 * 3_600_000;
+export const SPY_BAN_MS = 6 * 3_600_000;

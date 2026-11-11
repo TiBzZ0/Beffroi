@@ -58,7 +58,18 @@ import {
   RESEARCH_QUEUE_MAX,
   SABOTAGE_LEVEL_SHARE,
   SABOTAGE_BASE_SUCCESS,
-  SABOTAGE_PER_TOWER,
+  SABOTAGE_PER_GAP,
+  SABOTAGE_MAX_SUCCESS,
+  SPY_LEVEL_GROWTH,
+  SPY_LEVEL_MAX,
+  SPY_LEVEL_SECONDS,
+  SPY_MIN_MS,
+  SPY_RISK_BASE,
+  SPY_RISK_MAX,
+  SPY_RISK_MIN,
+  SPY_RISK_PER_CELL,
+  SPY_RISK_PER_GAP,
+  SPY_SPEED,
   SABOTAGE_MIN_SUCCESS,
   SABOTAGE_DELAY,
   SABOTAGE_IMMUNITY_MS,
@@ -75,9 +86,6 @@ import {
   RUIN_REBUILD_FACTOR,
   SECURED_SECONDS,
   SPY_COST_SECONDS,
-  SPY_DETECT_BASE,
-  SPY_DETECT_MAX,
-  SPY_DETECT_PER_TOWER,
   SPY_MIN_COST,
   MIN_EXPOSED_SHARE,
   SHIELD_MS,
@@ -174,7 +182,11 @@ export interface PlayerState {
   /** Améliorations militaires : niveau de chaque type, recherche en cours, académie. */
   levels: Levels;
   /** File de recherches (3 au plus), dans l'ordre ; chacune a son heure de fin. */
-  research: { id: CombatantId; endsAt: number }[];
+  research: { id: ResearchId; endsAt: number }[];
+  /** E1 : niveau d'espionnage (0 à 10). */
+  spyLevel?: number;
+  /** E3 : espions en route (aller simple). */
+  spies?: SpyMission[];
   academy: number;
   /** Protégé des sabotages jusqu'à cet horodatage. */
   sabotageImmuneUntil: number;
@@ -230,6 +242,30 @@ export interface PlayerState {
   hall?: Wings;
   /** Part de la dîme qui va à la halle (0 à 0,5). */
   hallTithe?: number;
+}
+
+/** Une recherche de la Forge : un type de troupe ou de fortification, ou l'espionnage. */
+export type ResearchId = CombatantId | "espionnage";
+
+/** E3 : un espion en route vers sa cible (joueur, seigneur, « fortress » ou « hall:<id> »). */
+export interface SpyMission {
+  id: string;
+  kind: "recon";
+  target: string;
+  departAt: number;
+  arriveAt: number;
+  /** Distance en cases, pour le risque d'être repéré. */
+  distance: number;
+}
+
+/** E3 : durée du trajet d'un espion (vitesse 3, 1 minute au moins). */
+export function spyTravelMs(distance: number): number {
+  return Math.max(SPY_MIN_MS, Math.round((TRAVEL_BASE_MIN + (TRAVEL_PER_CELL_MIN * distance) / SPY_SPEED) * 60_000));
+}
+
+/** E3 : risque d'être repéré pour un écart de niveau `gap` et une distance en cases. */
+export function spyRisk(gap: number, distance: number): number {
+  return Math.min(SPY_RISK_MAX, Math.max(SPY_RISK_MIN, SPY_RISK_BASE - SPY_RISK_PER_GAP * gap + SPY_RISK_PER_CELL * distance));
 }
 
 /** V15 : secondes de stock à l'abri achetées au marchand. */
@@ -1324,10 +1360,6 @@ export function spyCost(state: PlayerState, world: WorldState, now: number): num
   return Math.max(SPY_MIN_COST, Math.ceil(baseRate(state, world, now) * SPY_COST_SECONDS * fog));
 }
 
-/** Risque que l'espion soit repéré, selon les tours d'archers de la cible. */
-export function spyDetectChance(defense: Army): number {
-  return Math.min(SPY_DETECT_MAX, SPY_DETECT_BASE + SPY_DETECT_PER_TOWER * (defense.tour ?? 0));
-}
 
 /** Nombre vu de loin : 5 près pour les petites troupes, un seul chiffre significatif ensuite. */
 export function fuzzyCount(n: number): number {
@@ -1358,24 +1390,30 @@ export function settleResearch(state: PlayerState, now: number): PlayerState {
   if (queue.length === 0 || queue[0].endsAt > now) return state;
   const levels = { ...state.levels };
   const rest: PlayerState["research"] = [];
+  let spyLevel = state.spyLevel ?? 0;
   for (const r of queue) {
-    if (r.endsAt <= now && rest.length === 0) levels[r.id] = (levels[r.id] ?? 0) + 1;
-    else rest.push(r);
+    if (r.endsAt <= now && rest.length === 0) {
+      if (r.id === "espionnage") spyLevel = Math.min(SPY_LEVEL_MAX, spyLevel + 1);
+      else levels[r.id] = (levels[r.id] ?? 0) + 1;
+    } else rest.push(r);
   }
-  return { ...state, research: rest, levels };
+  return { ...state, research: rest, levels, spyLevel };
 }
 
 /** Niveau qu'aura ce type une fois la file terminée (c'est ce niveau-là qu'une nouvelle recherche améliore). */
-export function queuedLevel(state: PlayerState, id: CombatantId): number {
-  return levelOf(state, id) + (state.research ?? []).filter((r) => r.id === id).length;
+export function queuedLevel(state: PlayerState, id: ResearchId): number {
+  const done = id === "espionnage" ? (state.spyLevel ?? 0) : levelOf(state, id);
+  return done + (state.research ?? []).filter((r) => r.id === id).length;
 }
 
-export function researchCost(state: PlayerState, id: CombatantId): number {
+/** Prix d'une recherche ; l'espionnage se paie en minutes de production de base (`base`, par seconde). */
+export function researchCost(state: PlayerState, id: ResearchId, base = 0): number {
+  if (id === "espionnage") return Math.max(1, Math.ceil(SPY_LEVEL_SECONDS * base * SPY_LEVEL_GROWTH ** queuedLevel(state, id)));
   const def = COMBATANTS.get(id);
   return Math.ceil((def?.cost ?? 0) * RESEARCH_COST_FACTOR * RESEARCH_COST_GROWTH ** queuedLevel(state, id));
 }
 
-export function researchTime(state: PlayerState, id: CombatantId, stagesDone = 0): number {
+export function researchTime(state: PlayerState, id: ResearchId, stagesDone = 0): number {
   return Math.ceil((RESEARCH_BASE_MS * RESEARCH_TIME_GROWTH ** queuedLevel(state, id)) / (1 + ACADEMY_SPEED * (state.academy ?? 0)) / (1 + stagePerk(stagesDone, "researchSpeed")));
 }
 
@@ -1383,15 +1421,18 @@ export function researchTime(state: PlayerState, id: CombatantId, stagesDone = 0
 export const RESEARCHABLE: readonly CombatantId[] = [...UNIT_IDS, ...DEFENSE_IDS];
 
 /** Ajoute une recherche en bout de file : elle commence quand la précédente se termine. */
-export function startResearch(state: PlayerState, id: string, now: number, stagesDone = 0): Result<PlayerState> {
-  if (!RESEARCHABLE.includes(id as CombatantId)) return { ok: false, error: "Amélioration inconnue." };
+export function startResearch(state: PlayerState, id: string, now: number, stagesDone = 0, base = 0): Result<PlayerState> {
+  const spy = id === "espionnage";
+  if (!spy && !RESEARCHABLE.includes(id as CombatantId)) return { ok: false, error: "Amélioration inconnue." };
   const s = settleResearch(state, now);
   const queue = s.research ?? [];
   if (queue.length >= RESEARCH_QUEUE_MAX) return { ok: false, error: `La file de recherche est pleine (${RESEARCH_QUEUE_MAX} au plus).` };
-  const cost = researchCost(s, id as CombatantId);
+  if (spy && queuedLevel(s, "espionnage") >= SPY_LEVEL_MAX) return { ok: false, error: `L'espionnage est déjà au niveau ${SPY_LEVEL_MAX}.` };
+  const rid = id as ResearchId;
+  const cost = researchCost(s, rid, base);
   if (cost > s.stone) return { ok: false, error: "Pas assez de pierre." };
   const start = Math.max(now, queue[queue.length - 1]?.endsAt ?? now);
-  return { ok: true, value: { ...s, stone: s.stone - cost, research: [...queue, { id: id as CombatantId, endsAt: start + researchTime(s, id as CombatantId, stagesDone) }] } };
+  return { ok: true, value: { ...s, stone: s.stone - cost, research: [...queue, { id: rid, endsAt: start + researchTime(s, rid, stagesDone) }] } };
 }
 
 export function academyCost(state: PlayerState): number {
@@ -1414,8 +1455,9 @@ export function sabotageCost(saboteur: PlayerState, target: PlayerState, world: 
   return Math.max(SABOTAGE_MIN_COST, Math.ceil(baseRate(saboteur, world, now) * SABOTAGE_COST_SECONDS), Math.ceil(levelPrice * SABOTAGE_LEVEL_SHARE));
 }
 
-export function sabotageChance(defense: Army): number {
-  return Math.max(SABOTAGE_MIN_SUCCESS, SABOTAGE_BASE_SUCCESS - SABOTAGE_PER_TOWER * (defense.tour ?? 0));
+/** E4 : réussite d'un sabotage selon l'écart de niveau d'espionnage (les tours ne comptent plus). */
+export function sabotageChance(gap: number): number {
+  return Math.min(SABOTAGE_MAX_SUCCESS, Math.max(SABOTAGE_MIN_SUCCESS, SABOTAGE_BASE_SUCCESS + SABOTAGE_PER_GAP * gap));
 }
 
 /** Pourquoi on ne peut pas saboter cette cible, ou null. */

@@ -46,8 +46,11 @@ import {
   WOUNDED_DEFENDER_BEATEN,
   MAX_MARCHES,
   LORD_TARGET_RADIUS,
-  TOWER_REVEAL_CHANCE,
-  TOWER_REVEAL_MAX,
+  SPY_BAN_COUNT,
+  SPY_BAN_MS,
+  SPY_BAN_WINDOW_MS,
+  SPY_MAX_ACTIVE,
+  LORD_SPY_LEVEL,
   FEAST_GIFT_FACTOR,
   MERCHANT_OFFERS,
   type EventKind,
@@ -136,7 +139,10 @@ import {
   splitTroopLosses,
   recallReinforcements,
   sendReinforcements,
-  spyDetectChance,
+  spyRisk,
+  spyTravelMs,
+  type SpyMission,
+  type ResearchId,
 
   productionPerSecond,
   catchUpBonus,
@@ -239,7 +245,7 @@ interface PlayerRow {
   upgrades: string[];
   total_produced: number;
   total_contributed: number;
-  military?: { levels?: Record<string, number>; research?: { id: string; endsAt: number }[] | { id: string; endsAt: number } | null; academy?: number; sabotageImmuneUntil?: number; ruinImmuneUntil?: number; elanUntil?: number; tithe?: number; titheOwed?: number; titheSet?: boolean; share?: StageShare | null; donorTiers?: number; curfew?: Curfew | null; seen?: PlayerState["seen"] | null; veinAt?: number; frenzyUntil?: number; quest?: number | null; questFlags?: string[]; wounded?: Record<string, number>; healAt?: number; marches?: unknown; boostProdUntil?: number; boostSafeUntil?: number; merchantEvent?: number; daily?: unknown; dailyBoostUntil?: number; dailyBoost?: number; hallTithe?: number } | null;
+  military?: { levels?: Record<string, number>; research?: { id: string; endsAt: number }[] | { id: string; endsAt: number } | null; academy?: number; sabotageImmuneUntil?: number; ruinImmuneUntil?: number; elanUntil?: number; tithe?: number; titheOwed?: number; titheSet?: boolean; share?: StageShare | null; donorTiers?: number; curfew?: Curfew | null; seen?: PlayerState["seen"] | null; veinAt?: number; frenzyUntil?: number; quest?: number | null; questFlags?: string[]; wounded?: Record<string, number>; healAt?: number; marches?: unknown; boostProdUntil?: number; boostSafeUntil?: number; merchantEvent?: number; daily?: unknown; dailyBoostUntil?: number; dailyBoost?: number; hallTithe?: number; spyLevel?: number; spies?: unknown } | null;
   total_clicks: number;
   last_update: string;
   last_click_at: string;
@@ -362,7 +368,9 @@ function toEntity(row: PlayerRow): Entity {
       ),
       levels: armyCounts(row.military?.levels ?? {}, [...UNIT_IDS, ...DEFENSE_IDS]),
       // Anciennes lignes : une seule recherche (objet) au lieu d'une file.
-      research: [row.military?.research ?? []].flat().map((r) => ({ id: r.id as CombatantId, endsAt: Number(r.endsAt) })),
+      research: [row.military?.research ?? []].flat().map((r) => ({ id: r.id as ResearchId, endsAt: Number(r.endsAt) })),
+      spyLevel: Math.max(0, Math.floor(Number(row.military?.spyLevel ?? 0) || 0)),
+      spies: cleanSpies(row.military?.spies),
       academy: Number(row.military?.academy ?? 0),
       sabotageImmuneUntil: Number(row.military?.sabotageImmuneUntil ?? 0),
       ruinImmuneUntil: Number(row.military?.ruinImmuneUntil ?? 0),
@@ -418,7 +426,7 @@ function toJson(e: Entity, state: PlayerState, extra: Record<string, unknown> = 
     troops: state.troops,
     defenses: state.defenses,
     stationed: state.stationed,
-    military: { levels: state.levels, research: state.research, academy: state.academy, sabotageImmuneUntil: state.sabotageImmuneUntil, ruinImmuneUntil: state.ruinImmuneUntil, elanUntil: state.elanUntil, tithe: state.tithe, titheOwed: state.titheOwed, titheSet: state.titheSet, share: state.share, donorTiers: state.donorTiers, curfew: state.curfew, seen: state.seen ?? null, veinAt: state.veinAt, frenzyUntil: state.frenzyUntil, quest: state.quest, questFlags: state.questFlags, wounded: state.wounded, healAt: state.healAt, marches: state.marches ?? [], boostProdUntil: state.boostProdUntil, boostSafeUntil: state.boostSafeUntil, merchantEvent: state.merchantEvent, daily: state.daily ?? null, dailyBoostUntil: state.dailyBoostUntil, dailyBoost: state.dailyBoost, hallTithe: state.hallTithe },
+    military: { levels: state.levels, research: state.research, academy: state.academy, sabotageImmuneUntil: state.sabotageImmuneUntil, ruinImmuneUntil: state.ruinImmuneUntil, elanUntil: state.elanUntil, tithe: state.tithe, titheOwed: state.titheOwed, titheSet: state.titheSet, share: state.share, donorTiers: state.donorTiers, curfew: state.curfew, seen: state.seen ?? null, veinAt: state.veinAt, frenzyUntil: state.frenzyUntil, quest: state.quest, questFlags: state.questFlags, wounded: state.wounded, healAt: state.healAt, marches: state.marches ?? [], boostProdUntil: state.boostProdUntil, boostSafeUntil: state.boostSafeUntil, merchantEvent: state.merchantEvent, daily: state.daily ?? null, dailyBoostUntil: state.dailyBoostUntil, dailyBoost: state.dailyBoost, hallTithe: state.hallTithe, spyLevel: state.spyLevel ?? 0, spies: state.spies ?? [] },
     click_strikes: state.clickStrikes,
     click_paused_until: iso(state.clickPausedUntil),
     ...extra,
@@ -938,7 +946,6 @@ async function tickLords(admin: SupabaseClient, season: SeasonView, entities: Ma
           const from = home;
           const to = positions.get(pick.e.id);
           const outMs = travelMs({ milicien: 1 }, from && to ? mapDistance(from, to) : MAP_SPAWN_RADIUS);
-          const towers = Number((pick.s.defenses as Record<string, number>).tour ?? 0);
           const march: March = {
             id: `${now.toString(36)}${Math.floor(Math.random() * 1e6).toString(36)}`,
             kind: "raid",
@@ -948,7 +955,8 @@ async function tickLords(admin: SupabaseClient, season: SeasonView, entities: Ma
             arriveAt: now + outMs,
             status: "out",
             returnAt: 0,
-            revealed: Math.random() < Math.min(TOWER_REVEAL_MAX, TOWER_REVEAL_CHANCE * towers),
+            // E6 : le défenseur voit le nom s'il a un niveau d'espionnage au moins égal à celui du seigneur.
+            revealed: wingLevel(pick.s.hall, "guet") >= 2 || spyLevelOf(pick.e) >= spyLevelOf(me),
             warned: false,
             loot: 0,
             ransom: 0,
@@ -977,7 +985,7 @@ async function recentAttackers(admin: SupabaseClient, seasonId: number, lordId: 
   return new Set((data ?? []).map((r) => r.actor_id as string));
 }
 
-async function loadChronicle(admin: SupabaseClient, seasonId: number, entities: Map<string, Entity>): Promise<ChronicleEntry[]> {
+async function loadChronicle(admin: SupabaseClient, seasonId: number, entities: Map<string, Entity>, viewer = ""): Promise<ChronicleEntry[]> {
   const { data } = await admin
     .from("chronicle")
     .select("id, kind, actor_id, target_id, details, created_at")
@@ -985,12 +993,14 @@ async function loadChronicle(admin: SupabaseClient, seasonId: number, entities: 
     .order("created_at", { ascending: false })
     .limit(40);
   const name = (id: string | null) => (id ? (entities.get(id)?.name ?? "Un inconnu") : "");
+  // E5 : un espion surpris sans être reconnu reste anonyme, sauf pour son maître.
+  const hidden = (r: { kind: unknown; actor_id: unknown; details: unknown }) => r.kind === "spy" && (r.details as { named?: boolean } | null)?.named === false && r.actor_id !== viewer;
   return (data ?? []).map((r) => ({
     id: Number(r.id),
     at: Date.parse(r.created_at as string),
     kind: r.kind as ChronicleEntry["kind"],
-    actorId: r.actor_id as string | null,
-    actorName: name(r.actor_id as string | null),
+    actorId: hidden(r) ? null : (r.actor_id as string | null),
+    actorName: hidden(r) ? "Un espion inconnu" : name(r.actor_id as string | null),
     targetId: r.target_id as string | null,
     targetName: name(r.target_id as string | null),
     details: (r.details ?? {}) as ChronicleEntry["details"],
@@ -1000,22 +1010,6 @@ async function loadChronicle(admin: SupabaseClient, seasonId: number, entities: 
 /** Clé des rapports d'espion portant sur la forteresse. */
 const FORTRESS_INTEL = "fortress";
 
-/** Rapports d'espion encore valables : cible → fin de validité. */
-async function loadIntel(admin: SupabaseClient, seasonId: number, spyId: string, now: number): Promise<Map<string, number>> {
-  const { data } = await admin
-    .from("spy_reports")
-    .select("target_id, expires_at")
-    .eq("season_id", seasonId)
-    .eq("spy_id", spyId)
-    .gt("expires_at", iso(now));
-  const out = new Map<string, number>();
-  for (const r of data ?? []) {
-    // Sans cible : rapport sur la forteresse.
-    const key = (r.target_id as string | null) ?? FORTRESS_INTEL;
-    out.set(key, Math.max(out.get(key) ?? 0, ms(r.expires_at as string)));
-  }
-  return out;
-}
 
 // ---------------------------------------------------------------------------
 // Guerres d'alliances et forteresse
@@ -1859,7 +1853,7 @@ function rivalsFor(
   world: WorldState,
   flat: Map<string, number>,
   now: number,
-  intel: Map<string, number>,
+  intel: Map<string, Intel>,
   allianceNames: Map<number, string>,
   wars: WarRow[],
 ): RivalView[] {
@@ -1887,15 +1881,38 @@ function rivalsFor(
         relativeSize: e.isLord ? undefined : relativeSize(sizeOf(s, rate), mySize),
       };
       const fight = raidArmies(myState, s, ctx);
-      const intelUntil = intel.get(e.id) ?? 0;
-      const seen = intelUntil > now || allied ? fight.defense : fuzzyArmy(fight.defense);
+      // E2 : sans rapport, l'armée n'est qu'un ordre de grandeur. Alliés et seigneurs faciles restent à découvert.
+      const report = intel.get(e.id);
+      const intelUntil = report && report.until > now ? report.until : 0;
+      const open = allied || (e.isLord && e.lord?.difficulty === 1);
+      const gap = open ? Infinity : intelUntil > 0 ? report!.gap : -Infinity;
+      const seesArmy = gap >= -1;
+      const seesStock = e.isLord ? gap >= 1 : gap >= 2;
+      const seesMoves = !e.isLord && !allied && gap >= 1;
+      const seesInner = !e.isLord && !allied && gap >= 3;
+      const seen = seesArmy ? fight.defense : {};
       const fair = e.isLord ? 1 : fairness(ctx.relativeSize, revenge);
       const loot = lootOf(s.stone, rate, revenge, { lord: e.isLord, cap: e.isLord ? undefined : myRate * PVP_LOOT_CAP_SECONDS, factor: fair, stagesDone: stagesDoneAt(world, now), extraSecured: extraSecured(s, now) });
-      // Rançon attendue en cas de victoire : la défense qu'on voit, abattue.
-      const ransom = e.isLord ? 0 : ransomOf(seen as Army, fair);
+      // Rançon attendue en cas de victoire : la défense, abattue.
+      const ransom = e.isLord || !seesStock ? 0 : ransomOf(fight.defense as Army, fair);
+      const exact = estimateChance(fight.attack, fight.defense, fight.opts);
+      const fog = eventActive(myState, "brouillard", now);
+      const names = (key: string) => (key === "fortress" ? FORTRESS_NAME : key.startsWith("hall:") ? "une halle" : key.includes(":") ? "un événement" : (entities.get(key)?.name ?? "?"));
       return {
         ransom,
         fairness: fair,
+        ...(open ? {} : { spyGap: intelUntil > 0 ? report!.gap : null }),
+        ...(seesArmy ? {} : { armyHint: armyHint(fight.defense, fight.attack), ...(fog ? {} : { chanceWord: chanceWord(exact) }) }),
+        stoneKnown: seesStock,
+        ...(seesMoves
+          ? {
+              moves: (s.marches ?? []).map((m) => ({ target: names(m.target), troops: m.troops as Record<string, number>, status: m.status, arriveAt: m.arriveAt, returnAt: m.returnAt })),
+              guests: troopsHere({ ...s, troops: {} }) as Record<string, number>,
+            }
+          : {}),
+        ...(seesInner
+          ? { levels: s.levels as Record<string, number>, spyLevel: s.spyLevel ?? 0, researchQueue: s.research.map((r) => ({ id: r.id, endsAt: r.endsAt })), wounded: (s.wounded ?? {}) as Record<string, number>, healAt: s.healAt, curfewStart: s.curfew?.start ?? null }
+          : {}),
         lootCap: e.isLord ? undefined : myRate * PVP_LOOT_CAP_SECONDS,
         lootSafe: extraSecured(s, now) || undefined,
         id: e.id,
@@ -1905,17 +1922,17 @@ function rivalsFor(
         temper: e.lord?.temper,
         difficulty: e.lord?.difficulty,
         retaliateOnly: e.lord?.retaliateOnly,
-        stone: s.stone,
+        stone: seesStock ? s.stone : 0,
         stoneAt: now,
         rate,
-        loot,
+        loot: seesStock ? loot : 0,
         intelUntil,
         allied,
         atWar,
         allianceName: e.allianceId !== null ? (allianceNames.get(e.allianceId) ?? null) : null,
         army: seen as Record<string, number>,
-        // V14 : dans le brouillard, pas de chance affichée sans espion (-1).
-        chance: !(intelUntil > now || allied) && eventActive(myState, "brouillard", now) ? -1 : vagueChance(estimateChance(fight.attack, fight.defense, fight.opts), intelUntil > now || allied),
+        // E2 : sans rapport qui montre l'armée, la chance n'est qu'un mot (-1 ici).
+        chance: seesArmy ? exact : -1,
         shieldUntil: s.shieldUntil,
         burnedUntil: s.burnedUntil,
         totalPlundered: s.totalPlundered,
@@ -2043,8 +2060,8 @@ function applySimpleAction(state: PlayerState, action: GameAction, now: number, 
       return r.ok ? { ok: true, value: { state: r.value, log: { action: "army", details: { kind, id: action.id, qty: action.qty } } } } : r;
     }
     case "research": {
-      const r = startResearch(state, String(action.id), now, stagesDoneAt(world, now));
-      return r.ok ? { ok: true, value: { state: r.value, log: { action: "research", details: { id: action.id, level: queuedLevel(state, action.id as CombatantId) + 1 } } } } : r;
+      const r = startResearch(state, String(action.id), now, stagesDoneAt(world, now), baseRate(state, world, now));
+      return r.ok ? { ok: true, value: { state: r.value, log: { action: "research", details: { id: action.id, level: queuedLevel(state, action.id as ResearchId) + 1 } } } } : r;
     }
     case "curfew": {
       const r = setCurfew(state, action.start === null ? null : Number(action.start), now);
@@ -2272,7 +2289,7 @@ export async function runAction(admin: SupabaseClient, userId: string, action: G
       else if (current.stone < cost) error = `Il faut ${Math.ceil(cost).toLocaleString("fr-FR")} pierres pour payer un saboteur.`;
       else error = sabotageBlocker(targetState, now, current);
       if (!error && target && targetState) {
-        const success = Math.random() < sabotageChance(defenseArmy(targetState));
+        const success = Math.random() < sabotageChance(spyLevelOf(me) - spyLevelOf(target));
         const mine = { ...current, stone: current.stone - cost };
         const list = success ? [{ e: me, state: mine }, { e: target, state: applySabotage(targetState, now) }] : [{ e: me, state: mine }];
         if ((await writeStates(admin, season.id, list, "sabotage", { target: target.id, cost, success })) === "conflict") continue;
@@ -2289,13 +2306,10 @@ export async function runAction(admin: SupabaseClient, userId: string, action: G
         if ((data as { conflict?: boolean } | null)?.conflict) continue;
       }
     } else if (action.type === "spy") {
-      const onFortress = String(action.target) === FORTRESS_INTEL;
-      const target = onFortress ? undefined : entities.get(String(action.target));
-      const cost = spyCost(current, world, now);
-      if (onFortress && me.allianceId !== null && conflicts.fortress.holder === me.allianceId) error = "Ton alliance tient déjà la forteresse.";
-      else if (!onFortress && (!target || target.id === me.id)) error = "Cible inconnue.";
-      else if (current.stone < cost) error = `Il faut ${Math.ceil(cost).toLocaleString("fr-FR")} pierres pour payer un espion.`;
-      const next = error ? current : { ...current, stone: current.stone - cost };
+      // E3 : l'espion part sur la route ; le rapport arrive avec lui.
+      const r = await sendSpy(admin, season.id, me, current, entities, conflicts.fortress, String(action.target), world, now);
+      if ("error" in r) error = r.error;
+      const next = "error" in r ? current : r.state;
       const { data, error: rpcError } = await admin.rpc("commit_state", {
         p_season: season.id,
         p_state: toJson(me, next, {}),
@@ -2303,29 +2317,14 @@ export async function runAction(admin: SupabaseClient, userId: string, action: G
         p_contribution: 0,
         p_stage_bases: stageSizes,
         p_active_window_days: ACTIVE_WINDOW_DAYS,
-        p_action: error ? null : "spy",
-        p_details: error ? null : { target: onFortress ? FORTRESS_INTEL : target!.id, cost },
+        p_action: "error" in r ? null : "spy",
+        p_details: "error" in r ? null : { target: String(action.target), cost: r.cost },
       });
       if (rpcError) throw new Error(`Enregistrement impossible : ${rpcError.message}`);
       if ((data as { conflict?: boolean } | null)?.conflict) continue;
-      if (!error && onFortress) {
+      if (!("error" in r)) {
         finalState = next;
-        await admin.from("spy_reports").insert({ season_id: season.id, spy_id: me.id, target_id: null, expires_at: iso(now + SPY_INTEL_MS) });
-        const caught = Math.random() < spyDetectChance(fortressDefense(conflicts.fortress, entities));
-        if (caught) await addChronicle(admin, season.id, { kind: "spy", actor_id: me.id, target_id: null, details: { fortress: true } });
-        message = caught
-          ? `🕵️ Ton espion a vu les défenses de la ${FORTRESS_NAME}, mais il a été repéré en repartant.`
-          : `🕵️ Ton espion est revenu sans être vu : les défenses de la ${FORTRESS_NAME} sont révélées pendant 1 h.`;
-      } else if (!error && target) {
-        finalState = next;
-        await admin.from("spy_reports").insert({ season_id: season.id, spy_id: me.id, target_id: target.id, expires_at: iso(now + SPY_INTEL_MS) });
-        const targetState = advanceEntity(target, now, world, flat);
-        const defense = target.isLord ? (lordArmies(entities, world, now, flat).get(target.id)?.defense ?? {}) : raidArmies(current, targetState, { victimId: target.id, now }).defense;
-        const caught = Math.random() < spyDetectChance(defense);
-        if (caught) await addChronicle(admin, season.id, { kind: "spy", actor_id: me.id, target_id: target.id, details: {} });
-        message = caught
-          ? `🕵️ Ton espion a vu l'armée de ${target.name}, mais il a été repéré en repartant.`
-          : `🕵️ Ton espion est revenu sans être vu : l'armée de ${target.name} est révélée pendant 1 h.`;
+        message = r.message;
       }
     } else if (action.type === "raid") {
       // T3 : l'armée choisie part sur la route ; le combat se jouera à l'arrivée.
@@ -2366,7 +2365,6 @@ export async function runAction(admin: SupabaseClient, userId: string, action: G
             const outMs = travelMs(sent, distance, armySpeedBonus(current));
             const guet = victim.isLord ? 0 : wingLevel(victimState.hall, "guet");
             const fogged = eventActive(current, "brouillard", now);
-            const towers = Number((victimState.defenses as Record<string, number>).tour ?? 0);
             const march: March = {
               id: `${now.toString(36)}${Math.floor(Math.random() * 1e6).toString(36)}`,
               kind: "raid",
@@ -2377,7 +2375,7 @@ export async function runAction(admin: SupabaseClient, userId: string, action: G
               status: "out",
               returnAt: 0,
               // Halle : le guet niveau 2 donne toujours le nom de l'attaquant.
-              revealed: guet >= 2 || Math.random() < Math.min(TOWER_REVEAL_MAX, TOWER_REVEAL_CHANCE * towers),
+              revealed: guet >= 2 || spyLevelOf(victim) >= spyLevelOf(me),
               // Contre un seigneur, personne à prévenir ; le guet niveau 1 prévient dès le départ.
               warned: victim.isLord || (guet >= 1 && !fogged),
               loot: 0,
@@ -2474,10 +2472,10 @@ export async function runAction(admin: SupabaseClient, userId: string, action: G
     // Les dernières lectures partent ensemble (les noms d'alliance ne changent qu'avec une action d'alliance).
     const namesP = ALLIANCE_ACTIONS.has(action.type) || CONFLICT_ACTIONS.has(action.type) ? loadAllianceNames(admin, season.id) : Promise.resolve(allianceNames);
     const [intel, names, info, chronicle, hall, positions, dailyCounts, chiefs] = await Promise.all([
-      loadIntel(admin, season.id, userId, now),
+      loadIntelFor(admin, season.id, meNow.allianceId === null ? [userId] : [...entities.values()].filter((e) => !e.isLord && e.allianceId === meNow.allianceId).map((e) => e.id), now),
       namesP,
       namesP.then((n) => allianceInfo(admin, season.id, meNow, finalState, entities, n)),
-      wantsChronicle ? loadChronicle(admin, season.id, entities) : Promise.resolve(undefined),
+      wantsChronicle ? loadChronicle(admin, season.id, entities, userId) : Promise.resolve(undefined),
       loadHall(admin),
       loadPositions(admin, season.id, entities),
       loadDailyCounts(admin, season.id, userId, now),
@@ -2502,12 +2500,12 @@ export async function runAction(admin: SupabaseClient, userId: string, action: G
       alliances: [...allianceNames].map(([id, name]) => ({ id, name, size: [...entities.values()].filter((e) => e.allianceId === id).length })),
       war: warView(meNow, conflicts.wars, allianceNames),
       event: eventView(userId, finalState, events, now, currentRate(meNow, finalState, now, worldFrom(worksite), flat), positions, new Map([...entities.values()].map((x) => [x.id, x.name])), entities, baseRate(finalState, worldFrom(worksite), now)),
-      fortress: fortressView(meNow, finalState, conflicts.fortress, entities, allianceNames, now, intel.get(FORTRESS_INTEL) ?? null),
+      fortress: fortressView(meNow, finalState, conflicts.fortress, entities, allianceNames, now, intel.get(FORTRESS_INTEL)?.until ?? null),
       chronicle,
       map: { ...mapView(positions), halls: guildPlaces(entities, names) },
       incoming: incomingFor(userId, entities, now),
       daily: dailyView(finalState, dailyCounts, now),
-      guild: guildView(meNow, finalState, entities, chiefs, worldFrom(worksite), now, conflicts.wars, names),
+      guild: guildView(meNow, finalState, entities, chiefs, worldFrom(worksite), now, conflicts.wars, names, intel),
     };
     return error ? { ok: false, error, snapshot } : { ok: true, snapshot, message };
   }
@@ -2566,6 +2564,12 @@ async function settleMarches(
 ): Promise<"none" | "changed" | "conflict"> {
   const group = await resolveGroupEvent(admin, seasonId, entities, world, flat, events, now);
   if (group !== "none") return group;
+  // E3 : les espions arrivés livrent leur rapport, un à la fois.
+  const spy = [...entities.values()]
+    .flatMap((e) => (e.state.spies ?? []).map((sp) => ({ e, sp })))
+    .filter((x) => x.sp.arriveAt <= now)
+    .sort((a, b) => a.sp.arriveAt - b.sp.arriveAt)[0];
+  if (spy) return settleSpy(admin, seasonId, spy.e, spy.sp, entities, fortress, names);
   const due = [...entities.values()]
     .flatMap((e) => (e.state.marches ?? []).map((m) => ({ e, m, at: marchDue(m) })))
     .filter((d) => d.at <= now)
@@ -3621,7 +3625,7 @@ function guildPlaces(entities: Map<string, Entity>, names: Map<number, string>):
   }));
 }
 
-function guildView(me: Entity, state: PlayerState, entities: Map<string, Entity>, chiefs: Map<number, string | null>, world: WorldState, now: number, wars: WarRow[], names: Map<number, string>): HallView {
+function guildView(me: Entity, state: PlayerState, entities: Map<string, Entity>, chiefs: Map<number, string | null>, world: WorldState, now: number, wars: WarRow[], names: Map<number, string>, intel: Map<string, Intel> = new Map()): HallView {
   const guilds = guildsOf.get(entities) ?? [];
   const g = guildOf(me, guilds);
   const lodge = me.allianceId === null;
@@ -3662,9 +3666,207 @@ function guildView(me: Entity, state: PlayerState, entities: Map<string, Entity>
             id: x.id,
             name: names.get(x.allianceId!) ?? "Alliance",
             wings: activeWings(x, now),
-            chance: vagueChance(estimateChance(attackArmy(state), hallDefense(x), { attackerLevels: state.levels, defenderLevels: hallLevels(x, entities) }), false),
+            chance: vagueChance(estimateChance(attackArmy(state), hallDefense(x), { attackerLevels: state.levels, defenderLevels: hallLevels(x, entities) }), (intel.get(`hall:${x.id}`)?.until ?? 0) > now),
+            intelUntil: intel.get(`hall:${x.id}`)?.until ?? 0,
             blocker: hallSiegeBlocker(me, state, x, wars, now),
             immuneUntil: x.immuneUntil,
           })),
   };
+}
+
+// ---------------------------------------------------------------------------
+// Espionnage (E1 à E5) : niveau, trajet de l'espion, reconnaissance
+// ---------------------------------------------------------------------------
+
+function cleanSpies(raw: unknown): SpyMission[] {
+  if (!Array.isArray(raw)) return [];
+  return raw
+    .filter((m) => m && typeof m === "object" && typeof m.id === "string" && typeof m.target === "string")
+    .map((m) => ({ id: String(m.id), kind: "recon" as const, target: String(m.target), departAt: Number(m.departAt) || 0, arriveAt: Number(m.arriveAt) || 0, distance: Math.max(0, Number(m.distance) || 0) }));
+}
+
+/** Niveau d'espionnage : celui de la recherche, ou un niveau fixe pour un seigneur. */
+function spyLevelOf(e: Entity): number {
+  if (e.lord) return LORD_SPY_LEVEL[e.lord.difficulty as 1 | 2 | 3 | 4] ?? 0;
+  if (e.isLord) return 0;
+  return Math.max(0, e.state.spyLevel ?? 0);
+}
+
+/** Niveau d'une alliance : le plus haut de ses membres. */
+function allianceSpyLevel(allianceId: number | null, entities: Map<string, Entity>): number {
+  if (allianceId === null) return 0;
+  return Math.max(0, ...[...entities.values()].filter((e) => !e.isLord && e.allianceId === allianceId).map(spyLevelOf));
+}
+
+interface Intel {
+  until: number;
+  /** Écart de niveau au moment du rapport (anciens rapports : 0, l'armée exacte). */
+  gap: number;
+}
+
+/** Rapports encore valables de moi et de mes alliés : cible → meilleur rapport. */
+async function loadIntelFor(admin: SupabaseClient, seasonId: number, spyIds: string[], now: number): Promise<Map<string, Intel>> {
+  const { data } = await admin
+    .from("spy_reports")
+    .select("target_id, target_key, gap, expires_at")
+    .eq("season_id", seasonId)
+    .in("spy_id", spyIds)
+    .gt("expires_at", iso(now));
+  const out = new Map<string, Intel>();
+  for (const r of data ?? []) {
+    const key = (r.target_key as string | null) ?? (r.target_id as string | null) ?? FORTRESS_INTEL;
+    const gap = r.gap === null || r.gap === undefined ? 0 : Number(r.gap);
+    const until = ms(r.expires_at as string);
+    const prev = out.get(key);
+    // Le rapport le plus détaillé l'emporte ; à détail égal, le plus récent.
+    if (!prev || gap > prev.gap || (gap === prev.gap && until > prev.until)) out.set(key, { until, gap });
+  }
+  return out;
+}
+
+/** Ce que voit l'espion : l'écart de niveau avec la cible (joueur, seigneur, forteresse ou halle). */
+function targetSpyLevel(key: string, entities: Map<string, Entity>, fortress: FortressRow): number {
+  if (key === FORTRESS_INTEL) return allianceSpyLevel(fortress.holder, entities);
+  if (key.startsWith("hall:")) {
+    const g = (guildsOf.get(entities) ?? []).find((x) => `hall:${x.id}` === key);
+    return g?.allianceId != null ? allianceSpyLevel(g.allianceId, entities) : 0;
+  }
+  const e = entities.get(key);
+  return e ? spyLevelOf(e) : 0;
+}
+
+function spyTargetName(key: string, entities: Map<string, Entity>, names: Map<number, string>): string {
+  if (key === FORTRESS_INTEL) return `la ${FORTRESS_NAME}`;
+  if (key.startsWith("hall:")) {
+    const g = (guildsOf.get(entities) ?? []).find((x) => `hall:${x.id}` === key);
+    return g?.allianceId != null ? `la halle de ${names.get(g.allianceId) ?? "l'alliance"}` : "une halle";
+  }
+  return entities.get(key)?.name ?? "la cible";
+}
+
+/** Joueurs prévenus quand un espion est surpris chez eux. */
+function spyVictims(key: string, entities: Map<string, Entity>, fortress: FortressRow): string[] {
+  const members = (a: number | null) => (a === null ? [] : [...entities.values()].filter((e) => !e.isLord && e.allianceId === a).map((e) => e.id));
+  if (key === FORTRESS_INTEL) return members(fortress.holder);
+  if (key.startsWith("hall:")) return members((guildsOf.get(entities) ?? []).find((x) => `hall:${x.id}` === key)?.allianceId ?? null);
+  const e = entities.get(key);
+  return e && !e.isLord ? [e.id] : [];
+}
+
+/** E5 : trois espions repérés chez la même cible en 24 h, et ils n'y entrent plus pendant 6 h. Renvoie la fin de l'interdiction. */
+async function spyBanUntil(admin: SupabaseClient, seasonId: number, spyId: string, key: string, now: number): Promise<number> {
+  const { data } = await admin
+    .from("chronicle")
+    .select("created_at")
+    .eq("season_id", seasonId)
+    .eq("kind", "spy")
+    .eq("actor_id", spyId)
+    .eq("details->>key", key)
+    .gt("created_at", iso(now - SPY_BAN_WINDOW_MS))
+    .order("created_at", { ascending: false })
+    .limit(SPY_BAN_COUNT);
+  if ((data ?? []).length < SPY_BAN_COUNT) return 0;
+  const until = ms(data![0].created_at as string) + SPY_BAN_MS;
+  return until > now ? until : 0;
+}
+
+/** E3 : envoie un espion en reconnaissance. */
+async function sendSpy(
+  admin: SupabaseClient,
+  seasonId: number,
+  me: Entity,
+  current: PlayerState,
+  entities: Map<string, Entity>,
+  fortress: FortressRow,
+  key: string,
+  world: WorldState,
+  now: number,
+): Promise<{ error: string } | { state: PlayerState; message: string; cost: number }> {
+  const guilds = guildsOf.get(entities) ?? [];
+  const hall = key.startsWith("hall:") ? guilds.find((g) => `hall:${g.id}` === key) : undefined;
+  const target = key === FORTRESS_INTEL || key.startsWith("hall:") ? undefined : entities.get(key);
+  if (key === FORTRESS_INTEL) {
+    if (me.allianceId !== null && fortress.holder === me.allianceId) return { error: "Ton alliance tient déjà la forteresse." };
+  } else if (key.startsWith("hall:")) {
+    if (!hall || hall.allianceId === null) return { error: "Halle inconnue." };
+    if (hall.allianceId === me.allianceId) return { error: "C'est la halle de ton alliance." };
+  } else if (!target || target.id === me.id) return { error: "Cible inconnue." };
+  else if (isAllied(me, target)) return { error: "On n'espionne pas un allié." };
+  if ((current.spies ?? []).length >= SPY_MAX_ACTIVE) return { error: `${SPY_MAX_ACTIVE} espions en route au plus.` };
+  if ((current.spies ?? []).some((sp) => sp.target === key)) return { error: "Un de tes espions y va déjà." };
+  const cost = spyCost(current, world, now);
+  if (current.stone < cost) return { error: `Il faut ${Math.ceil(cost).toLocaleString("fr-FR")} pierres pour payer un espion.` };
+  const ban = await spyBanUntil(admin, seasonId, me.id, key, now);
+  if (ban > now) return { error: `Trop de tes espions ont été surpris là-bas : on les y attend jusqu'à ${new Date(ban).toLocaleTimeString("fr-FR", { hour: "2-digit", minute: "2-digit", timeZone: "Europe/Paris" })}.` };
+  const positions = await loadPositions(admin, seasonId, entities);
+  const from = positions.get(me.id);
+  const to = key === FORTRESS_INTEL ? FORTRESS_POS : hall ? hall.pos : positions.get(key);
+  const distance = from && to ? mapDistance(from, to) : MAP_SPAWN_RADIUS;
+  const travel = spyTravelMs(distance);
+  const mission: SpyMission = { id: marchId(), kind: "recon", target: key, departAt: now, arriveAt: now + travel, distance };
+  return {
+    cost,
+    state: { ...current, stone: current.stone - cost, spies: [...(current.spies ?? []), mission] },
+    message: `🕵️ Ton espion part : arrivée dans ${Math.max(1, Math.round(travel / 60_000))} min. Le rapport te parviendra à son arrivée.`,
+  };
+}
+
+/** E3 à E5 : un espion arrive. Il peut être repéré ; le rapport est livré dans tous les cas. */
+async function settleSpy(
+  admin: SupabaseClient,
+  seasonId: number,
+  owner: Entity,
+  sp: SpyMission,
+  entities: Map<string, Entity>,
+  fortress: FortressRow,
+  names: Map<number, string>,
+): Promise<"changed" | "conflict"> {
+  const state = { ...owner.state, spies: (owner.state.spies ?? []).filter((x) => x.id !== sp.id) };
+  const { data } = await admin.rpc("commit_state", { p_season: seasonId, p_state: toJson(owner, state), p_touch: false, p_contribution: 0, p_stage_bases: stageSizes, p_active_window_days: ACTIVE_WINDOW_DAYS, p_action: null, p_details: null });
+  if ((data as { conflict?: boolean } | null)?.conflict) return "conflict";
+  const mine = spyLevelOf(owner);
+  const theirs = targetSpyLevel(sp.target, entities, fortress);
+  const gap = mine - theirs;
+  const caught = Math.random() < spyRisk(gap, sp.distance);
+  const entity = entities.get(sp.target);
+  await admin.from("spy_reports").insert({
+    season_id: seasonId,
+    spy_id: owner.id,
+    target_id: entity ? entity.id : null,
+    target_key: sp.target,
+    gap,
+    expires_at: iso(sp.arriveAt + SPY_INTEL_MS),
+  });
+  const where = spyTargetName(sp.target, entities, names);
+  if (caught) {
+    // E5 : la cible voit le nom du maître si son niveau est au moins celui de l'espion, moins 1.
+    const named = theirs >= mine - 1;
+    await addChronicle(admin, seasonId, {
+      kind: "spy",
+      actor_id: owner.id,
+      target_id: entity && !entity.isLord ? entity.id : null,
+      details: { key: sp.target, named, ...(sp.target === FORTRESS_INTEL ? { fortress: true } : {}), ...(sp.target.startsWith("hall:") ? { hall: where } : {}) },
+    });
+    notify(admin, spyVictims(sp.target, entities, fortress), {
+      title: "🕵️ Un espion a été surpris chez toi",
+      body: named ? `C'était un espion de ${owner.name}.` : "Son maître reste inconnu : ton niveau d'espionnage est trop bas pour le reconnaître.",
+      tag: "spy",
+    });
+  }
+  const depth = gap <= -2 ? "il n'a presque rien vu" : gap <= 0 ? "il a vu l'armée présente" : gap === 1 ? "il a vu l'armée et ses mouvements" : gap === 2 ? "il a vu l'armée, ses mouvements et le stock exposé" : "il a tout vu, jusqu'à la Forge";
+  notify(admin, [owner.id], { title: caught ? "🕵️ Espion repéré, mais rapport livré" : "🕵️ Rapport d'espion", body: `Chez ${where}, ${depth}. Rapport valable 1 h, partagé avec ton alliance.`, tag: "spy" });
+  return "changed";
+}
+
+/** E2 : ordre de grandeur d'une armée, comparé à la sienne. */
+function armyHint(theirs: Army, mine: Army): "bien plus faible" | "comparable" | "plus forte" | "écrasante" {
+  const a = armyValue(cleanArmy({ ...theirs, garde: 0 } as Army));
+  const b = Math.max(1, armyValue(mine));
+  const r = a / b;
+  return r < 0.5 ? "bien plus faible" : r <= 1.5 ? "comparable" : r <= 3 ? "plus forte" : "écrasante";
+}
+
+/** E2 : la chance en un mot. */
+function chanceWord(chance: number): "favorable" | "incertaine" | "risquée" {
+  return chance >= 0.65 ? "favorable" : chance >= 0.35 ? "incertaine" : "risquée";
 }
