@@ -44,3 +44,16 @@ describe("événements sur la carte (T6)", () => {
     }
   });
 });
+
+describe("décor de la carte", () => {
+  it("est stable et laisse les lieux dégagés", async () => {
+    const { buildTerrain } = await import("./map-terrain");
+    const places: [number, number][] = [[8, 8], [8, 4], [5, 5], [11, 11], [2, 12]];
+    const a = buildTerrain(places, 15);
+    const b = buildTerrain(places, 15);
+    expect(a.trees.length).toBe(b.trees.length);
+    expect(a.trees.length).toBeGreaterThan(100);
+    expect(a.bridges.length).toBeGreaterThan(0);
+    for (const t of a.trees) for (const p of places) expect(Math.hypot(t.x - p[0], t.y - p[1])).toBeGreaterThanOrEqual(0.6);
+  });
+});

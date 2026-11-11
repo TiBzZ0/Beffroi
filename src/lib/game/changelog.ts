@@ -277,4 +277,13 @@ export const CHANGELOG: ChangeEntry[] = [
       "🏰 Correctif : un siège perdu fait bien perdre 10 % à l'étape en cours, quelle qu'elle soit.",
     ],
   },
+  {
+    id: 34,
+    date: "11 novembre",
+    items: [
+      "🗺️ Nouvelle carte du royaume, dessinée comme une carte ancienne : champs autour du beffroi, forêts, montagnes, rivière et ponts, lac de Brumeport, marais de Clairmarais, routes et sentiers.",
+      "🏘️ Chaque domaine grandit avec sa production (hameau, village, manoir), avec un toit aux couleurs de son alliance. Les seigneurs ont leur château selon leur force, et le beffroi monte au fil des étapes.",
+      "🔍 Bouton Agrandir pour jouer la carte au doigt sur téléphone, et bouton Noms pour afficher tout le monde. Toucher un lieu montre la durée de marche depuis chez toi.",
+    ],
+  },
 ];

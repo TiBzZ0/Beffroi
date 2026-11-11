@@ -1149,40 +1149,6 @@ a {
   font: inherit;
 }
 
-/* T1 : carte du royaume */
-.kingdom-map {
-  max-width: 480px;
-  margin: 0 auto 10px;
-}
-.kingdom-map svg {
-  width: 100%;
-  height: auto;
-  background: var(--panel-2);
-  border: 1px solid var(--line);
-  border-radius: var(--radius);
-}
-.map-grid line {
-  stroke: var(--line);
-  stroke-width: 0.5;
-}
-.map-icon {
-  font-size: 15px;
-  text-anchor: middle;
-  dominant-baseline: central;
-  user-select: none;
-}
-.map-badge {
-  font-size: 8px;
-  text-anchor: middle;
-  dominant-baseline: central;
-}
-.map-place {
-  cursor: pointer;
-}
-.map-place.picked circle,
-.map-place.picked text.map-icon {
-  filter: drop-shadow(0 0 3px var(--gold));
-}
 
 /* Événements sans combat */
 .event-banner {
@@ -1203,14 +1169,6 @@ a {
 }
 
 /* T2 à T5 : armées en route */
-.map-march line {
-  stroke: var(--accent);
-  stroke-width: 1.5;
-  stroke-dasharray: 4 3;
-}
-.map-march circle {
-  fill: var(--accent);
-}
 .marches {
   list-style: none;
   margin: 0 0 10px;
@@ -1247,9 +1205,725 @@ a {
 .event-banner.incoming {
   border-color: var(--accent);
 }
-.map-path {
-  stroke: var(--gold);
-  stroke-width: 1;
-  stroke-dasharray: 2 3;
-}
 .num.warn { color: var(--accent); font-weight: 600; }
+
+/* T1 : carte du royaume, façon carte ancienne */
+:root {
+  --map-paper: #e9dab4;
+  --map-land: #ecdfb9;
+  --map-ink: #4b3622;
+  --map-ink-soft: rgba(75, 54, 34, 0.45);
+  --map-tree: #7f9a55;
+  --map-tree-hi: #a3b86e;
+  --map-pine: #5e7d47;
+  --map-rock: #c2b08c;
+  --map-rock-shade: #9c8865;
+  --map-snow: #fbf7ec;
+  --map-hill: #d6c48f;
+  --map-water: #93b9c3;
+  --map-water-deep: #6f9aa8;
+  --map-bank: #b9a777;
+  --map-road: #e0c896;
+  --map-field-0: #e3cf8a;
+  --map-field-1: #c9cf86;
+  --map-field-2: #d9bb7a;
+  --map-field-3: #bfc98e;
+  --map-wall: #f5ead2;
+  --map-roof: #9a7b62;
+  --map-stone: #d9cfba;
+  --map-stone-shade: #b7aa90;
+  --map-lroof: #6c4f45;
+  --map-wood: #9a6b3e;
+  --map-canvas: #f3ead4;
+  --map-gold: #d4a43a;
+  --map-danger: #b3302a;
+  --map-pennant: #2f6db3;
+  --map-me: #d4a43a;
+  --map-neutral-banner: #f5f0e4;
+  --map-shadow: rgba(75, 54, 34, 0.18);
+  --map-window: #f2d27a;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --map-paper: #2a241c;
+    --map-land: #3a3226;
+    --map-ink: #1a140e;
+    --map-ink-soft: rgba(230, 210, 170, 0.22);
+    --map-tree: #4f6a3a;
+    --map-tree-hi: #67824a;
+    --map-pine: #3d5a34;
+    --map-rock: #74684f;
+    --map-rock-shade: #554a37;
+    --map-snow: #d9d4c8;
+    --map-hill: #5a4f38;
+    --map-water: #3d6170;
+    --map-water-deep: #2c4b58;
+    --map-bank: #4e4532;
+    --map-road: #6e5d40;
+    --map-field-0: #5e5434;
+    --map-field-1: #4e5636;
+    --map-field-2: #5a4a30;
+    --map-field-3: #485236;
+    --map-wall: #cbbd9e;
+    --map-roof: #7a6250;
+    --map-stone: #a69c86;
+    --map-stone-shade: #847a66;
+    --map-lroof: #4f3a33;
+    --map-wood: #7a5532;
+    --map-canvas: #cfc4aa;
+    --map-gold: #e2b54e;
+    --map-danger: #d2483f;
+    --map-pennant: #5b93d6;
+    --map-me: #e2b54e;
+    --map-neutral-banner: #d9d2c0;
+    --map-shadow: rgba(0, 0, 0, 0.35);
+    --map-window: #f0c860;
+  }
+}
+.kingdom-map {
+  position: relative;
+  max-width: 680px;
+  margin: 0 auto 10px;
+}
+.kingdom-map .map-scroll {
+  border-radius: var(--radius);
+  box-shadow: var(--shadow);
+}
+.kingdom-map.zoomed .map-scroll {
+  overflow: auto;
+  max-height: min(78vh, 760px);
+  -webkit-overflow-scrolling: touch;
+}
+.map-svg {
+  display: block;
+  width: 100%;
+  height: auto;
+  touch-action: manipulation;
+}
+.kingdom-map.zoomed .map-svg {
+  width: 210%;
+  max-width: none;
+}
+.map-tools {
+  display: flex;
+  gap: 6px;
+  justify-content: flex-end;
+  margin-bottom: 6px;
+}
+.map-tools .btn {
+  padding: 4px 10px;
+  font-size: 0.85rem;
+}
+.map-paper {
+  fill: var(--map-paper);
+}
+.map-land {
+  fill: var(--map-land);
+}
+.g-speck {
+  fill: var(--map-ink);
+  opacity: 0.18;
+}
+.g-vignette-in {
+  stop-color: var(--map-ink);
+  stop-opacity: 0;
+}
+.g-vignette-out {
+  stop-color: var(--map-ink);
+  stop-opacity: 0.22;
+}
+.map-grid {
+  fill: none;
+}
+.map-frame {
+  fill: none;
+  stroke: var(--map-ink);
+  stroke-width: 2.4;
+}
+.map-frame-inner {
+  fill: none;
+  stroke: var(--map-ink);
+  stroke-width: 0.8;
+}
+.g-furrow {
+  stroke: var(--map-ink);
+  stroke-width: 0.5;
+  opacity: 0.22;
+}
+.map-field {
+  stroke: var(--map-ink-soft);
+  stroke-width: 0.5;
+}
+.map-field.t0 { fill: var(--map-field-0); }
+.map-field.t1 { fill: var(--map-field-1); }
+.map-field.t2 { fill: var(--map-field-2); }
+.map-field.t3 { fill: var(--map-field-3); }
+.g-trunk {
+  stroke: var(--map-ink);
+  stroke-width: 1.3;
+  stroke-linecap: round;
+}
+.g-tree {
+  fill: var(--map-tree);
+  stroke: var(--map-ink);
+  stroke-width: 0.9;
+}
+.g-tree-hi {
+  fill: var(--map-tree-hi);
+}
+.g-pine {
+  fill: var(--map-pine);
+  stroke: var(--map-ink);
+  stroke-width: 0.9;
+  stroke-linejoin: round;
+}
+.g-ink-thin {
+  fill: none;
+  stroke: var(--map-ink);
+  stroke-width: 0.7;
+  stroke-linecap: round;
+  opacity: 0.75;
+}
+.g-outline {
+  fill: none;
+  stroke: var(--map-ink);
+  stroke-width: 1.1;
+  stroke-linejoin: round;
+}
+.g-rock {
+  fill: var(--map-rock);
+  stroke: var(--map-ink);
+  stroke-width: 1;
+  stroke-linejoin: round;
+}
+.g-rock-shade {
+  fill: var(--map-rock-shade);
+}
+.g-snow {
+  fill: var(--map-snow);
+}
+.g-hill {
+  fill: var(--map-hill);
+  stroke: var(--map-ink);
+  stroke-width: 0.9;
+}
+.g-reed {
+  fill: none;
+  stroke: #5e7d47;
+  stroke-width: 0.8;
+  stroke-linecap: round;
+}
+.g-reed-head {
+  fill: var(--map-wood);
+}
+.map-water,
+.map-pond {
+  fill: var(--map-water);
+  stroke: var(--map-ink);
+  stroke-width: 0.9;
+}
+.map-water-bank {
+  fill: none;
+  stroke: var(--map-bank);
+  stroke-width: 6;
+  stroke-linejoin: round;
+}
+.map-water-lines {
+  fill: none;
+  stroke: var(--map-water-deep);
+  stroke-width: 9;
+  stroke-dasharray: 2 7;
+  opacity: 0.35;
+  transform-box: fill-box;
+  transform-origin: center;
+  transform: scale(0.72);
+}
+.map-river-bank {
+  fill: none;
+  stroke: var(--map-ink);
+  stroke-width: 15.5;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  opacity: 0.65;
+}
+.map-river {
+  fill: none;
+  stroke: var(--map-water);
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+.map-river.w1 { stroke-width: 9; }
+.map-river.w2 { stroke-width: 12; }
+.map-river.w3 { stroke-width: 14; }
+.map-river-bank { stroke-width: 16; }
+.map-river-glint {
+  fill: none;
+  stroke: var(--map-snow);
+  stroke-width: 1.2;
+  stroke-dasharray: 6 14;
+  stroke-linecap: round;
+  opacity: 0.7;
+  animation: map-flow 6s linear infinite;
+}
+@keyframes map-flow {
+  to {
+    stroke-dashoffset: -40;
+  }
+}
+.map-road-edge {
+  fill: none;
+  stroke: var(--map-ink);
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  opacity: 0.55;
+}
+.map-road-edge.royal { stroke-width: 7.5; }
+.map-road-edge.road { stroke-width: 5.5; }
+.map-road-edge.trail { stroke-width: 0; }
+.map-road {
+  fill: none;
+  stroke: var(--map-road);
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+.map-road.royal { stroke-width: 5.5; }
+.map-road.road { stroke-width: 3.6; }
+.map-road.trail {
+  stroke: var(--map-ink);
+  stroke-width: 1.3;
+  stroke-dasharray: 3 3.5;
+  opacity: 0.55;
+}
+.map-bridge rect {
+  fill: var(--map-wood);
+  stroke: var(--map-ink);
+  stroke-width: 0.9;
+}
+.map-bridge path {
+  stroke: var(--map-ink);
+  stroke-width: 1.6;
+}
+.g-shadow {
+  fill: var(--map-shadow);
+}
+.g-wall {
+  fill: var(--map-wall);
+  stroke: var(--map-ink);
+  stroke-width: 0.9;
+}
+.g-roof {
+  fill: var(--roof, var(--map-roof));
+  stroke: var(--map-ink);
+  stroke-width: 0.9;
+  stroke-linejoin: round;
+}
+.g-door {
+  fill: var(--map-wood);
+  stroke: var(--map-ink);
+  stroke-width: 0.6;
+}
+.g-window {
+  fill: var(--map-window);
+  stroke: var(--map-ink);
+  stroke-width: 0.5;
+}
+.g-palisade {
+  fill: none;
+  stroke: var(--map-wood);
+  stroke-width: 2.2;
+  stroke-dasharray: 1.6 1;
+}
+.g-stone {
+  fill: var(--map-stone);
+  stroke: var(--map-ink);
+  stroke-width: 0.9;
+  stroke-linejoin: round;
+}
+.g-stone-shade {
+  fill: var(--map-stone-shade);
+}
+.g-lroof {
+  fill: var(--map-lroof);
+  stroke: var(--map-ink);
+  stroke-width: 0.9;
+  stroke-linejoin: round;
+}
+.g-mound {
+  fill: var(--map-hill);
+  stroke: var(--map-ink);
+  stroke-width: 0.8;
+}
+.g-pole {
+  stroke: var(--map-ink);
+  stroke-width: 1.1;
+  stroke-linecap: round;
+}
+.g-pole-base {
+  fill: var(--map-ink);
+}
+.g-pennant {
+  fill: var(--pennant, var(--map-pennant));
+  stroke: var(--map-ink);
+  stroke-width: 0.6;
+}
+.g-banner {
+  fill: var(--banner, var(--map-neutral-banner));
+  stroke: var(--map-ink);
+  stroke-width: 0.7;
+}
+.g-flag {
+  fill: var(--flag, var(--map-me));
+  stroke: var(--map-ink);
+  stroke-width: 0.7;
+  stroke-linejoin: round;
+}
+.g-horse {
+  fill: #8a5a33;
+  stroke: var(--map-ink);
+  stroke-width: 0.7;
+  stroke-linejoin: round;
+}
+.g-leg {
+  stroke: var(--map-ink);
+  stroke-width: 1.1;
+  stroke-linecap: round;
+}
+.g-wood {
+  fill: var(--map-wood);
+  stroke: var(--map-ink);
+  stroke-width: 0.8;
+}
+.g-canvas {
+  fill: var(--map-canvas);
+  stroke: var(--map-ink);
+  stroke-width: 0.8;
+}
+.g-wheel {
+  fill: var(--map-canvas);
+  stroke: var(--map-ink);
+  stroke-width: 1.2;
+}
+.g-royal {
+  fill: #5a3d8a;
+  stroke: var(--map-gold);
+  stroke-width: 1.2;
+}
+.g-gold {
+  fill: var(--map-gold);
+  stroke: var(--map-ink);
+  stroke-width: 0.6;
+}
+.g-goldline {
+  stroke: var(--map-gold);
+  stroke-width: 1;
+}
+.g-giant {
+  fill: #8b8576;
+  stroke: var(--map-ink);
+  stroke-width: 1;
+  stroke-linejoin: round;
+}
+.g-eye {
+  fill: #ff5a3c;
+}
+.g-danger-ring {
+  fill: rgba(179, 48, 42, 0.08);
+  stroke: var(--map-danger);
+  stroke-width: 1.2;
+  stroke-dasharray: 4 3;
+  animation: map-spin 12s linear infinite;
+}
+@keyframes map-spin {
+  to {
+    stroke-dashoffset: -70;
+  }
+}
+.g-dark {
+  fill: #2b2118;
+}
+.g-timber {
+  fill: none;
+  stroke: var(--map-wood);
+  stroke-width: 1.6;
+}
+.g-tent {
+  fill: #c9a46a;
+  stroke: var(--map-ink);
+  stroke-width: 0.9;
+  stroke-linejoin: round;
+}
+.g-enemy .g-tent,
+use.g-enemy {
+  fill: #b5503f;
+}
+.g-blackflag {
+  fill: #2b2118;
+}
+.g-fire {
+  fill: #e8792b;
+  stroke: #b3302a;
+  stroke-width: 0.5;
+}
+.g-x {
+  fill: none;
+  stroke: var(--map-danger);
+  stroke-width: 3.2;
+  stroke-linecap: round;
+}
+.g-blade {
+  fill: none;
+  stroke: #e6e2d6;
+  stroke-width: 2;
+  stroke-linecap: round;
+  filter: drop-shadow(0 0 0.6px #2b2118);
+}
+.g-hilt {
+  stroke: var(--map-gold);
+  stroke-width: 2.2;
+  stroke-linecap: round;
+}
+.g-moon {
+  fill: #f2d27a;
+  stroke: var(--map-ink);
+  stroke-width: 0.6;
+}
+.g-badge {
+  fill: var(--map-canvas);
+  stroke: var(--map-ink);
+  stroke-width: 0.8;
+}
+.g-town {
+  fill: var(--map-field-2);
+  opacity: 0.55;
+}
+.g-townwall {
+  fill: none;
+  stroke: var(--map-stone-shade);
+  stroke-width: 3;
+  stroke-dasharray: 3 1.4;
+}
+.g-scaffold {
+  fill: none;
+  stroke: var(--map-wood);
+  stroke-width: 0.9;
+}
+.map-event-path {
+  fill: none;
+  stroke: var(--map-gold);
+  stroke-width: 1.6;
+  stroke-dasharray: 1 5;
+  stroke-linecap: round;
+}
+.map-place {
+  cursor: pointer;
+}
+.map-place.me {
+  cursor: default;
+}
+.map-hit {
+  fill: transparent;
+}
+.map-place.curfew > use {
+  opacity: 0.7;
+}
+.map-place:hover > use:not([href="#mg-moon"]),
+.map-place.picked > use {
+  filter: drop-shadow(0 0 2px var(--map-gold));
+}
+.map-select {
+  fill: rgba(212, 164, 58, 0.2);
+  stroke: var(--map-gold);
+  stroke-width: 1.4;
+  stroke-dasharray: 4 3;
+  animation: map-spin 6s linear infinite;
+}
+.map-me-ring {
+  fill: rgba(212, 164, 58, 0.25);
+  stroke: var(--map-gold);
+  stroke-width: 1.2;
+  transform-box: fill-box;
+  transform-origin: center;
+  animation: map-pulse 2.6s ease-in-out infinite;
+}
+.map-alarm {
+  fill: none;
+  stroke: var(--map-danger);
+  stroke-width: 1.8;
+  transform-box: fill-box;
+  transform-origin: center;
+  animation: map-pulse 1.1s ease-in-out infinite;
+}
+@keyframes map-pulse {
+  50% {
+    transform: scale(1.18);
+    opacity: 0.55;
+  }
+}
+.map-shield {
+  fill: rgba(91, 147, 214, 0.18);
+  stroke: #5b93d6;
+  stroke-width: 1.1;
+}
+.map-cleared {
+  opacity: 0.4;
+  filter: grayscale(1);
+}
+.map-march-line {
+  fill: none;
+  stroke: var(--flag, var(--map-me));
+  stroke-width: 2;
+  stroke-dasharray: 5 4;
+  stroke-linecap: round;
+  animation: map-march 1.4s linear infinite;
+  filter: drop-shadow(0 0 0.8px var(--map-ink));
+}
+.map-march.camp .map-march-line {
+  animation: none;
+  opacity: 0.6;
+}
+@keyframes map-march {
+  to {
+    stroke-dashoffset: -18;
+  }
+}
+.map-incoming-line {
+  fill: none;
+  stroke: var(--map-danger);
+  stroke-width: 2.2;
+  stroke-dasharray: 6 4;
+  animation: map-march 0.9s linear infinite;
+}
+.map-travel path {
+  fill: none;
+  stroke: var(--map-ink);
+  stroke-width: 1.3;
+  stroke-dasharray: 1 4;
+  stroke-linecap: round;
+}
+.map-label {
+  font-family: var(--font-display), Georgia, serif;
+  font-size: 9px;
+  font-weight: 600;
+  text-anchor: middle;
+  dominant-baseline: hanging;
+  fill: var(--ink);
+  paint-order: stroke;
+  stroke: var(--map-land);
+  stroke-width: 2.6px;
+  stroke-linejoin: round;
+}
+.map-label.lord {
+  font-style: italic;
+  fill: var(--map-lroof);
+}
+.map-label.event {
+  font-size: 10px;
+  font-weight: 700;
+  fill: var(--map-danger);
+}
+.map-event-halo {
+  fill: rgba(212, 164, 58, 0.28);
+  stroke: var(--map-gold);
+  stroke-width: 1;
+  transform-box: fill-box;
+  transform-origin: center;
+  animation: map-pulse 2.2s ease-in-out infinite;
+}
+.map-label.strong {
+  font-size: 12px;
+  font-weight: 700;
+}
+.map-label.major {
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+.map-blazon {
+  font-size: 10px;
+  text-anchor: middle;
+  dominant-baseline: central;
+}
+.map-pill {
+  fill: var(--map-canvas);
+  stroke: var(--map-ink);
+  stroke-width: 0.9;
+}
+.map-pill-text {
+  font-family: var(--font-body), Georgia, serif;
+  font-size: 11px;
+  font-weight: 700;
+  text-anchor: middle;
+  dominant-baseline: central;
+  fill: #2b2118;
+}
+.map-scale rect {
+  stroke: var(--map-ink);
+  stroke-width: 0.8;
+}
+.map-scale .dark {
+  fill: var(--map-ink);
+}
+.map-scale .light {
+  fill: var(--map-land);
+}
+.map-scale-text,
+.map-compass-n {
+  font-family: var(--font-body), Georgia, serif;
+  font-size: 11px;
+  font-style: italic;
+  fill: var(--ink);
+  dominant-baseline: central;
+}
+.map-compass-n {
+  font-family: var(--font-display), Georgia, serif;
+  font-style: normal;
+  font-weight: 700;
+  font-size: 9px;
+  text-anchor: middle;
+}
+.map-compass circle {
+  fill: none;
+  stroke: var(--map-ink);
+  stroke-width: 0.8;
+}
+.map-compass .needle {
+  fill: var(--map-land);
+  stroke: var(--map-ink);
+  stroke-width: 0.8;
+}
+.map-compass .north {
+  fill: var(--map-danger);
+}
+.map-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 12px;
+  justify-content: center;
+  margin: 8px 0 0;
+  padding: 0;
+  list-style: none;
+  font-size: 0.85rem;
+  color: var(--ink-soft);
+}
+.map-legend li {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+.map-legend svg {
+  width: 22px;
+  height: 22px;
+}
+@media (prefers-reduced-motion: reduce) {
+  .map-river-glint,
+  .g-danger-ring,
+  .map-select,
+  .map-me-ring,
+  .map-alarm,
+  .map-march-line,
+  .map-event-halo,
+  .map-incoming-line {
+    animation: none;
+  }
+}

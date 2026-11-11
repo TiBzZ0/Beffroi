@@ -75,9 +75,10 @@ import {
   type PlayerState,
 } from "@/lib/game/engine";
 import { formatNumber, formatRate } from "@/lib/game/format";
-import { battle, estimateChance, seededRng, type Army } from "@/lib/game/battle";
+import { armySize, battle, cleanArmy, estimateChance, seededRng, type Army } from "@/lib/game/battle";
 import { worldFrom, type AwaySummary, type LotView, type AllianceSummary, type ChronicleEntry, type EventView, type GameSnapshot, type RivalView } from "@/lib/game/types";
 import { useChat, useGame, useLeaderboard, usePush, useTick } from "./use-game";
+import { MapBoard, type BoardMarch, type BoardPlace } from "./kingdom-map";
 import { CHAT_MAX_LENGTH, CHAT_REACTIONS, type ChatChannel } from "@/lib/game/chat-config";
 import { CHANGELOG } from "@/lib/game/changelog";
 
@@ -2346,17 +2347,44 @@ function allianceColor(id: number | null | undefined): string | undefined {
 }
 
 /** T1 : carte du royaume. Toucher un lieu ouvre sa fiche. */
+function readMapNames(): boolean {
+  try {
+    return localStorage.getItem("beffroi-map-names") === "1";
+  } catch {
+    return false;
+  }
+}
+
 function KingdomMap({ snap, live, now, run }: { snap: GameSnapshot; live: PlayerState; now: number; run: ReturnType<typeof useGame>["run"] }) {
   const [picked, setPicked] = useState<string | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
+  const [zoomed, setZoomed] = useState(false);
+  const [names, setNames] = useState(readMapNames);
+  const scroller = useRef<HTMLDivElement>(null);
   const map = snap.map;
+  const mine = map?.places[snap.userId];
+  // En gros plan, on centre la vue sur mon domaine.
+  useEffect(() => {
+    const el = scroller.current;
+    if (!zoomed || !el || !map || !mine) return;
+    const fx = (mine[0] - 0.5) / map.size;
+    const fy = (map.size - mine[1] + 0.5) / map.size;
+    el.scrollLeft = fx * el.scrollWidth - el.clientWidth / 2;
+    el.scrollTop = fy * el.scrollHeight * 0.92 - el.clientHeight / 2;
+  }, [zoomed, map, mine]);
   if (!map) return <p className="empty">On déplie la carte…</p>;
-  const cell = 24;
-  const size = map.size * cell;
-  const at = (p: readonly [number, number]) => ({ cx: (p[0] - 0.5) * cell, cy: (map.size - p[1] + 0.5) * cell });
-  const mine = map.places[snap.userId];
-  // La caravane avance en direct le long de sa route.
+  const toggleNames = () => {
+    setNames((v) => {
+      try {
+        localStorage.setItem("beffroi-map-names", v ? "0" : "1");
+      } catch {
+        /* préférence non retenue */
+      }
+      return !v;
+    });
+  };
   const ev = snap.event;
+  // La caravane et le convoi avancent en direct le long de leur route.
   const evPos: [number, number] | undefined = ev?.active && ev.path
     ? (() => {
         const f = Math.min(1, Math.max(0, (now - ev.startsAt) / Math.max(1, ev.endsAt - ev.startsAt)));
@@ -2373,97 +2401,138 @@ function KingdomMap({ snap, live, now, run }: { snap: GameSnapshot; live: Player
   };
   const spyPrice = spyCost(live, worldFrom(snap.worksite), now);
   const placeDistance = (p?: readonly [number, number]) => (mine && p ? mapDistance(mine, p) : null);
+  // Taille des domaines : hameau, village ou manoir selon la production parmi les joueurs.
+  const myRate = rateAt(live, worldFrom(snap.worksite), now);
+  const rates = [myRate, ...snap.rivals.filter((r) => !r.isLord).map((r) => r.rate)].sort((a, b) => a - b);
+  const tierOf = (rate: number): 1 | 2 | 3 => {
+    const rank = rates.findIndex((x) => x >= rate) / Math.max(1, rates.length - 1);
+    return rank >= 0.7 ? 3 : rank >= 0.3 ? 2 : 1;
+  };
+  const places: BoardPlace[] = [];
+  for (const [id, p] of Object.entries(map.places)) {
+    const pos: [number, number] = [p[0], p[1]];
+    if (id === snap.userId) {
+      places.push({ id, pos, kind: "me", name: snap.username, color: allianceColor(myAlliance), tier: tierOf(myRate) });
+      continue;
+    }
+    const r = snap.rivals.find((x) => x.id === id);
+    if (!r) continue;
+    places.push({
+      id,
+      pos,
+      kind: r.isLord ? "lord" : "player",
+      name: r.name,
+      color: r.isLord ? undefined : allianceColor(allianceIdOf(r.allianceName)),
+      tier: r.isLord ? 1 : tierOf(r.rate),
+      difficulty: r.difficulty,
+      aggressive: r.isLord && !r.retaliateOnly && (r.difficulty ?? 1) > 1,
+      blazon: r.blazon,
+      shielded: r.shieldUntil > now,
+      curfew: r.curfew,
+      allied: r.allied,
+      atWar: r.atWar,
+    });
+  }
+  const marches: BoardMarch[] = !mine
+    ? []
+    : (snap.state.marches ?? []).flatMap((m) => {
+        const camp = m.target.startsWith("camp:") ? ev?.camps?.find((c) => `camp:${ev?.id}:${c.id}` === m.target) : undefined;
+        const target =
+          m.target === "fortress"
+            ? map.fortress
+            : m.target.startsWith("convoy:") || m.target.startsWith("siege:")
+              ? ev?.pos
+              : m.target.startsWith("event:") || m.target.startsWith("mine:") || m.target.startsWith("treasure:")
+                ? evPos
+                : camp
+                  ? camp.pos
+                  : map.places[m.target];
+        if (!target) return [];
+        const f =
+          m.status === "camp"
+            ? 1
+            : m.status === "out"
+              ? Math.min(1, Math.max(0, (now - m.departAt) / Math.max(1, m.arriveAt - m.departAt)))
+              : Math.min(1, Math.max(0, (m.returnAt - now) / Math.max(1, m.arriveAt - m.departAt)));
+        return [{ id: m.id, from: [mine[0], mine[1]], to: [target[0], target[1]], f, status: m.status }];
+      });
+  const incoming = (snap.incoming ?? []).map((i) => {
+    const from = i.from ? snap.rivals.find((r) => r.name === i.from) : undefined;
+    const at = from ? map.places[from.id] : undefined;
+    return { id: i.id, from: at ? ([at[0], at[1]] as [number, number]) : null };
+  });
+  const pickedPos = picked ? map.places[picked] : undefined;
+  const pickedDistance = placeDistance(pickedPos);
+  const army = cleanArmy({ ...live.troops } as Army);
+  const travel =
+    pickedPos && pickedDistance !== null
+      ? { to: [pickedPos[0], pickedPos[1]] as [number, number], label: `≈ ${Math.round(travelMs(armySize(army) > 0 ? army : ({ piquier: 1 } as Army), pickedDistance) / 60_000)} min` }
+      : null;
   return (
     <>
-      <p className="note">
-        Le royaume vu d&apos;en haut : 🔔 le beffroi au centre, 🏰 Pierre-Haute, les seigneurs sous leur blason, les joueurs sous leur écu, aux couleurs de leur
-        alliance. Toi, tu es l&apos;étoile. Touche un lieu pour ouvrir sa fiche.
-      </p>
-      <div className="kingdom-map">
-        <svg viewBox={`0 0 ${size} ${size}`} role="img" aria-label="Carte du royaume">
-          {Array.from({ length: map.size + 1 }, (_, i) => (
-            <g key={i} className="map-grid">
-              <line x1={i * cell} y1={0} x2={i * cell} y2={size} />
-              <line x1={0} y1={i * cell} x2={size} y2={i * cell} />
-            </g>
-          ))}
-          <text {...(({ cx, cy }) => ({ x: cx, y: cy }))(at(map.belfry))} className="map-icon">
-            🔔
-          </text>
-          <text {...(({ cx, cy }) => ({ x: cx, y: cy }))(at(map.fortress))} className="map-icon" onClick={() => setPicked(null)}>
-            🏰
-          </text>
-          {snap.event?.active && snap.event.path && (
-            <line className="map-path" {...(({ cx, cy }) => ({ x1: cx, y1: cy }))(at(snap.event.path.from))} {...(({ cx, cy }) => ({ x2: cx, y2: cy }))(at(snap.event.path.to))} />
-          )}
-          {snap.event?.active &&
-            (snap.event.camps ?? []).map((c) => (
-              <text key={c.id} x={at(c.pos).cx} y={at(c.pos).cy} className="map-icon" opacity={c.winner ? 0.35 : 1}>
-                🏕️
-              </text>
-            ))}
-          {snap.event?.active && evPos && (
-            <text {...(({ cx, cy }) => ({ x: cx, y: cy }))(at(evPos))} className="map-icon">
-              {EVENT_ICONS[snap.event.kind]}
-            </text>
-          )}
-          {mine &&
-            (snap.state.marches ?? []).map((m) => {
-              const camp = m.target.startsWith("camp:") ? snap.event?.camps?.find((c) => `camp:${snap.event?.id}:${c.id}` === m.target) : undefined;
-              const target =
-                m.target === "fortress"
-                  ? map.fortress
-                  : m.target.startsWith("convoy:") || m.target.startsWith("siege:")
-                    ? ev?.pos
-                    : m.target.startsWith("event:") || m.target.startsWith("mine:") || m.target.startsWith("treasure:")
-                    ? evPos
-                    : camp
-                      ? camp.pos
-                      : map.places[m.target];
-              if (!target) return null;
-              const a = at(mine);
-              const b = at(target);
-              // Position sur la route : 0 au domaine, 1 à la cible.
-              const f = m.status === "camp"
-                ? 1
-                : m.status === "out"
-                ? Math.min(1, Math.max(0, (now - m.departAt) / Math.max(1, m.arriveAt - m.departAt)))
-                : Math.min(1, Math.max(0, (m.returnAt - now) / Math.max(1, m.arriveAt - m.departAt)));
-              return (
-                <g key={m.id} className="map-march">
-                  <line x1={a.cx} y1={a.cy} x2={b.cx} y2={b.cy} />
-                  <circle cx={a.cx + (b.cx - a.cx) * f} cy={a.cy + (b.cy - a.cy) * f} r={4} />
-                </g>
-              );
-            })}
-          {Object.entries(map.places).map(([id, p]) => {
-            const { cx, cy } = at(p);
-            const me = id === snap.userId;
-            const r = snap.rivals.find((x) => x.id === id);
-            if (!me && !r) return null;
-            const color = me ? allianceColor(myAlliance) : allianceColor(allianceIdOf(r?.allianceName ?? null));
-            const guarded = r && (r.shieldUntil > now || r.curfew);
-            return (
-              <g key={id} className={`map-place${picked === id ? " picked" : ""}`} onClick={() => !me && setPicked(id)} role="button" aria-label={me ? "Ton domaine" : r?.name}>
-                {color && <circle cx={cx} cy={cy} r={cell * 0.48} fill={color} opacity={0.35} />}
-                <text x={cx} y={cy} className="map-icon">
-                  {me ? "⭐" : r?.isLord ? r.blazon : "🛡️"}
-                </text>
-                {guarded && (
-                  <text x={cx + cell * 0.32} y={cy - cell * 0.28} className="map-badge">
-                    {r?.curfew ? "🌙" : "🔰"}
-                  </text>
-                )}
-              </g>
-            );
-          })}
-        </svg>
+      <div className="map-tools">
+        <button className="btn" aria-pressed={names} onClick={toggleNames}>
+          🏷️ Noms
+        </button>
+        <button className="btn" aria-pressed={zoomed} onClick={() => setZoomed((z) => !z)}>
+          {zoomed ? "🗺️ Vue d'ensemble" : "🔍 Agrandir"}
+        </button>
+      </div>
+      <div className={`kingdom-map${zoomed ? " zoomed" : ""}`}>
+        <div className="map-scroll" ref={scroller}>
+          <MapBoard
+            size={map.size}
+            belfry={[map.belfry[0], map.belfry[1]]}
+            fortress={[map.fortress[0], map.fortress[1]]}
+            fortressName={snap.fortress.name}
+            fortressColor={allianceColor(snap.fortress.holderId)}
+            stagesDone={stagesDoneAt(worldFrom(snap.worksite), now)}
+            stagesTotal={STAGES.length}
+            places={places}
+            event={ev}
+            now={now}
+            marches={marches}
+            incoming={incoming}
+            picked={picked}
+            onPick={setPicked}
+            showNames={names || zoomed}
+            travel={travel}
+            meColor={allianceColor(myAlliance)}
+          />
+        </div>
+        <ul className="map-legend" aria-label="Légende">
+          <li>
+            <svg viewBox="-20 -24 40 40" aria-hidden>
+              <use href="#mg-house1" style={{ ["--roof" as string]: allianceColor(myAlliance) ?? "var(--map-roof)" }} />
+            </svg>
+            Joueurs (toit aux couleurs de l&apos;alliance)
+          </li>
+          <li>
+            <svg viewBox="-20 -24 40 40" aria-hidden>
+              <use href="#mg-lord2" />
+            </svg>
+            Seigneurs (plus grands, plus redoutables)
+          </li>
+          <li>
+            <svg viewBox="-20 -22 40 40" aria-hidden>
+              <use href="#mg-flag" />
+            </svg>
+            Ton armée en route
+          </li>
+          <li>
+            <svg viewBox="-20 -14 40 30" aria-hidden>
+              <path d="M-17 10 A17 17 0 0 1 17 10" className="map-shield" />
+            </svg>
+            Sous bouclier
+          </li>
+        </ul>
       </div>
       <Marches snap={snap} now={now} run={run} />
       {rival ? (
         <>
           <p className="raid-state">
-            📍 {rival.name} est à {(placeDistance(map.places[rival.id]) ?? 0).toLocaleString("fr-FR", { maximumFractionDigits: 1 })} cases de chez toi.
+            📍 {rival.name} est à {(pickedDistance ?? 0).toLocaleString("fr-FR", { maximumFractionDigits: 1 })} cases de chez toi
+            {travel ? `, ${travel.label.replace("≈", "environ")} de marche` : ""}.
           </p>
           {rival.allied ? (
             <p className="note">C&apos;est un allié : tu peux lui envoyer des renforts depuis l&apos;onglet Alliance.</p>
@@ -2474,7 +2543,7 @@ function KingdomMap({ snap, live, now, run }: { snap: GameSnapshot; live: Player
                 now={now}
                 busy={busy}
                 onRaid={(t, troops) => act(t, { type: "raid", target: t, troops })}
-                distance={placeDistance(map.places[rival.id]) ?? undefined}
+                distance={pickedDistance ?? undefined}
                 onSpy={(t) => act(t, { type: "spy", target: t })}
                 spyPrice={spyPrice}
                 stone={live.stone}
@@ -2486,7 +2555,7 @@ function KingdomMap({ snap, live, now, run }: { snap: GameSnapshot; live: Player
           )}
         </>
       ) : (
-        <p className="empty">Touche un domaine sur la carte.</p>
+        <p className="empty">Touche un domaine ou un seigneur sur la carte pour ouvrir sa fiche.</p>
       )}
     </>
   );
