@@ -1914,7 +1914,7 @@ function GuildHall({ snap, live, now, run }: { snap: GameSnapshot; live: PlayerS
         <span style={{ width: `${pct}%` }} />
       </div>
       <div className="bar-caption num">
-        <span>{done ? `${formatNumber(h.received)} pierres reçues` : `${formatNumber(h.progress)} / ${formatNumber(h.cost)}`}</span>
+        <span>{done ? `${formatNumber(h.received)} pierres reçues` : `${formatNumber(h.progress)} / ${formatNumber(h.cost)} (${pct.toLocaleString("fr-FR", { maximumFractionDigits: 2 })} %)`}</span>
         <span>{founding ? "fondation" : done ? `achevée (${h.maxStages}/${h.maxStages})` : `étape ${h.stage + 1}/${h.maxStages}`}</span>
       </div>
       <form
@@ -1931,7 +1931,15 @@ function GuildHall({ snap, live, now, run }: { snap: GameSnapshot; live: PlayerS
         <button type="button" className="btn" disabled={busy || live.stone < 1} onClick={() => give(live.stone / 10)}>
           10 %
         </button>
+        <button type="button" className="btn" disabled={busy || live.stone < 1} onClick={() => give(live.stone / 2)}>
+          50 %
+        </button>
       </form>
+      {!done && (
+        <p className="note num">
+          Il manque {formatNumber(Math.max(0, h.cost - h.progress))} pierres. Ta part déjà versée : {formatNumber(h.gifts.find((x) => x.id === snap.userId)?.amount ?? 0)}.
+        </p>
+      )}
       <label className="hall-tithe">
         Part de ta dîme pour {g.lodge ? "ta loge" : "la halle"} :{" "}
         <select className="input" value={tithe} disabled={busy} onChange={(e) => act({ type: "hall", op: "tithe", percent: Number(e.target.value) })}>

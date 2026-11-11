@@ -3541,7 +3541,7 @@ async function runHallAction(
       const done = await giveToGuild(admin, mine, me.id, amount, perSecond, entities);
       const founding = mine.stage < 0;
       return {
-        message: done > 0 ? (founding ? `🏛️ Versé ! ${lodge ? "Ta loge" : "La halle"} est fondée.` : "🏛️ Versé ! Étape terminée : un niveau d'aile à placer.") : `🏛️ ${amount.toLocaleString("fr-FR")} pierres versées à ${lodge ? "ta loge" : "la halle"}.`,
+        message: done > 0 ? (founding ? `🏛️ Versé ! ${lodge ? "Ta loge" : "La halle"} est fondée.` : "🏛️ Versé ! Étape terminée : un niveau d'aile à placer.") : `🏛️ ${amount.toLocaleString("fr-FR")} pierres versées à ${lodge ? "ta loge" : "la halle"} (${((Math.min(mine.cost, mine.progress + amount) / Math.max(1, mine.cost)) * 100).toLocaleString("fr-FR", { maximumFractionDigits: 2 })} % de ${founding ? "la fondation" : "l'étape"}).`,
         state: paid,
       };
     }
