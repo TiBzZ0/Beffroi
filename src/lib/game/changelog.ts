@@ -370,4 +370,9 @@ export const CHANGELOG: ChangeEntry[] = [
       "🕵️ Nouvelle quête du jour pour qui a un niveau d'espionnage : envoyer une reconnaissance.",
     ],
   },
+  {
+    id: 44,
+    date: "11 novembre",
+    items: ["🏛️ Fonder la halle donne tout de suite un niveau d'aile à placer, en plus d'un par étape terminée."],
+  },
 ];

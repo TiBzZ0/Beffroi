@@ -3701,7 +3701,7 @@ async function runHallAction(
       if (!mine) return { error: "Pas de halle." };
       if (!isChief) return { error: "Seul le chef place les niveaux d'aile. Propose ton choix dans le canal d'alliance." };
       const wing = String(action.wing) as WingId;
-      const available = Math.max(0, mine.stage) + masterLevelsOf(mine, lotsOf.get(entities) ?? []);
+      const available = foundedLevels(mine.stage) + masterLevelsOf(mine, lotsOf.get(entities) ?? []);
       const blocked = wingBlocker(mine.wings, wing, available, lodge);
       if (blocked) return { error: blocked };
       const { data } = await admin.rpc("hall_place", { p_hall: mine.id, p_wing: wing, p_available: available, p_max_kinds: lodge ? LODGE_MAX_WINGS : WING_IDS.length });
@@ -3748,7 +3748,7 @@ function guildView(me: Entity, state: PlayerState, entities: Map<string, Entity>
             .map(([id, amount]) => ({ id, name: entities.get(id)?.name ?? "Ancien membre", amount }))
             .sort((a, b) => b.amount - a.amount),
           wings: g.wings,
-          available: Math.max(0, g.stage) + masterLevels,
+          available: foundedLevels(g.stage) + masterLevels,
           placed: placedLevels(g.wings),
           masterLevels,
           garrison: Object.entries(g.garrison).map(([id, troops]) => ({ id, name: entities.get(id)?.name ?? "?", troops })),
@@ -3786,6 +3786,11 @@ function cleanSpies(raw: unknown): SpyMission[] {
 
 /** Alertes de taupe gardées dans le journal. */
 const SPY_LOG_MAX = 20;
+
+/** Niveaux d'aile gagnés par le chantier : un à la fondation, puis un par étape terminée. */
+function foundedLevels(stage: number): number {
+  return stage < 0 ? 0 : stage + 1;
+}
 
 function cleanMoles(raw: unknown): Mole[] {
   if (!Array.isArray(raw)) return [];
