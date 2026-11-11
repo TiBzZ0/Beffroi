@@ -30,6 +30,7 @@ import {
   ELAN_MAX_MS,
   MIN_TARGET_SIZE,
   PVP_LOOT_CAP_SECONDS,
+  LORD_LOOT_CAP_SECONDS,
   INFIRMARY_MS,
   WOUNDED_WINNER,
   WOUNDED_ATTACKER_BEATEN,
@@ -1186,7 +1187,8 @@ export function resolveRaid(
   const stolen = lootOf(victim.stone, ctx.victimRate, revenge, {
     extraSecured: extraSecured(victim, now),
     lord: !!ctx.defenderArmy,
-    cap: playerVsPlayer && ctx.attackerRate !== undefined ? ctx.attackerRate * PVP_LOOT_CAP_SECONDS : undefined,
+    // Un seigneur prend au plus 30 minutes de la production de sa victime, revanche comprise.
+    cap: ctx.attackerIsLord ? ctx.victimRate * LORD_LOOT_CAP_SECONDS : playerVsPlayer && ctx.attackerRate !== undefined ? ctx.attackerRate * PVP_LOOT_CAP_SECONDS : undefined,
     factor: factor * lootBonus,
     stagesDone: ctx.stagesDone,
   });

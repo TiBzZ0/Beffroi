@@ -551,6 +551,8 @@ export const SABOTAGE_IMMUNITY_MS = 60 * 60 * 1000;
 
 // Raids entre joueurs (audit, vague 1).
 /** A6 : butin plafonné à 2 h de production de l'attaquant, revanche comprise. */
+/** Butin d'un seigneur sur un joueur : au plus 30 minutes de la production de la victime, revanche comprise. */
+export const LORD_LOOT_CAP_SECONDS = 30 * 60;
 export const PVP_LOOT_CAP_SECONDS = 2 * 60 * 60;
 /** A6 : on ne peut pas attaquer une cible dont la taille relative est sous 0,1 (sauf guerre et revanche). */
 export const MIN_TARGET_SIZE = 0.1;

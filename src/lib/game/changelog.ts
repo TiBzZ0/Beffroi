@@ -269,4 +269,12 @@ export const CHANGELOG: ChangeEntry[] = [
       "🏆 Nouvel événement, le tournoi (1 h) : compose une armée avec le budget fourni, sans toucher à tes troupes. Tableau à élimination à la fin, sans pertes : 2 h, 1 h et 30 min de production pour le podium.",
     ],
   },
+  {
+    id: 33,
+    date: "11 novembre",
+    items: [
+      "🛡️ Les seigneurs pillards prennent désormais au plus 30 minutes de ta production par raid, revanche comprise.",
+      "🏰 Correctif : un siège perdu fait bien perdre 10 % à l'étape en cours, quelle qu'elle soit.",
+    ],
+  },
 ];

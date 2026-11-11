@@ -93,6 +93,14 @@ describe("raids", () => {
     expect(r.value.victim.defenses).toEqual({ palissade: 10 });
   });
 
+  it("un seigneur prend au plus 30 minutes de la production de sa victime", () => {
+    const victim = player({ stone: 10_000_000, troops: {} });
+    const r = resolveRaid(player({ troops: {} }), victim, ctx({ attackerIsLord: true, attackerArmy: { chevalier: 50 }, victimRate: 10 }));
+    if (!r.ok) throw new Error(r.error);
+    expect(r.value.report.success).toBe(true);
+    expect(r.value.report.stolen).toBe(10 * 30 * 60);
+  });
+
   it("une cible trop petite ne peut pas être attaquée, sauf en revanche ou en guerre", () => {
     const victim = player({ troops: {} });
     expect(resolveRaid(player(), victim, ctx({ relativeSize: 0.05 })).ok).toBe(false);
