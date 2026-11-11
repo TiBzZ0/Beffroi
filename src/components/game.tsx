@@ -1325,7 +1325,7 @@ function AllianceTab({ snap, live, now, run }: { snap: GameSnapshot; live: Playe
     <>
       <Marches snap={snap} now={now} run={run} />
       <Alliance snap={snap} run={run} />
-      <GuildHall snap={snap} live={live} run={run} />
+      <GuildHall snap={snap} live={live} now={now} run={run} />
       <Fortress snap={snap} live={live} now={now} run={run} />
       {snap.alliance && <Wars snap={snap} run={run} now={now} />}
       {allies.length > 0 && (
@@ -1616,7 +1616,9 @@ function Marches({ snap, now, run }: { snap: GameSnapshot; now: number; run: Ret
             ? "le trésor"
             : id.startsWith("camp:")
               ? "un camp de bandits"
-              : (snap.rivals.find((r) => r.id === id)?.name ?? "une cible");
+              : id.startsWith("hall:")
+                ? (snap.map?.halls?.find((h) => `hall:${h.id}` === id)?.name ?? "une halle")
+                : (snap.rivals.find((r) => r.id === id)?.name ?? "une cible");
   return (
     <ul className="marches">
       {list.map((m) => {
@@ -1627,14 +1629,14 @@ function Marches({ snap, now, run }: { snap: GameSnapshot; now: number; run: Ret
         return (
           <li key={m.id}>
             <span>
-              {back ? "↩️" : m.kind === "reinforce" || m.kind === "station" ? "🛡️" : m.kind === "fortress" ? "🏰" : "🏇"} {armyIcons(m.troops, "plus personne")}{" "}
+              {back ? "↩️" : m.kind === "reinforce" || m.kind === "station" || m.kind === "hall_station" ? "🛡️" : m.kind === "fortress" ? "🏰" : m.kind === "hall_siege" ? "🏛️" : "🏇"} {armyIcons(m.troops, "plus personne")}{" "}
               {camp
                 ? `postée sur ${nameOf(m.target)}`
                 : back
                 ? `rentre de ${nameOf(m.target)}`
-                : m.kind === "reinforce" || m.kind === "station"
+                : m.kind === "reinforce" || m.kind === "station" || m.kind === "hall_station"
                   ? `en renfort vers ${nameOf(m.target)}`
-                  : m.kind === "fortress"
+                  : m.kind === "fortress" || m.kind === "hall_siege"
                     ? `à l'assaut de ${nameOf(m.target)}`
                     : `vers ${nameOf(m.target)}`}
               {verdict ? ` (${verdict})` : ""} · {left > 0 ? duration(left) : "imminent"}
@@ -1781,11 +1783,54 @@ function Forge({ live, now, run, stagesDone }: { live: PlayerState; now: number;
 
 /** Mon alliance : fondation, invitations, troupes postées. */
 /** Halle de guilde (H1 à H6), ou loge d'un joueur seul. */
-function GuildHall({ snap, live, run }: { snap: GameSnapshot; live: PlayerState; run: ReturnType<typeof useGame>["run"] }) {
+function GuildHall({ snap, live, now, run }: { snap: GameSnapshot; live: PlayerState; now: number; run: ReturnType<typeof useGame>["run"] }) {
   const [amount, setAmount] = useState("");
   const [busy, setBusy] = useState(false);
+  const [unit, setUnit] = useState("");
+  const [qty, setQty] = useState(1);
+  const [aim, setAim] = useState<Record<number, string>>({});
   const g = snap.guild;
   if (!g) return null;
+  const available = UNITS.filter((u) => (live.troops[u.id] ?? 0) > 0);
+  const chosen = available.find((u) => u.id === unit) ?? available[0];
+  const sieges = g.targets.length > 0 && (
+    <>
+      <h4 className="hall-sub">⚔️ Halles ennemies</h4>
+      <p className="note">En guerre, une halle peut être prise d&apos;assaut : l&apos;aile visée est hors service 24 h, rien n&apos;est détruit ni volé. La halle est ensuite à l&apos;abri 24 h.</p>
+      <div className="list">
+        {g.targets.map((t) => {
+          const wings = WINGS.filter((w) => (t.wings[w.id] ?? 0) > 0);
+          const target = aim[t.id] ?? wings[0]?.id ?? "";
+          return (
+            <div key={t.id} className="row">
+              <div className="row-icon" aria-hidden>
+                🏛️
+              </div>
+              <div>
+                <div className="row-title">Halle · {t.name}</div>
+                <div className="row-desc">
+                  {wings.length ? wings.map((w) => `${w.icon} ${t.wings[w.id]}`).join("  ") : "Aucune aile en service."} · chance ≈ {Math.round(t.chance * 100)} %
+                  {t.blocker ? ` · ${t.blocker}` : ""}
+                </div>
+                {wings.length > 0 && (
+                  <select className="input" value={target} onChange={(e) => setAim({ ...aim, [t.id]: e.target.value })} aria-label="Aile visée">
+                    {wings.map((w) => (
+                      <option key={w.id} value={w.id}>
+                        Viser : {w.name}
+                      </option>
+                    ))}
+                  </select>
+                )}
+              </div>
+              <button className="btn btn-primary" disabled={busy || t.blocker !== null} onClick={() => act({ type: "hall", op: "siege", hall: t.id, wing: target || undefined })}>
+                Assaut
+              </button>
+            </div>
+          );
+        })}
+      </div>
+    </>
+  );
   const act = async (action: Parameters<typeof run>[0]) => {
     setBusy(true);
     await run(action);
@@ -1810,6 +1855,7 @@ function GuildHall({ snap, live, run }: { snap: GameSnapshot; live: PlayerState;
         ) : (
           <p className="note">Seul le chef{g.chiefName ? ` (${g.chiefName})` : ""} peut la fonder.</p>
         )}
+        {sieges}
       </div>
     );
   }
@@ -1868,6 +1914,7 @@ function GuildHall({ snap, live, run }: { snap: GameSnapshot; live: PlayerState;
       <div className="list">
         {WINGS.map((w) => {
           const lvl = h.wings[w.id] ?? 0;
+          const down = h.disabled[w.id] ?? 0;
           const blocked = lvl >= 3 || (g.lodge && lvl === 0 && kinds >= 2);
           return (
             <div key={w.id} className={`row${lvl === 0 ? " hall-off" : ""}`}>
@@ -1879,7 +1926,11 @@ function GuildHall({ snap, live, run }: { snap: GameSnapshot; live: PlayerState;
                   {w.name}
                   <span className="row-count num">{lvl}/3</span>
                 </div>
-                <div className="row-desc">{lvl > 0 ? w.levels[lvl - 1] : "Pas encore bâtie."}{lvl < 3 ? ` · niveau ${lvl + 1} : ${w.levels[lvl]}` : ""}</div>
+                <div className="row-desc">
+                  {down > now ? `🔥 Hors service encore ${duration(down - now)} · ` : ""}
+                  {lvl > 0 ? w.levels[lvl - 1] : "Pas encore bâtie."}
+                  {lvl < 3 ? ` · niveau ${lvl + 1} : ${w.levels[lvl]}` : ""}
+                </div>
               </div>
               {g.chief && free > 0 && !blocked && (
                 <button className="btn btn-primary" disabled={busy} onClick={() => act({ type: "hall", op: "place", wing: w.id })}>
@@ -1893,6 +1944,43 @@ function GuildHall({ snap, live, run }: { snap: GameSnapshot; live: PlayerState;
       {h.gifts.length > 0 && (
         <p className="note num">Versements : {h.gifts.map((x) => `${x.id === snap.userId ? "toi" : x.name} ${formatNumber(x.amount)}`).join(" · ")}</p>
       )}
+      {!g.lodge && (
+        <>
+          <h4 className="hall-sub">🛡️ Garnison</h4>
+          <p className="row-desc num">
+            Murs : {armyIcons(h.walls as Record<string, number>, "aucun")} (10 % de la pierre reçue)
+            {h.immuneUntil > now ? ` · à l'abri des assauts encore ${duration(h.immuneUntil - now)}` : ""}
+          </p>
+          <p className="row-desc num">
+            Troupes postées :{" "}
+            {h.garrison.length === 0 ? "aucune" : h.garrison.map((x) => `${x.id === snap.userId ? "toi" : x.name} ${armyIcons(x.troops as Record<string, number>)}`).join(" · ")}
+          </p>
+          {chosen ? (
+            <div className="reinforce">
+              <select className="input" value={chosen.id} onChange={(e) => setUnit(e.target.value)} aria-label="Troupe à poster">
+                {available.map((u) => (
+                  <option key={u.id} value={u.id}>
+                    {u.icon} {u.plural} ({live.troops[u.id]})
+                  </option>
+                ))}
+              </select>
+              <input className="input input-qty" type="number" min={1} value={qty} onChange={(e) => setQty(Math.max(1, Math.floor(Number(e.target.value) || 1)))} aria-label="Nombre" />
+              <button className="btn btn-primary" disabled={busy} onClick={() => act({ type: "hall", op: "station", unit: chosen.id, qty: Math.min(qty, live.troops[chosen.id] ?? 0) })}>
+                Poster
+              </button>
+            </div>
+          ) : (
+            <p className="row-desc">Aucune troupe chez toi à poster à la halle.</p>
+          )}
+          {h.garrison.some((x) => x.id === snap.userId) && (
+            <button className="btn" disabled={busy} onClick={() => act({ type: "hall", op: "recall" })}>
+              Rappeler mes troupes de la halle
+            </button>
+          )}
+          <p className="note">Seule une alliance en guerre avec la vôtre peut assiéger la halle. Un assaut réussi met une aile hors service 24 h, sans rien détruire.</p>
+        </>
+      )}
+      {sieges}
     </div>
   );
 }
@@ -2534,6 +2622,12 @@ function Chronicle({ entries, me, now, rivals, alliances = [] }: { entries: Chro
           text = d.master
             ? `👑 ${d.name} finit son lot de « ${stageName} » le premier et devient maître d'œuvre !`
             : `🏗️ ${d.name} finit son lot de « ${stageName} ».`;
+        } else if (e.kind === "hall_siege") {
+          const d = e.details as { success?: boolean; target?: number; wing?: string | null };
+          const wing = WINGS.find((w) => w.id === d.wing)?.name;
+          text = d.success
+            ? `🏛️ ${who(e.actorId, e.actorName, true)} ${e.actorId === me ? "as pris" : "a pris"} d'assaut la halle de ${allianceName(d.target)}${wing ? ` : aile « ${wing} » hors service 24 h` : ""}.`
+            : `🏛️ ${who(e.actorId, e.actorName, true)} ${e.actorId === me ? "t'es brisé" : "s'est brisé"} sur les murs de la halle de ${allianceName(d.target)}.`;
         } else if (e.kind === "hall") {
           text = `🏛️ ${who(e.actorId, e.actorName, true)} ${e.actorId === me ? "as fondé" : "a fondé"} la halle de ${allianceName(e.details.alliance)}.`;
         } else if (e.kind === "gift") {
@@ -2683,7 +2777,9 @@ function KingdomMap({ snap, live, now, run }: { snap: GameSnapshot; live: Player
                 ? evPos
                 : camp
                   ? camp.pos
-                  : map.places[m.target];
+                  : m.target.startsWith("hall:")
+                    ? map.halls?.find((h) => `hall:${h.id}` === m.target)?.pos
+                    : map.places[m.target];
         if (!target) return [];
         const f =
           m.status === "camp"

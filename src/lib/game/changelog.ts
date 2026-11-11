@@ -332,4 +332,13 @@ export const CHANGELOG: ChangeEntry[] = [
       "🏠 Seul, tu peux fonder une petite loge (4 étapes, deux ailes). Si tu rejoins une alliance qui a sa halle, la moitié de ce que tu lui as versé y passe.",
     ],
   },
+  {
+    id: 40,
+    date: "11 novembre",
+    items: [
+      "🛡️ Halle de guilde : les membres peuvent y poster une garnison. Ses murs valent 10 % de toute la pierre qu'elle a reçue.",
+      "⚔️ En guerre, on peut prendre d'assaut la halle ennemie. Si l'assaut réussit, l'aile visée est hors service 24 heures, rien n'est détruit ni volé, et la halle est ensuite à l'abri 24 heures. Rançon, infirmerie et équité comme entre joueurs.",
+      "🐛 Correction : une armée envoyée vers un événement pouvait faire demi-tour sans combattre. C'est réglé.",
+    ],
+  },
 ];

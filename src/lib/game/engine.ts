@@ -3,6 +3,7 @@
 
 import type { DailyState } from "./daily";
 import { wingLevel, type Wings } from "./hall";
+import type { WingId } from "./config";
 import {
   BURN_CLICK_REDUCTION_MS,
   BURN_MS,
@@ -261,7 +262,9 @@ export function buyFromMerchant(state: PlayerState, choice: string, eventId: num
 export interface March {
   id: string;
   /** Raid, renforts envoyés à un allié, assaut ou garnison de la forteresse (T6). */
-  kind: "raid" | "reinforce" | "fortress" | "station" | "event";
+  kind: "raid" | "reinforce" | "fortress" | "station" | "event" | "hall_station" | "hall_siege";
+  /** H5 : aile visée par un assaut de halle. */
+  wing?: WingId;
   target: string;
   troops: Army;
   departAt: number;

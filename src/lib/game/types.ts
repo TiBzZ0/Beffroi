@@ -105,7 +105,7 @@ export interface AwaySummary {
 export interface ChronicleEntry {
   id: number;
   at: number;
-  kind: "raid" | "gift" | "spy" | "war" | "fortress" | "event" | "sabotage" | "lot" | "hall";
+  kind: "raid" | "gift" | "spy" | "war" | "fortress" | "event" | "sabotage" | "lot" | "hall" | "hall_siege";
   actorId: string | null;
   actorName: string;
   targetId: string | null;
@@ -197,7 +197,14 @@ export interface HallView {
     available: number;
     placed: number;
     masterLevels: number;
+    /** H5 : garnison, murs, ailes hors service (jusqu'à) et protection après un assaut. */
+    garrison: { id: string; name: string; troops: Partial<Record<string, number>> }[];
+    walls: Partial<Record<string, number>>;
+    disabled: Partial<Record<string, number>>;
+    immuneUntil: number;
   } | null;
+  /** Halles ennemies (en guerre) qu'on peut assiéger. */
+  targets: { id: number; name: string; wings: Partial<Record<string, number>>; chance: number; blocker: string | null; immuneUntil: number }[];
   /** Ma loge qui attend d'être versée dans la halle de mon alliance. */
   dormantLodge: boolean;
 }
@@ -302,7 +309,7 @@ export type GameAction =
   | { type: "march_recall"; id: string }
   | { type: "tournament_join"; troops: Record<string, number> }
   | { type: "daily"; op: "claim" | "swap" | "chest"; index: number }
-  | { type: "hall"; op: "found" | "give" | "tithe" | "place"; amount?: number; percent?: number; wing?: string }
+  | { type: "hall"; op: "found" | "give" | "tithe" | "place" | "station" | "recall" | "siege"; amount?: number; percent?: number; wing?: string; unit?: string; qty?: number; hall?: number; troops?: Record<string, number> }
   | { type: "academy" }
   | { type: "tithe"; percent: number }
   | { type: "curfew"; start: number | null }

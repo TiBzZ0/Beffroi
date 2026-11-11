@@ -106,6 +106,9 @@ import {
   mapDistance,
   type MapPos,
   HALL_FOUND_HOURS,
+  HALL_SIEGE_IMMUNITY_MS,
+  HALL_WALLS_SHARE,
+  HALL_WING_DOWN_MS,
   HALL_TITHE_DEFAULT,
   HALL_TITHE_MAX,
   LODGE_MAX_WINGS,
@@ -497,7 +500,7 @@ async function loadEntities(admin: SupabaseClient, seasonId: number, userId: str
   guildsOf.set(entities, guilds);
   for (const e of entities.values()) {
     const g = e.isLord ? undefined : guildOf(e, guilds);
-    if (g) e.state = { ...e.state, hall: g.wings };
+    if (g) e.state = { ...e.state, hall: activeWings(g, Date.now()) };
   }
   return entities;
 }
@@ -1808,6 +1811,7 @@ async function runAllianceAction(
       if (me.allianceId === null) return { error: "Tu n'as pas d'alliance." };
       const { data: fort } = await admin.from("fortresses").select("garrison").eq("season_id", seasonId).maybeSingle();
       if ((fort?.garrison as Record<string, unknown> | null)?.[me.id]) return { error: "Rappelle d'abord tes troupes de la forteresse." };
+      if ((guildsOf.get(entities) ?? []).some((g) => g.garrison[me.id])) return { error: "Rappelle d'abord tes troupes de la halle." };
       const { mine, others } = unwindGarrisons(me, current, entities, advanceOf);
       if (others.length > 0 && (await writeStates(admin, seasonId, [{ e: me, state: mine }, ...others], "alliance_leave", {})) === "conflict") return "conflict";
       const left = me.allianceId;
@@ -2223,7 +2227,7 @@ export async function runAction(admin: SupabaseClient, userId: string, action: G
         self.version += 1;
         return "ok" as const;
       };
-      const r = await runHallAction(admin, season.id, self, current, entities, action, world, now, commit);
+      const r = await runHallAction(admin, season.id, self, current, entities, action, world, now, commit, conflicts.wars);
       if (r === "conflict") continue;
       if (r.error) error = r.error;
       message = r.message;
@@ -2502,7 +2506,7 @@ export async function runAction(admin: SupabaseClient, userId: string, action: G
       map: { ...mapView(positions), halls: guildPlaces(entities, names) },
       incoming: incomingFor(userId, entities, now),
       daily: dailyView(finalState, dailyCounts, now),
-      guild: guildView(meNow, entities, chiefs, worldFrom(worksite), now),
+      guild: guildView(meNow, finalState, entities, chiefs, worldFrom(worksite), now, conflicts.wars, names),
     };
     return error ? { ok: false, error, snapshot } : { ok: true, snapshot, message };
   }
@@ -2519,7 +2523,8 @@ function cleanMarches(raw: unknown): March[] {
     .filter((m) => m && typeof m === "object" && typeof m.id === "string" && typeof m.target === "string")
     .map((m) => ({
       id: String(m.id),
-      kind: (["reinforce", "fortress", "station"].includes(m.kind) ? m.kind : "raid") as March["kind"],
+      // Toutes les sortes d'armées doivent survivre à la relecture (sinon une marche d'événement redevient un raid).
+      kind: (["reinforce", "fortress", "station", "event", "hall_station", "hall_siege"].includes(m.kind) ? m.kind : "raid") as March["kind"],
       target: String(m.target),
       troops: armyCounts(m.troops ?? {}, UNIT_IDS) as Army,
       departAt: Number(m.departAt) || 0,
@@ -2529,6 +2534,7 @@ function cleanMarches(raw: unknown): March[] {
       revealed: m.revealed === true,
       warned: m.warned === true,
       ...(m.hidden === true ? { hidden: true } : {}),
+      ...((WING_IDS as string[]).includes(m.wing) ? { wing: m.wing as WingId } : {}),
       loot: Math.max(0, Number(m.loot) || 0),
       ransom: Math.max(0, Number(m.ransom) || 0),
       ...(["won", "lost", "turned", "recalled"].includes(m.outcome) ? { outcome: m.outcome } : {}),
@@ -2700,6 +2706,8 @@ async function settleMarches(
     if (r.message && !owner.isLord) notify(admin, [owner.id], { title: ev.kind === "caravane" ? "🐪 Caravane" : "🗿 Colosse", body: r.message.replace(/^\S+\s/, ""), tag: "event" });
     return "changed";
   }
+
+  if (m.kind === "hall_station" || m.kind === "hall_siege") return settleHallMarch(admin, seasonId, owner, m, at, entities, world, flat, wars, names, replace, commit);
 
   if (m.kind === "station") {
     // T6 : la garnison n'entre que si son alliance tient encore la forteresse.
@@ -3245,6 +3253,11 @@ interface Guild {
   received: number;
   gifts: Record<string, number>;
   wings: Wings;
+  /** H5 : troupes postées par les membres, ailes hors service (jusqu'à), protection après un assaut. */
+  garrison: PlayerState["stationed"];
+  disabled: Partial<Record<WingId, number>>;
+  immuneUntil: number;
+  version: number;
 }
 
 /** Halles chargées avec les participants (même requête). */
@@ -3263,7 +3276,143 @@ async function loadGuilds(admin: SupabaseClient, seasonId: number): Promise<Guil
     received: Number(r.received),
     gifts: Object.fromEntries(Object.entries((r.gifts as Record<string, unknown>) ?? {}).map(([k, v]) => [k, Number(v) || 0])),
     wings: cleanWings(r.wings),
+    garrison: Object.fromEntries(
+      Object.entries((r.garrison as Record<string, Record<string, number>>) ?? {})
+        .map(([owner, g]) => [owner, armyCounts(g, UNIT_IDS)] as const)
+        .filter(([, g]) => Object.keys(g).length > 0),
+    ),
+    disabled: Object.fromEntries(Object.entries((r.disabled as Record<string, unknown>) ?? {}).map(([k, v]) => [k, Number(v) || 0])) as Partial<Record<WingId, number>>,
+    immuneUntil: Number(r.immune_until ?? 0),
+    version: Number(r.version ?? 0),
   }));
+}
+
+/** Ailes en service : une aile mise à bas par un assaut ne compte plus pendant 24 h. */
+function activeWings(g: Guild, now: number): Wings {
+  return Object.fromEntries(Object.entries(g.wings).filter(([id]) => !((g.disabled[id as WingId] ?? 0) > now))) as Wings;
+}
+
+/** H5 : défense de la halle, murs (10 % de la pierre reçue, comme ceux de la forteresse) et garnison. */
+function hallDefense(g: Guild): Army {
+  const army: Army = armyFromBudget(g.received * HALL_WALLS_SHARE, FORTRESS_WALLS);
+  for (const group of Object.values(g.garrison)) for (const [id, n] of Object.entries(group) as [UnitId, number][]) army[id] = (army[id] ?? 0) + n;
+  return army;
+}
+
+function hallLevels(g: Guild, entities: Map<string, Entity>): Levels {
+  const out: Levels = {};
+  for (const [owner, group] of Object.entries(g.garrison)) {
+    const lv = entities.get(owner)?.state.levels ?? {};
+    for (const id of Object.keys(group) as UnitId[]) out[id] = Math.max(out[id] ?? 0, lv[id] ?? 0);
+  }
+  return out;
+}
+
+/** Taille d'une alliance : armée et production de tous ses membres (pour l'équité et la rançon). */
+function allianceSize(allianceId: number, entities: Map<string, Entity>, world: WorldState, now: number): { army: number; rate: number } {
+  return [...entities.values()]
+    .filter((e) => !e.isLord && e.allianceId === allianceId)
+    .reduce((acc, e) => {
+      const sz = attackerSizeOf(e.id, e.state, entities, rateAt(e.state, world, now));
+      return { army: acc.army + sz.army, rate: acc.rate + sz.rate };
+    }, { army: 0, rate: 0 });
+}
+
+function hallSiegeBlocker(me: Entity, state: PlayerState, g: Guild, wars: WarRow[], now: number, army?: Army): string | null {
+  if (g.allianceId === null) return "Une loge ne s'assiège pas.";
+  if (me.allianceId === null) return "Rejoins une alliance pour assiéger une halle.";
+  if (g.allianceId === me.allianceId) return "C'est la halle de ton alliance.";
+  if (!warBetween(wars, me.allianceId, g.allianceId, now)) return "On n'assiège une halle qu'en guerre contre son alliance.";
+  if (g.immuneUntil > now) return `Cette halle a déjà subi un assaut : à l'abri jusqu'à ${new Date(g.immuneUntil).toLocaleTimeString("fr-FR", { hour: "2-digit", minute: "2-digit", timeZone: "Europe/Paris" })}.`;
+  if (eventActive(state, "treve", now)) return "Trêve des cloches : aucune armée ne part.";
+  if (inCurfew(state, now)) return "Tu es en couvre-feu : pas d'attaque pendant ta plage.";
+  if (armySize(army ?? attackArmy(state)) === 0) return "Il te faut des troupes pour l'assaut.";
+  return null;
+}
+
+async function applyHall(admin: SupabaseClient, seasonId: number, g: Guild, states: { e: Entity; state: PlayerState }[], garrison: PlayerState["stationed"], disabled: Guild["disabled"], immuneUntil: number, act: string, details: Record<string, unknown>): Promise<"ok" | "conflict"> {
+  const { data, error } = await admin.rpc("apply_hall", { p_season: seasonId, p_states: states.map((x) => toJson(x.e, x.state)), p_hall: g.id, p_version: g.version, p_garrison: garrison, p_disabled: disabled, p_immune_until: immuneUntil, p_action: act, p_details: details });
+  if (error?.message.includes("beffroi_conflict") || (data as { conflict?: boolean } | null)?.conflict) return "conflict";
+  if (error) throw new Error(`Halle : ${error.message}`);
+  return "ok";
+}
+
+async function travelToHall(admin: SupabaseClient, seasonId: number, entities: Map<string, Entity>, fromId: string, g: Guild, army: Army): Promise<number> {
+  const positions = await loadPositions(admin, seasonId, entities);
+  const a = positions.get(fromId);
+  const owner = entities.get(fromId);
+  return travelMs(army, a ? mapDistance(a, g.pos) : MAP_SPAWN_RADIUS, owner ? armySpeedBonus(owner.state) : 0);
+}
+
+/** H5 : arrivée d'une garnison ou d'un assaut à une halle. */
+async function settleHallMarch(
+  admin: SupabaseClient,
+  seasonId: number,
+  owner: Entity,
+  m: March,
+  at: number,
+  entities: Map<string, Entity>,
+  world: WorldState,
+  flat: Map<string, number>,
+  wars: WarRow[],
+  names: Map<number, string>,
+  replace: (state: PlayerState, next: March | null) => PlayerState,
+  commit: (e: Entity, state: PlayerState) => Promise<"changed" | "conflict">,
+): Promise<"changed" | "conflict"> {
+  const outMs = m.arriveAt - m.departAt;
+  const g = (guildsOf.get(entities) ?? []).find((x) => `hall:${x.id}` === m.target);
+  const turned = () => commit(owner, replace(owner.state, { ...m, status: "back", returnAt: m.arriveAt + outMs, outcome: "turned" }));
+  if (!g) return turned();
+  if (m.kind === "hall_station") {
+    if (owner.allianceId === null || g.allianceId !== owner.allianceId) return turned();
+    const garrison = { ...g.garrison };
+    const group = { ...(garrison[owner.id] ?? {}) } as Record<string, number>;
+    for (const [u, n] of Object.entries(m.troops) as [string, number][]) if (n > 0) group[u] = (group[u] ?? 0) + n;
+    garrison[owner.id] = group as PlayerState["troops"];
+    const r = await applyHall(admin, seasonId, g, [{ e: owner, state: replace(owner.state, null) }], garrison, g.disabled, g.immuneUntil, "hall_station", {});
+    return r === "conflict" ? "conflict" : "changed";
+  }
+  // Assaut : il se joue à l'arrivée contre les murs et la garnison présents.
+  const aState = advanceEntity(owner, at, world, flat);
+  if (hallSiegeBlocker(owner, aState, g, wars, at, m.troops)) return turned();
+  const defense = hallDefense(g);
+  const levels = { attackerLevels: aState.levels, defenderLevels: hallLevels(g, entities) };
+  const chance = estimateChance(m.troops, defense, levels);
+  const fight = battle(m.troops, defense, Math.random, levels);
+  // Garnison : pertes au prorata ; les blessés des défenseurs se relèvent sur place.
+  const theirs = splitTroopLosses({ ...newPlayerState(at), stationed: g.garrison }, fight.defenderLost);
+  const garrison = theirs.stationed;
+  for (const [ownerId, lost] of Object.entries(theirs.byOwner)) {
+    const back = woundedOf(lost, fight.success ? WOUNDED_DEFENDER_BEATEN : WOUNDED_WINNER);
+    if (Object.keys(back).length === 0) continue;
+    const group = { ...(garrison[ownerId] ?? {}) } as Record<string, number>;
+    for (const [u, n] of Object.entries(back) as [string, number][]) group[u] = (group[u] ?? 0) + n;
+    garrison[ownerId] = group as PlayerState["troops"];
+  }
+  // Rançon et équité comme entre joueurs, la taille relative se calculant entre les deux alliances.
+  const relative = relativeSize(allianceSize(g.allianceId!, entities, world, at), allianceSize(owner.allianceId!, entities, world, at));
+  const ransom = fight.success ? ransomOf(Object.fromEntries(Object.entries(fight.defenderLost).filter(([id]) => (UNIT_IDS as string[]).includes(id))) as Army, fairness(relative, false)) : 0;
+  const survivors = cleanArmy(Object.fromEntries((Object.entries(m.troops) as [string, number][]).map(([id, n]) => [id, n - ((fight.attackerLost as Record<string, number>)[id] ?? 0)])) as Army);
+  const healed = addWounded(aState, woundedOf(fight.attackerLost, fight.success ? WOUNDED_WINNER : WOUNDED_ATTACKER_BEATEN), at);
+  const back: March = { ...m, troops: survivors, status: "back", returnAt: at + outMs, ransom: m.ransom + ransom, outcome: fight.success ? "won" : "lost" };
+  const after = replace(healed, armySize(survivors) > 0 ? back : null);
+  // L'aile visée, ou à défaut la plus haute encore en service.
+  const live = activeWings(g, at);
+  const wanted = m.wing && (live[m.wing] ?? 0) > 0 ? m.wing : (Object.entries(live).sort((a, b) => (b[1] ?? 0) - (a[1] ?? 0))[0]?.[0] as WingId | undefined);
+  const disabled = fight.success && wanted ? { ...g.disabled, [wanted]: at + HALL_WING_DOWN_MS } : g.disabled;
+  const immune = fight.success ? at + HALL_SIEGE_IMMUNITY_MS : g.immuneUntil;
+  const details = { success: fight.success, chance, rounds: fight.rounds, alliance: owner.allianceId, target: g.allianceId, wing: fight.success ? wanted ?? null : null, ransom, attackerLost: fight.attackerLost, defenderLost: fight.defenderLost, log: fight.log };
+  const r = await applyHall(admin, seasonId, g, [{ e: owner, state: after }], garrison, disabled, immune, "hall_siege", details);
+  if (r === "conflict") return "conflict";
+  const wingName = wanted ? WINGS.find((w) => w.id === wanted)?.name : null;
+  const defenders = [...entities.values()].filter((e) => !e.isLord && e.allianceId === g.allianceId).map((e) => e.id);
+  notify(admin, defenders, fight.success
+    ? { title: "🏛️ La halle a cédé !", body: `${owner.name} (${names.get(owner.allianceId!) ?? "l'ennemi"}) a mis ${wingName ? `l'aile « ${wingName} »` : "une aile"} hors service pour 24 h.`, tag: "hall" }
+    : { title: "🏛️ La halle a tenu", body: `${owner.name} s'est brisé sur vos murs.`, tag: "hall" });
+  notify(admin, [owner.id], fight.success
+    ? { title: "🏛️ Halle prise d'assaut", body: `${wingName ? `L'aile « ${wingName} »` : "Une aile"} est hors service pour 24 h.${ransom > 0 ? ` Rançon : ${ransom.toLocaleString("fr-FR")} pierres.` : ""}`, tag: "hall" }
+    : { title: "🏛️ Assaut repoussé", body: "La halle a tenu. Tes survivants rentrent.", tag: "hall" });
+  return "changed";
 }
 
 /** La halle qui profite à un joueur : celle de son alliance, ou sa loge s'il est seul. */
@@ -3334,6 +3483,7 @@ async function runHallAction(
   world: WorldState,
   now: number,
   commit: (state: PlayerState, act: string, details: Record<string, unknown>) => Promise<"ok" | "conflict">,
+  wars: WarRow[],
 ): Promise<"conflict" | { error?: string; message?: string; state?: PlayerState }> {
   const guilds = guildsOf.get(entities) ?? [];
   const mine = guildOf(me, guilds);
@@ -3389,6 +3539,47 @@ async function runHallAction(
       if ((await commit(next, "hall_tithe", { percent })) === "conflict") return "conflict";
       return { message: `⛪ ${percent} % de ta dîme ira à ${lodge ? "ta loge" : "la halle"}, le reste au beffroi.`, state: next };
     }
+    case "station": {
+      if (!mine || lodge) return { error: "Seule une halle d'alliance reçoit une garnison." };
+      const sending = sendTroops(current, { [String(action.unit)]: Number(action.qty) } as Army);
+      if (!sending.ok) return { error: sending.error };
+      const outMs = await travelToHall(admin, seasonId, entities, me.id, mine, sending.value.sent);
+      const march: March = { id: marchId(), kind: "hall_station", target: `hall:${mine.id}`, troops: sending.value.sent, departAt: now, arriveAt: now + outMs, status: "out", returnAt: 0, revealed: true, warned: true, loot: 0, ransom: 0 };
+      const sent = { ...sending.value.state, marches: [...(current.marches ?? []), march] };
+      if ((await commit(sent, "hall_station_march", { unit: action.unit, qty: action.qty })) === "conflict") return "conflict";
+      return { state: sent, message: `🏛️ Garnison en route vers la halle : arrivée dans ${Math.round(outMs / 60_000)} min.` };
+    }
+    case "recall": {
+      const g = guilds.find((x) => x.garrison[me.id]);
+      const group = g?.garrison[me.id];
+      if (!g || !group || Object.keys(group).length === 0) return { error: "Tu n'as pas de troupes à la halle." };
+      if ((current.marches ?? []).length >= MAX_MARCHES) return { error: `${MAX_MARCHES} armées en route au plus.` };
+      const outMs = await travelToHall(admin, seasonId, entities, me.id, g, group as Army);
+      const march: March = { id: marchId(), kind: "hall_station", target: `hall:${g.id}`, troops: { ...group } as Army, departAt: now - outMs, arriveAt: now, status: "back", returnAt: now + outMs, revealed: true, warned: true, loot: 0, ransom: 0, outcome: "recalled" };
+      const rest = { ...g.garrison };
+      delete rest[me.id];
+      const owner = { ...current, marches: [...(current.marches ?? []), march] };
+      if ((await applyHall(admin, seasonId, g, [{ e: me, state: owner }], rest, g.disabled, g.immuneUntil, "hall_recall", {})) === "conflict") return "conflict";
+      me.version += 1;
+      return { state: owner, message: `Tes troupes quittent la halle : retour dans ${Math.round(outMs / 60_000)} min.` };
+    }
+    case "siege": {
+      const g = guilds.find((x) => x.id === Number(action.hall));
+      if (!g) return { error: "Halle inconnue." };
+      const wanted = (action.troops ?? current.troops) as Army;
+      const sending = sendTroops(current, wanted);
+      if (!sending.ok) return { error: sending.error };
+      const early = hallSiegeBlocker(me, current, g, wars, now, sending.value.sent);
+      if (early) return { error: early };
+      const wing = (WING_IDS as string[]).includes(String(action.wing)) ? (String(action.wing) as WingId) : undefined;
+      const outMs = await travelToHall(admin, seasonId, entities, me.id, g, sending.value.sent);
+      const march: March = { id: marchId(), kind: "hall_siege", target: `hall:${g.id}`, troops: sending.value.sent, departAt: now, arriveAt: now + outMs, status: "out", returnAt: 0, revealed: true, warned: true, loot: 0, ransom: 0, ...(wing ? { wing } : {}) };
+      const sent = { ...sending.value.state, marches: [...(current.marches ?? []), march], lastRaidAt: now, shieldUntil: 0 };
+      if ((await commit(sent, "hall_siege_march", { hall: g.id, wing: wing ?? null, arriveAt: march.arriveAt })) === "conflict") return "conflict";
+      const defenders = [...entities.values()].filter((e) => !e.isLord && e.allianceId === g.allianceId).map((e) => e.id);
+      notify(admin, defenders, { title: "🏛️ La halle est menacée !", body: `Une armée de ${me.name} marche sur votre halle, arrivée vers ${new Date(march.arriveAt).toLocaleTimeString("fr-FR", { hour: "2-digit", minute: "2-digit", timeZone: "Europe/Paris" })}. Postez une garnison !`, tag: "hall" });
+      return { state: sent, message: `🏛️ Ton armée marche sur la halle : arrivée dans ${Math.round(outMs / 60_000)} min.` };
+    }
     case "place": {
       if (!mine) return { error: "Pas de halle." };
       if (!isChief) return { error: "Seul le chef place les niveaux d'aile. Propose ton choix dans le canal d'alliance." };
@@ -3416,7 +3607,7 @@ function guildPlaces(entities: Map<string, Entity>, names: Map<number, string>):
   }));
 }
 
-function guildView(me: Entity, entities: Map<string, Entity>, chiefs: Map<number, string | null>, world: WorldState, now: number): HallView {
+function guildView(me: Entity, state: PlayerState, entities: Map<string, Entity>, chiefs: Map<number, string | null>, world: WorldState, now: number, wars: WarRow[], names: Map<number, string>): HallView {
   const guilds = guildsOf.get(entities) ?? [];
   const g = guildOf(me, guilds);
   const lodge = me.allianceId === null;
@@ -3443,7 +3634,23 @@ function guildView(me: Entity, entities: Map<string, Entity>, chiefs: Map<number
           available: g.stage + masterLevels,
           placed: placedLevels(g.wings),
           masterLevels,
+          garrison: Object.entries(g.garrison).map(([id, troops]) => ({ id, name: entities.get(id)?.name ?? "?", troops })),
+          walls: armyFromBudget(g.received * HALL_WALLS_SHARE, FORTRESS_WALLS),
+          disabled: Object.fromEntries(Object.entries(g.disabled).filter(([, until]) => (until ?? 0) > now)),
+          immuneUntil: g.immuneUntil,
         }
       : null,
+    targets: me.allianceId === null
+      ? []
+      : guilds
+          .filter((x) => x.allianceId !== null && x.allianceId !== me.allianceId && warBetween(wars, me.allianceId, x.allianceId, now))
+          .map((x) => ({
+            id: x.id,
+            name: names.get(x.allianceId!) ?? "Alliance",
+            wings: activeWings(x, now),
+            chance: vagueChance(estimateChance(attackArmy(state), hallDefense(x), { attackerLevels: state.levels, defenderLevels: hallLevels(x, entities) }), false),
+            blocker: hallSiegeBlocker(me, state, x, wars, now),
+            immuneUntil: x.immuneUntil,
+          })),
   };
 }

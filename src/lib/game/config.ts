@@ -801,3 +801,7 @@ export const WING_REINFORCE_STRENGTH = [0, 0.1, 0.2, 0.3];
 export const WING_REINFORCE_SPEED = [0, 0.2, 0.4, 0.6];
 export const WING_ARMY_SPEED = [0, 0.1, 0.2, 0.3];
 export const WING_HEAL_MS = [30, 25, 20, 15].map((m) => m * 60_000);
+/** H5 : murs de la halle (10 % de la pierre reçue), aile hors service 24 h, puis halle à l'abri 24 h. */
+export const HALL_WALLS_SHARE = 0.1;
+export const HALL_WING_DOWN_MS = 24 * 3_600_000;
+export const HALL_SIEGE_IMMUNITY_MS = 24 * 3_600_000;
