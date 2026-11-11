@@ -209,11 +209,21 @@ export function seededRng(seed: number): () => number {
 /** Chance de victoire estimée en simulant plusieurs batailles (tirages fixes : résultat stable). */
 export function estimateChance(attacker: Army, defender: Army, opts: BattleOptions = {}): number {
   if (armySize(cleanArmy(attacker)) === 0) return 0;
+  // Les tirages sont fixes : mêmes armées, même résultat. On garde les derniers calculs (le serveur
+  // recalcule sinon la chance contre chaque rival à chaque synchronisation).
+  const key = JSON.stringify([attacker, defender, opts.attackerLevels ?? null, opts.defenderLevels ?? null, opts.attackBonus ?? null]);
+  const known = chanceCache.get(key);
+  if (known !== undefined) return known;
   const rng = seededRng(0xbeff);
   let wins = 0;
   for (let i = 0; i < CHANCE_SIMULATIONS; i++) if (battle(attacker, defender, rng, opts).success) wins++;
-  return wins / CHANCE_SIMULATIONS;
+  const chance = wins / CHANCE_SIMULATIONS;
+  if (chanceCache.size >= CHANCE_CACHE_SIZE) chanceCache.delete(chanceCache.keys().next().value as string);
+  chanceCache.set(key, chance);
+  return chance;
 }
+const CHANCE_CACHE_SIZE = 4000;
+const chanceCache = new Map<string, number>();
 
 /** Compose une armée à partir d'un budget et de parts par type (le reste part dans le moins cher). */
 export function armyFromBudget(budget: number, shares: Partial<Record<CombatantId, number>>): Army {

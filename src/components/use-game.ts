@@ -8,7 +8,8 @@ import type { GeneratorId } from "@/lib/game/config";
 import { worksiteFromRow, worldFrom, type ActionResponse, type AwaySummary, type GameAction, type GameSnapshot, type Leaderboards } from "@/lib/game/types";
 import { getBrowserClient } from "@/lib/supabase/client";
 
-const CLICK_FLUSH_MS = 3_000;
+/** Les clics partent par lots : moins d'appels au serveur (la pierre s'affiche déjà en local). */
+const CLICK_FLUSH_MS = 8_000;
 const SYNC_MS = 60_000;
 /** Délai minimal entre deux synchronisations déclenchées par l'activité des rivaux. */
 const LIVE_SYNC_MS = 5_000;
@@ -168,7 +169,10 @@ export function useGame() {
     const flush = setInterval(() => {
       if (pending.current > 0) void run("flush-clicks");
     }, CLICK_FLUSH_MS);
-    const sync = setInterval(() => void run({ type: "sync" }), SYNC_MS);
+    // Onglet caché : pas de synchronisation de fond, on rattrape au retour.
+    const sync = setInterval(() => {
+      if (document.visibilityState === "visible") void run({ type: "sync" });
+    }, SYNC_MS);
     const onVisible = () => {
       if (document.visibilityState === "visible") void run({ type: "sync" });
       else if (pending.current > 0) void run("flush-clicks");
@@ -303,14 +307,16 @@ export function useGame() {
             const repelled = (payload.new.details as { success?: boolean } | null)?.success === false;
             showToast(repelled ? `🛡️ Tu as repoussé le raid de ${attacker} !` : `⚔️ ${attacker} vient de piller tes greniers !`);
           }
-          void run({ type: "sync" });
+          // On ne se resynchronise que si ça me concerne ; le reste attend la prochaine synchro.
+          if (s && (payload.new.target_id === s.userId || payload.new.actor_id === s.userId)) void run({ type: "sync" });
+          else scheduleLiveSync();
         },
       )
       .subscribe();
     return () => {
       void supabase.removeChannel(channel);
     };
-  }, [seasonId, run, showToast]);
+  }, [seasonId, run, showToast, scheduleLiveSync]);
 
   return { snap, toast, away, dismissAway: () => setAway(null), run, click, predictedStone, serverNow, watchRivals, pendingClicks: () => pending.current + inflight.current };
 }
@@ -428,7 +434,7 @@ export function usePush() {
   return { state, enable, disable };
 }
 
-/** B11 : messages d'un canal, relus toutes les 8 secondes tant que l'onglet est ouvert. */
+/** B11 : messages d'un canal, relus toutes les 12 secondes tant que l'onglet est ouvert et visible. */
 export function useChat(channel: ChatChannel) {
   const [view, setView] = useState<ChatView | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -443,7 +449,9 @@ export function useChat(channel: ChatChannel) {
       }
     };
     void load();
-    const id = setInterval(load, 8_000);
+    const id = setInterval(() => {
+      if (document.visibilityState === "visible") void load();
+    }, 12_000);
     return () => {
       alive = false;
       clearInterval(id);
