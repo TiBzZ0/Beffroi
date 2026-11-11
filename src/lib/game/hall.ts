@@ -54,15 +54,27 @@ export function wingBlocker(w: Wings, wing: WingId, available: number, lodge: bo
   return null;
 }
 
-/** H1 : cases possibles pour la halle, de la plus proche à la plus lointaine du domaine `home`. */
+/**
+ * H1 : cases possibles pour la halle, de la plus proche à la plus lointaine du domaine `home`.
+ * Idéalement à 3 cases au plus d'un membre et à 2 cases au moins de tout lieu ; si la carte est trop pleine,
+ * on s'éloigne des membres, puis on accepte une case simplement libre.
+ */
 export function hallSpots(home: MapPos, members: MapPos[], taken: MapPos[]): MapPos[] {
-  const out: { c: MapPos; d: number }[] = [];
-  for (let x = 1; x <= MAP_SIZE; x++)
-    for (let y = 1; y <= MAP_SIZE; y++) {
-      const c: MapPos = [x, y];
-      if (taken.some((t) => mapDistance(t, c) < HALL_MIN_GAP)) continue;
-      if (!members.some((m) => mapDistance(m, c) <= HALL_MAX_FROM_MEMBER)) continue;
-      out.push({ c, d: mapDistance(home, c) });
-    }
-  return out.sort((a, b) => a.d - b.d || a.c[0] - b.c[0] || a.c[1] - b.c[1]).map((o) => o.c);
+  const tries: { gap: number; near: number }[] = [
+    { gap: HALL_MIN_GAP, near: HALL_MAX_FROM_MEMBER },
+    { gap: HALL_MIN_GAP, near: Infinity },
+    { gap: 1, near: Infinity },
+  ];
+  for (const t of tries) {
+    const out: { c: MapPos; d: number }[] = [];
+    for (let x = 1; x <= MAP_SIZE; x++)
+      for (let y = 1; y <= MAP_SIZE; y++) {
+        const c: MapPos = [x, y];
+        if (taken.some((p) => mapDistance(p, c) < t.gap)) continue;
+        if (!members.some((m) => mapDistance(m, c) <= t.near)) continue;
+        out.push({ c, d: mapDistance(home, c) });
+      }
+    if (out.length > 0) return out.sort((a, b) => a.d - b.d || a.c[0] - b.c[0] || a.c[1] - b.c[1]).map((o) => o.c);
+  }
+  return [];
 }

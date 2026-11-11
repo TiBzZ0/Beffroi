@@ -46,6 +46,15 @@ describe("halle de guilde", () => {
     }
   });
 
+  it("s'éloigne quand la carte est pleine autour des membres", () => {
+    const home: [number, number] = [8, 8];
+    const crowd: [number, number][] = [];
+    for (let x = 5; x <= 11; x++) for (let y = 5; y <= 11; y++) crowd.push([x, y]);
+    const spots = hallSpots(home, [home], crowd);
+    expect(spots.length).toBeGreaterThan(0);
+    expect(crowd.some((c) => c[0] === spots[0][0] && c[1] === spots[0][1])).toBe(false);
+  });
+
   it("donne ses effets aux membres", () => {
     const s = { ...newPlayerState(0), hall: { loge: 2, grenier: 1, ecuries: 3, armes: 1, infirmerie: 3 } };
     const base = newPlayerState(0);
