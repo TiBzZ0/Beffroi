@@ -1242,6 +1242,10 @@ a {
   --map-neutral-banner: #f5f0e4;
   --map-shadow: rgba(75, 54, 34, 0.18);
   --map-window: #f2d27a;
+  --map-label: #2b2118;
+  --map-label-halo: #f3e8c8;
+  --map-label-lord: #6c3f30;
+  --map-label-event: #a8231c;
 }
 @media (prefers-color-scheme: dark) {
   :root {
@@ -1278,6 +1282,10 @@ a {
     --map-neutral-banner: #d9d2c0;
     --map-shadow: rgba(0, 0, 0, 0.35);
     --map-window: #f0c860;
+    --map-label: #fbf1d8;
+    --map-label-halo: #120e0a;
+    --map-label-lord: #f0cf8e;
+    --map-label-event: #ff8a7a;
   }
 }
 .kingdom-map {
@@ -1806,20 +1814,20 @@ use.g-enemy {
   font-weight: 600;
   text-anchor: middle;
   dominant-baseline: hanging;
-  fill: var(--ink);
+  fill: var(--map-label);
   paint-order: stroke;
-  stroke: var(--map-land);
-  stroke-width: 2.6px;
+  stroke: var(--map-label-halo);
+  stroke-width: 3px;
   stroke-linejoin: round;
 }
 .map-label.lord {
   font-style: italic;
-  fill: var(--map-lroof);
+  fill: var(--map-label-lord);
 }
 .map-label.event {
   font-size: 10px;
   font-weight: 700;
-  fill: var(--map-danger);
+  fill: var(--map-label-event);
 }
 .map-event-halo {
   fill: rgba(212, 164, 58, 0.28);
@@ -1872,7 +1880,7 @@ use.g-enemy {
   font-family: var(--font-body), Georgia, serif;
   font-size: 11px;
   font-style: italic;
-  fill: var(--ink);
+  fill: var(--map-label);
   dominant-baseline: central;
 }
 .map-compass-n {
