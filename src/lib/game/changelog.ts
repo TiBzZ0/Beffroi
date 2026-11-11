@@ -321,4 +321,15 @@ export const CHANGELOG: ChangeEntry[] = [
       "⭐ Chaque bâtiment affiche son prochain palier, et le conseil « le plus rentable » en tient compte : il peut te suggérer d'en prendre plusieurs d'un coup pour compléter un lot.",
     ],
   },
+  {
+    id: 39,
+    date: "11 novembre",
+    items: [
+      "🏛️ Nouveau : la halle de guilde, dans l'onglet Alliance. Le chef la fonde près de vos domaines, elle apparaît sur la carte et grandit à chaque étape.",
+      "🪙 Chacun y verse de la pierre à la main, et une part de sa dîme (25 % au départ, réglable de 0 à 50 %). Le reste de la dîme va toujours au beffroi.",
+      "🧱 Dix étapes, chacune donne un niveau d'aile à placer par le chef : loge (production), grenier (stock à l'abri), salle d'armes (renforts), guet (alertes), écuries (vitesse des armées), infirmerie (soins). Six ailes à trois niveaux : impossible de tout avoir.",
+      "👑 L'alliance maître d'œuvre d'une étape du beffroi gagne un niveau d'aile gratuit.",
+      "🏠 Seul, tu peux fonder une petite loge (4 étapes, deux ailes). Si tu rejoins une alliance qui a sa halle, la moitié de ce que tu lui as versé y passe.",
+    ],
+  },
 ];

@@ -105,7 +105,7 @@ export interface AwaySummary {
 export interface ChronicleEntry {
   id: number;
   at: number;
-  kind: "raid" | "gift" | "spy" | "war" | "fortress" | "event" | "sabotage" | "lot";
+  kind: "raid" | "gift" | "spy" | "war" | "fortress" | "event" | "sabotage" | "lot" | "hall";
   actorId: string | null;
   actorName: string;
   targetId: string | null;
@@ -163,6 +163,43 @@ export interface IncomingView {
   id: string;
   arriveAt: number;
   from: string | null;
+  /** Guet niveau 3 : composition de l'armée. */
+  troops?: Partial<Record<string, number>>;
+}
+
+/** Halle de guilde (ou loge d'un joueur seul) sur la carte. */
+export interface HallPlace {
+  id: number;
+  name: string;
+  allianceId: number | null;
+  pos: [number, number];
+  stage: number;
+  lodge: boolean;
+}
+
+/** Ma halle (ou ma loge), ou de quoi la fonder. */
+export interface HallView {
+  lodge: boolean;
+  /** Puis-je fonder, placer les ailes (chef ou propriétaire) ? */
+  chief: boolean;
+  chiefName: string | null;
+  foundCost: number;
+  hall: {
+    pos: [number, number];
+    stage: number;
+    maxStages: number;
+    progress: number;
+    cost: number;
+    received: number;
+    gifts: { id: string; name: string; amount: number }[];
+    wings: Partial<Record<string, number>>;
+    /** Niveaux gagnés (étapes, et maîtrise du beffroi) et déjà placés. */
+    available: number;
+    placed: number;
+    masterLevels: number;
+  } | null;
+  /** Ma loge qui attend d'être versée dans la halle de mon alliance. */
+  dormantLodge: boolean;
 }
 
 /** T1 : carte du royaume. Positions en cases (1 à size), par id de joueur ou de seigneur. */
@@ -171,6 +208,7 @@ export interface MapView {
   belfry: [number, number] | readonly [number, number];
   fortress: [number, number] | readonly [number, number];
   places: Record<string, [number, number]>;
+  halls?: HallPlace[];
 }
 
 export interface GameSnapshot {
@@ -204,6 +242,7 @@ export interface GameSnapshot {
   map?: MapView;
   incoming?: IncomingView[];
   daily?: DailyView;
+  guild?: HallView;
 }
 
 export interface LeaderboardRow {
@@ -263,6 +302,7 @@ export type GameAction =
   | { type: "march_recall"; id: string }
   | { type: "tournament_join"; troops: Record<string, number> }
   | { type: "daily"; op: "claim" | "swap" | "chest"; index: number }
+  | { type: "hall"; op: "found" | "give" | "tithe" | "place"; amount?: number; percent?: number; wing?: string }
   | { type: "academy" }
   | { type: "tithe"; percent: number }
   | { type: "curfew"; start: number | null }

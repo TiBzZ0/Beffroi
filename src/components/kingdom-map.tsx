@@ -51,6 +51,58 @@ interface BoardProps {
   showNames: boolean;
   travel: { to: Pt; label: string } | null;
   meColor?: string;
+  halls?: BoardHall[];
+}
+
+/** Halle de guilde (ou loge) : son dessin grandit avec ses étapes. */
+export interface BoardHall {
+  id: number;
+  pos: Pt;
+  name: string;
+  color?: string;
+  stage: number;
+  maxStages: number;
+  lodge: boolean;
+  mine: boolean;
+}
+
+/** Une halle à colombages : échafaudage à la fondation, puis nef, tours et bannière à mesure des étapes. */
+function HallGlyph({ h }: { h: BoardHall }) {
+  const f = h.maxStages > 0 ? h.stage / h.maxStages : 0;
+  const w = 9 + Math.round(f * 7);
+  const towers = h.lodge ? (h.stage >= 3 ? 1 : 0) : h.stage >= 7 ? 2 : h.stage >= 4 ? 1 : 0;
+  return (
+    <g>
+      <ellipse cy="10" rx={w + 5} ry="4" className="g-shadow" />
+      {h.stage === 0 ? (
+        <g>
+          <rect x={-w} y="2" width={2 * w} height="7" className="g-stone" />
+          <path d={`M${-w + 2} 2 V-10 M${w - 2} 2 V-10 M${-w + 2} -10 H${w - 2} M${-w + 2} -3 L${w - 2} -10`} className="g-pole" />
+        </g>
+      ) : (
+        <g>
+          {towers >= 1 && (
+            <g transform={`translate(${-w - 1} 0)`}>
+              <rect x="-4" y="-12" width="8" height="21" className="g-stone" />
+              <path d="M-5 -12 L0 -21 L5 -12 Z" className="g-roof" />
+            </g>
+          )}
+          {towers >= 2 && (
+            <g transform={`translate(${w + 1} 0)`}>
+              <rect x="-4" y="-12" width="8" height="21" className="g-stone" />
+              <path d="M-5 -12 L0 -21 L5 -12 Z" className="g-roof" />
+            </g>
+          )}
+          <rect x={-w} y="-3" width={2 * w} height="12" className="g-wall" />
+          <path d={`M${-w - 2} -3 L${-w + 4} -12 L${w - 4} -12 L${w + 2} -3 Z`} className="g-roof" />
+          <circle cy="2" r="2.4" className="g-window" />
+          <path d="M-2.4 9 V5.5 Q0 3.5 2.4 5.5 V9 Z" className="g-door" />
+          <path d="M0 -12 V-24" className="g-pole" />
+          <path d="M0 -24 L10 -21.5 L0 -19 Z" className="g-banner" />
+        </g>
+      )}
+    </g>
+  );
 }
 
 const C = 40;
@@ -457,10 +509,11 @@ function placeGlyph(p: BoardPlace): { id: string; scale: number } {
 export function MapBoard(props: BoardProps) {
   const { size, belfry, fortress, places, event: ev, now, picked, onPick, showNames } = props;
   const W = size * C;
-  const key = places.map((p) => `${p.pos[0]},${p.pos[1]}`).join(";");
+  const halls = props.halls ?? [];
+  const key = [...places.map((p) => p.pos), ...halls.map((h) => h.pos)].map((p) => `${p[0]},${p[1]}`).join(";");
   // Le décor ne dépend que des cases occupées (la clé les résume).
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  const terrain = useMemo(() => buildTerrain([belfry, fortress, ...places.map((p) => p.pos)], size), [key, size]);
+  const terrain = useMemo(() => buildTerrain([belfry, fortress, ...places.map((p) => p.pos), ...halls.map((h) => h.pos)], size), [key, size]);
   const sx = (p: Pt) => X(size, p[0]);
   const sy = (p: Pt) => Y(size, p[1]);
   const me = places.find((p) => p.kind === "me");
@@ -559,6 +612,15 @@ export function MapBoard(props: BoardProps) {
         </g>
       )}
 
+      {/* Halles de guilde et loges */}
+      {halls.map((h) => (
+        <g key={`hall-${h.id}`} transform={`translate(${sx(h.pos)} ${sy(h.pos) - 4}) scale(${h.lodge ? 0.85 : 1.1})`} style={{ ["--roof" as string]: h.color ?? "var(--map-roof)", ["--banner" as string]: h.color ?? "var(--map-neutral-banner)" }} className="map-hall">
+          <title>{`${h.name} · étape ${h.stage}/${h.maxStages}`}</title>
+          {h.mine && <ellipse cy="10" rx="20" ry="7" className="map-me-ring" />}
+          <HallGlyph h={h} />
+        </g>
+      ))}
+
       {/* Lieux : seigneurs et joueurs */}
       {sorted.map((p) => {
         const x = sx(p.pos);
@@ -628,6 +690,13 @@ export function MapBoard(props: BoardProps) {
             </text>
           );
         })}
+        {halls.map((h) =>
+          h.mine || showNames ? (
+            <text key={`hall-${h.id}`} x={sx(h.pos)} y={h.pos[1] <= 1 ? sy(h.pos) - 40 : sy(h.pos) + 21} className={`map-label${h.mine ? " strong" : ""}`}>
+              {h.name}
+            </text>
+          ) : null,
+        )}
         {evLive && evAt && EVENT_GLYPH[evLive.kind] && (
           <text x={sx(evAt)} y={sy(evAt) + 22} className="map-label event">
             {evLive.name}

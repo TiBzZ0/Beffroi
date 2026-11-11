@@ -754,3 +754,50 @@ export const TOWER_REVEAL_CHANCE = 0.05;
 export const TOWER_REVEAL_MAX = 0.9;
 /** T6 : un seigneur vise de préférence un joueur à moins de 8 cases. */
 export const LORD_TARGET_RADIUS = 8;
+
+// ---------------------------------------------------------------------------
+// Halle de guilde (H1 à H6)
+// ---------------------------------------------------------------------------
+
+export type WingId = "loge" | "grenier" | "armes" | "guet" | "ecuries" | "infirmerie";
+
+export interface WingDef {
+  id: WingId;
+  name: string;
+  icon: string;
+  levels: [string, string, string];
+}
+
+export const WINGS: readonly WingDef[] = [
+  { id: "loge", name: "Loge des bâtisseurs", icon: "🧱", levels: ["+3 % de production", "+6 % de production", "+9 % de production"] },
+  { id: "grenier", name: "Grenier commun", icon: "🌾", levels: ["+30 min de stock à l'abri", "+1 h de stock à l'abri", "+1 h 30 de stock à l'abri"] },
+  { id: "armes", name: "Salle d'armes", icon: "⚔️", levels: ["Renforts 10 % plus forts, 20 % plus rapides", "Renforts 20 % plus forts, 40 % plus rapides", "Renforts 30 % plus forts, 60 % plus rapides"] },
+  { id: "guet", name: "Guet", icon: "🔭", levels: ["Alerte dès le départ de l'armée ennemie", "Le nom de l'attaquant est toujours connu", "La composition de l'armée est connue"] },
+  { id: "ecuries", name: "Écuries", icon: "🐎", levels: ["Armées 10 % plus rapides", "Armées 20 % plus rapides", "Armées 30 % plus rapides"] },
+  { id: "infirmerie", name: "Infirmerie de guilde", icon: "⚕️", levels: ["Blessés soignés en 25 min", "Blessés soignés en 20 min", "Blessés soignés en 15 min"] },
+];
+export const WING_IDS = WINGS.map((w) => w.id);
+export const WING_MAX_LEVEL = 3;
+
+/** Prix de fondation : 30 minutes de la production cumulée des membres. */
+export const HALL_FOUND_HOURS = 0.5;
+/** Étape n : 0,5 × 1,4^(n−1) heure de la production cumulée des membres, mesurée à l'ouverture. */
+export const HALL_STAGE_BASE_HOURS = 0.5;
+export const HALL_STAGE_GROWTH = 1.4;
+export const HALL_STAGES = 10;
+/** Loge d'un joueur seul : 4 étapes, deux ailes différentes au plus. */
+export const LODGE_STAGES = 4;
+export const LODGE_MAX_WINGS = 2;
+/** À 3 cases au plus d'un membre, à 2 cases au moins de tout autre lieu. */
+export const HALL_MAX_FROM_MEMBER = 3;
+export const HALL_MIN_GAP = 2;
+/** Part de la dîme qui va à la halle : 0 à 50 %, par pas de 5 %, 25 % au départ. */
+export const HALL_TITHE_MAX = 0.5;
+export const HALL_TITHE_DEFAULT = 0.25;
+/** Effets des ailes, par niveau (index 0 = aile absente). */
+export const WING_PRODUCTION = [0, 0.03, 0.06, 0.09];
+export const WING_SAFE_SECONDS = [0, 1800, 3600, 5400];
+export const WING_REINFORCE_STRENGTH = [0, 0.1, 0.2, 0.3];
+export const WING_REINFORCE_SPEED = [0, 0.2, 0.4, 0.6];
+export const WING_ARMY_SPEED = [0, 0.1, 0.2, 0.3];
+export const WING_HEAL_MS = [30, 25, 20, 15].map((m) => m * 60_000);

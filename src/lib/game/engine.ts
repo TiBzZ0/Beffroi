@@ -2,6 +2,7 @@
 // Le serveur s'en sert pour calculer l'état qui fait foi ; le navigateur pour animer le compteur.
 
 import type { DailyState } from "./daily";
+import { wingLevel, type Wings } from "./hall";
 import {
   BURN_CLICK_REDUCTION_MS,
   BURN_MS,
@@ -13,6 +14,12 @@ import {
   SUSPICIOUS_CLICK_RATE,
   COST_GROWTH,
   COMPANIONS,
+  WING_ARMY_SPEED,
+  WING_HEAL_MS,
+  WING_PRODUCTION,
+  WING_REINFORCE_SPEED,
+  WING_REINFORCE_STRENGTH,
+  WING_SAFE_SECONDS,
   COMPANION_BONUS,
   COMPANION_TRANCHE,
   MASTERY_BONUS,
@@ -218,11 +225,15 @@ export interface PlayerState {
   daily?: DailyState | null;
   dailyBoostUntil?: number;
   dailyBoost?: number;
+  /** Ailes de la halle de l'alliance (ou de la loge), posées au chargement ; jamais enregistrées. */
+  hall?: Wings;
+  /** Part de la dîme qui va à la halle (0 à 0,5). */
+  hallTithe?: number;
 }
 
 /** V15 : secondes de stock à l'abri achetées au marchand. */
 export function extraSecured(state: PlayerState, t: number): number {
-  return t < (state.boostSafeUntil ?? 0) ? MERCHANT_SAFE_SECONDS : 0;
+  return (t < (state.boostSafeUntil ?? 0) ? MERCHANT_SAFE_SECONDS : 0) + WING_SAFE_SECONDS[wingLevel(state.hall, "grenier")];
 }
 
 /** V15 : prix du marchand, 30 minutes de sa production. */
@@ -273,10 +284,11 @@ export interface March {
 }
 
 /** T2 : durée de l'aller, en millisecondes, au pas de l'unité la plus lente. */
-export function travelMs(army: Army, distance: number): number {
+export function travelMs(army: Army, distance: number, speedBonus = 0): number {
   const speeds = (Object.entries(army) as [string, number][]).filter(([, n]) => n > 0).map(([id]) => UNIT_SPEED[id] ?? 1);
   const speed = speeds.length ? Math.min(...speeds) : 1;
-  const minutes = Math.min(TRAVEL_MAX_MIN, Math.max(TRAVEL_MIN_MIN, TRAVEL_BASE_MIN + (TRAVEL_PER_CELL_MIN * distance) / speed));
+  // Halle : écuries (et salle d'armes pour les renforts) raccourcissent la route.
+  const minutes = Math.min(TRAVEL_MAX_MIN, Math.max(TRAVEL_MIN_MIN, TRAVEL_BASE_MIN + (TRAVEL_PER_CELL_MIN * distance) / speed) / (1 + Math.max(0, speedBonus)));
   return Math.round(minutes * 60_000);
 }
 
@@ -493,7 +505,7 @@ export function productionMultiplier(state: PlayerState, world: WorldState, stag
   for (const u of ownedUpgrades(state)) {
     if (u.effect.kind === "production") m *= u.effect.multiplier;
   }
-  return m * (1 + masteryBonus(state)) * stageMultiplier(stagesDone, "production");
+  return m * (1 + masteryBonus(state)) * (1 + WING_PRODUCTION[wingLevel(state.hall, "loge")]) * stageMultiplier(stagesDone, "production");
 }
 
 /** Production de pierre par seconde pour un nombre d'étapes terminées donné. */
@@ -919,7 +931,7 @@ export function addWounded(state: PlayerState, wounded: Army, now: number): Play
   if (Object.keys(wounded).length === 0) return state;
   const w: PlayerState["wounded"] = { ...(state.wounded ?? {}) };
   for (const [id, n] of Object.entries(wounded) as [UnitId, number][]) w[id] = (w[id] ?? 0) + n;
-  return { ...state, wounded: w, healAt: now + INFIRMARY_MS };
+  return { ...state, wounded: w, healAt: now + (wingLevel(state.hall, "infirmerie") > 0 ? WING_HEAL_MS[wingLevel(state.hall, "infirmerie")] : INFIRMARY_MS) };
 }
 
 /** Les blessés guéris rejoignent la garnison. */
@@ -1116,7 +1128,7 @@ export interface RaidReport {
 
 export function raidArmies(attacker: PlayerState, victim: PlayerState, ctx: Pick<RaidContext, "attackerArmy" | "defenderArmy" | "victimId" | "now" | "stagesDone">) {
   // Le coup de pouce de la victime rend ses défenseurs plus durs à abattre.
-  const sturdy = (masterActive(victim, "defense", ctx.now) ? 1 + MASTER_BONUSES.defense.value : 1) * (ctx.defenderArmy ? 1 : 1 + stagePerk(ctx.stagesDone ?? 0, "defenseHp"));
+  const sturdy = (masterActive(victim, "defense", ctx.now) ? 1 + MASTER_BONUSES.defense.value : 1) * (ctx.defenderArmy ? 1 : 1 + stagePerk(ctx.stagesDone ?? 0, "defenseHp")) * (ctx.defenderArmy ? 1 : reinforcementStrength(victim));
   const attackBonus = (hasRevenge(attacker, ctx.victimId, ctx.now) ? REVENGE_ATTACK_BONUS : 1) / (1 + (victim.catchUp ?? 0)) / sturdy;
   const opts: BattleOptions = { attackBonus, attackerLevels: attacker.levels, defenderLevels: victim.levels };
   return {
@@ -1125,6 +1137,20 @@ export function raidArmies(attacker: PlayerState, victim: PlayerState, ctx: Pick
     attackBonus,
     opts,
   };
+}
+
+/** Halle : la salle d'armes rend les renforts postés plus durs, au prorata de leur part dans la défense. */
+export function reinforcementStrength(victim: PlayerState): number {
+  const bonus = WING_REINFORCE_STRENGTH[wingLevel(victim.hall, "armes")];
+  if (!(bonus > 0)) return 1;
+  const all = armySize(troopsHere(victim));
+  const guests = all - armySize(cleanArmy({ ...victim.troops }));
+  return all > 0 ? 1 + (bonus * guests) / all : 1;
+}
+
+/** Halle : vitesse en plus d'une armée (écuries, et salle d'armes pour des renforts). */
+export function armySpeedBonus(state: PlayerState, reinforce = false): number {
+  return WING_ARMY_SPEED[wingLevel(state.hall, "ecuries")] + (reinforce ? WING_REINFORCE_SPEED[wingLevel(state.hall, "armes")] : 0);
 }
 
 /** Vérifie qu'un raid est permis. Renvoie un message d'erreur, ou null. */

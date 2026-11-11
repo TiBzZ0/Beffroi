@@ -7,7 +7,7 @@ import { createAdminClient, getCurrentUser } from "@/lib/supabase/server";
 // Point d'entrée unique du jeu. Le client n'envoie que des intentions
 // (« acheter un atelier »), jamais de valeurs (« j'ai 5 000 pierres »).
 
-const ACTIONS = new Set(["sync", "click", "buy", "upgrade", "contribute", "raid", "rebuild", "army", "spy", "alliance_create", "alliance_invite", "alliance_accept", "alliance_decline", "alliance_leave", "reinforce", "recall", "war_declare", "fortress_attack", "fortress_station", "fortress_recall", "event_attack", "research", "academy", "sabotage", "tithe", "curfew", "vein", "master_choice", "merchant", "march_recall", "tournament_join", "daily"]);
+const ACTIONS = new Set(["sync", "click", "buy", "upgrade", "contribute", "raid", "rebuild", "army", "spy", "alliance_create", "alliance_invite", "alliance_accept", "alliance_decline", "alliance_leave", "reinforce", "recall", "war_declare", "fortress_attack", "fortress_station", "fortress_recall", "event_attack", "research", "academy", "sabotage", "tithe", "curfew", "vein", "master_choice", "merchant", "march_recall", "tournament_join", "daily", "hall"]);
 
 function json(body: ActionResponse, status = 200) {
   return NextResponse.json(body, { status, headers: { "Cache-Control": "no-store" } });

@@ -105,9 +105,17 @@ import {
   MAP_SPAWN_RADIUS,
   mapDistance,
   type MapPos,
+  HALL_FOUND_HOURS,
+  HALL_TITHE_DEFAULT,
+  HALL_TITHE_MAX,
+  LODGE_MAX_WINGS,
+  WING_IDS,
+  WINGS,
+  type WingId,
 } from "./config";
 import { banditSpot, caravanPath, caravanPos, colossusPos, fixedPlaces, pickSpawn } from "./map";
 import { drawNextEvent, tourneyPodium } from "./events";
+import { cleanWings, hallSpots, hallStageCost, maxStages, placedLevels, wingBlocker, wingLevel, type Wings } from "./hall";
 import { chestBonus, claimDaily, dailyDay, dailyProgress, dailyStart, openChest, rollDaily, seedOf, swapDaily, type DailyContext, type DailyCounts, type DailyState } from "./daily";
 import {
   advance,
@@ -177,6 +185,7 @@ import {
   type RaidReport,
   type Result,
   type WorldState,
+  armySpeedBonus,
 } from "./engine";
 import {
   worksiteFromRow,
@@ -200,6 +209,8 @@ import {
   type WarView,
   type EventView,
   type DailyView,
+  type HallPlace,
+  type HallView,
   type HallCategory,
   type SeasonHall,
   type Standing,
@@ -224,7 +235,7 @@ interface PlayerRow {
   upgrades: string[];
   total_produced: number;
   total_contributed: number;
-  military?: { levels?: Record<string, number>; research?: { id: string; endsAt: number }[] | { id: string; endsAt: number } | null; academy?: number; sabotageImmuneUntil?: number; ruinImmuneUntil?: number; elanUntil?: number; tithe?: number; titheOwed?: number; titheSet?: boolean; share?: StageShare | null; donorTiers?: number; curfew?: Curfew | null; seen?: PlayerState["seen"] | null; veinAt?: number; frenzyUntil?: number; quest?: number | null; questFlags?: string[]; wounded?: Record<string, number>; healAt?: number; marches?: unknown; boostProdUntil?: number; boostSafeUntil?: number; merchantEvent?: number; daily?: unknown; dailyBoostUntil?: number; dailyBoost?: number } | null;
+  military?: { levels?: Record<string, number>; research?: { id: string; endsAt: number }[] | { id: string; endsAt: number } | null; academy?: number; sabotageImmuneUntil?: number; ruinImmuneUntil?: number; elanUntil?: number; tithe?: number; titheOwed?: number; titheSet?: boolean; share?: StageShare | null; donorTiers?: number; curfew?: Curfew | null; seen?: PlayerState["seen"] | null; veinAt?: number; frenzyUntil?: number; quest?: number | null; questFlags?: string[]; wounded?: Record<string, number>; healAt?: number; marches?: unknown; boostProdUntil?: number; boostSafeUntil?: number; merchantEvent?: number; daily?: unknown; dailyBoostUntil?: number; dailyBoost?: number; hallTithe?: number } | null;
   total_clicks: number;
   last_update: string;
   last_click_at: string;
@@ -373,6 +384,7 @@ function toEntity(row: PlayerRow): Entity {
       daily: cleanDaily(row.military?.daily),
       dailyBoostUntil: Number(row.military?.dailyBoostUntil ?? 0) || 0,
       dailyBoost: Number(row.military?.dailyBoost ?? 0) || 0,
+      hallTithe: row.military?.hallTithe === undefined ? HALL_TITHE_DEFAULT : Math.min(HALL_TITHE_MAX, Math.max(0, Number(row.military.hallTithe) || 0)),
       eventMods: currentEventMods,
       ...(row.military?.seen ? { seen: { produced: Number(row.military.seen.produced ?? 0), contributed: Number(row.military.seen.contributed ?? 0), levels: armyCounts(row.military.seen.levels ?? {}, [...UNIT_IDS, ...DEFENSE_IDS]) } } : {}),
     },
@@ -402,7 +414,7 @@ function toJson(e: Entity, state: PlayerState, extra: Record<string, unknown> = 
     troops: state.troops,
     defenses: state.defenses,
     stationed: state.stationed,
-    military: { levels: state.levels, research: state.research, academy: state.academy, sabotageImmuneUntil: state.sabotageImmuneUntil, ruinImmuneUntil: state.ruinImmuneUntil, elanUntil: state.elanUntil, tithe: state.tithe, titheOwed: state.titheOwed, titheSet: state.titheSet, share: state.share, donorTiers: state.donorTiers, curfew: state.curfew, seen: state.seen ?? null, veinAt: state.veinAt, frenzyUntil: state.frenzyUntil, quest: state.quest, questFlags: state.questFlags, wounded: state.wounded, healAt: state.healAt, marches: state.marches ?? [], boostProdUntil: state.boostProdUntil, boostSafeUntil: state.boostSafeUntil, merchantEvent: state.merchantEvent, daily: state.daily ?? null, dailyBoostUntil: state.dailyBoostUntil, dailyBoost: state.dailyBoost },
+    military: { levels: state.levels, research: state.research, academy: state.academy, sabotageImmuneUntil: state.sabotageImmuneUntil, ruinImmuneUntil: state.ruinImmuneUntil, elanUntil: state.elanUntil, tithe: state.tithe, titheOwed: state.titheOwed, titheSet: state.titheSet, share: state.share, donorTiers: state.donorTiers, curfew: state.curfew, seen: state.seen ?? null, veinAt: state.veinAt, frenzyUntil: state.frenzyUntil, quest: state.quest, questFlags: state.questFlags, wounded: state.wounded, healAt: state.healAt, marches: state.marches ?? [], boostProdUntil: state.boostProdUntil, boostSafeUntil: state.boostSafeUntil, merchantEvent: state.merchantEvent, daily: state.daily ?? null, dailyBoostUntil: state.dailyBoostUntil, dailyBoost: state.dailyBoost, hallTithe: state.hallTithe },
     click_strikes: state.clickStrikes,
     click_paused_until: iso(state.clickPausedUntil),
     ...extra,
@@ -438,6 +450,7 @@ async function loadEntities(admin: SupabaseClient, seasonId: number, userId: str
     admin.from("player_states").select("*, profiles(username, display_name, is_bot, ecus)").eq("season_id", seasonId);
   const fortP = admin.from("fortresses").select("holder").eq("season_id", seasonId).maybeSingle();
   const lotsP = admin.from("stage_lots").select("*").eq("season_id", seasonId);
+  const guildsP = loadGuilds(admin, seasonId);
   let { data, error } = await select();
   if (error) throw new Error(`Joueurs introuvables : ${error.message}`);
   const present = new Set((data ?? []).map((r) => (r as PlayerRow).user_id));
@@ -479,6 +492,13 @@ async function loadEntities(admin: SupabaseClient, seasonId: number, userId: str
   const lots = ((lotRows ?? []) as LotRow[]).map(lotFromRow);
   applyLotBonuses(entities, lots, Date.now());
   lotsOf.set(entities, lots);
+  // Halle de guilde : les ailes profitent aux membres présents (ou au joueur seul et sa loge).
+  const guilds = await guildsP;
+  guildsOf.set(entities, guilds);
+  for (const e of entities.values()) {
+    const g = e.isLord ? undefined : guildOf(e, guilds);
+    if (g) e.state = { ...e.state, hall: g.wings };
+  }
   return entities;
 }
 
@@ -1753,7 +1773,7 @@ async function runAllianceAction(
       const name = String(action.name ?? "").trim().replace(/\s+/g, " ");
       if (me.allianceId !== null) return { error: "Tu fais déjà partie d'une alliance." };
       if (name.length < 2 || name.length > 30) return { error: "Le nom doit faire entre 2 et 30 caractères." };
-      const { data, error } = await admin.from("alliances").insert({ season_id: seasonId, name }).select("id").single();
+      const { data, error } = await admin.from("alliances").insert({ season_id: seasonId, name, chief_id: me.id }).select("id").single();
       if (error || !data) throw new Error(`Alliance impossible : ${error?.message}`);
       await admin.from("player_states").update({ alliance_id: data.id }).eq("season_id", seasonId).eq("user_id", me.id);
       await admin.from("alliance_invites").delete().eq("season_id", seasonId).eq("invitee_id", me.id);
@@ -1801,7 +1821,7 @@ async function runAllianceAction(
       // T6 : les renforts voyagent comme une armée.
       const sending = sendTroops(current, { [String(action.unit)]: Number(action.qty) } as Army);
       if (!sending.ok) return { error: sending.error };
-      const outMs = await travelBetween(admin, seasonId, entities, me.id, host.id, sending.value.sent);
+      const outMs = await travelBetween(admin, seasonId, entities, me.id, host.id, sending.value.sent, armySpeedBonus(current, true));
       const march: March = { id: marchId(), kind: "reinforce", target: host.id, troops: sending.value.sent, departAt: Date.now(), arriveAt: Date.now() + outMs, status: "out", returnAt: 0, revealed: true, warned: true, loot: 0, ransom: 0 };
       const sender = { ...sending.value.state, marches: [...(current.marches ?? []), march] };
       if ((await writeStates(admin, seasonId, [{ e: me, state: sender }], "reinforce", { target: host.id, unit: action.unit, qty: action.qty })) === "conflict") return "conflict";
@@ -1815,7 +1835,7 @@ async function runAllianceAction(
       if (!group || Object.keys(group).length === 0) return { error: "Tu n'as pas de troupes là-bas." };
       if ((current.marches ?? []).length >= MAX_MARCHES) return { error: `${MAX_MARCHES} armées en route au plus.` };
       // T6 : elles quittent l'allié tout de suite et rentrent par la route.
-      const outMs = await travelBetween(admin, seasonId, entities, host.id, me.id, group as Army);
+      const outMs = await travelBetween(admin, seasonId, entities, host.id, me.id, group as Army, armySpeedBonus(current, true));
       const now = Date.now();
       const march: March = { id: marchId(), kind: "reinforce", target: host.id, troops: { ...group } as Army, departAt: now - outMs, arriveAt: now, status: "back", returnAt: now + outMs, revealed: true, warned: true, loot: 0, ransom: 0, outcome: "recalled" };
       const stationed = { ...hostState.stationed };
@@ -2146,7 +2166,7 @@ export async function runAction(admin: SupabaseClient, userId: string, action: G
         const positions = await loadPositions(admin, season.id, entities);
         const from = positions.get(me.id);
         const dest = local && "pos" in local ? local.pos : eventPosAt(e, positions, now);
-        const outMs = travelMs(sending.value.sent, from ? mapDistance(from, dest) : MAP_SPAWN_RADIUS);
+        const outMs = travelMs(sending.value.sent, from ? mapDistance(from, dest) : MAP_SPAWN_RADIUS, armySpeedBonus(current));
         const march: March = { id: marchId(), kind: "event", target, troops: sending.value.sent, departAt: now, arriveAt: now + outMs, status: "out", returnAt: 0, revealed: true, warned: true, loot: 0, ransom: 0 };
         finalState = { ...sending.value.state, marches: [...(current.marches ?? []), march], lastRaidAt: now };
         const { data, error: rpcError } = await admin.rpc("commit_state", { p_season: season.id, p_state: toJson(me, finalState, {}), p_touch: true, p_contribution: 0, p_stage_bases: stageSizes, p_active_window_days: ACTIVE_WINDOW_DAYS, p_action: "event_march", p_details: { event: e.id } });
@@ -2193,6 +2213,23 @@ export async function runAction(admin: SupabaseClient, userId: string, action: G
         entities = await loadEntities(admin, season.id, userId);
         events = await loadEvent(admin, season.id, now, entities, world, flat);
       }
+    } else if (action.type === "hall") {
+      const self = me;
+      const commit = async (state: PlayerState, act: string, details: Record<string, unknown>) => {
+        const { data, error: rpcError } = await admin.rpc("commit_state", { p_season: season.id, p_state: toJson(self, state, {}), p_touch: true, p_contribution: 0, p_stage_bases: stageSizes, p_active_window_days: ACTIVE_WINDOW_DAYS, p_action: act, p_details: details });
+        if (rpcError) throw new Error(`Enregistrement impossible : ${rpcError.message}`);
+        if ((data as { conflict?: boolean } | null)?.conflict) return "conflict" as const;
+        // L'enregistrement suivant (remboursement) part de la nouvelle version.
+        self.version += 1;
+        return "ok" as const;
+      };
+      const r = await runHallAction(admin, season.id, self, current, entities, action, world, now, commit);
+      if (r === "conflict") continue;
+      if (r.error) error = r.error;
+      message = r.message;
+      if (r.state) finalState = r.state;
+      entities = await loadEntities(admin, season.id, userId);
+      finalState = { ...finalState, hall: entities.get(userId)?.state.hall };
     } else if (CONFLICT_ACTIONS.has(action.type)) {
       const r = await runConflictAction(admin, season.id, me, current, entities, conflicts, allianceNames, action as Parameters<typeof runConflictAction>[7], now);
       if (r === "conflict") continue;
@@ -2321,7 +2358,9 @@ export async function runAction(admin: SupabaseClient, userId: string, action: G
             const from = positions.get(me.id);
             const to = positions.get(victim.id);
             const distance = from && to ? mapDistance(from, to) : MAP_SPAWN_RADIUS;
-            const outMs = travelMs(sent, distance);
+            const outMs = travelMs(sent, distance, armySpeedBonus(current));
+            const guet = victim.isLord ? 0 : wingLevel(victimState.hall, "guet");
+            const fogged = eventActive(current, "brouillard", now);
             const towers = Number((victimState.defenses as Record<string, number>).tour ?? 0);
             const march: March = {
               id: `${now.toString(36)}${Math.floor(Math.random() * 1e6).toString(36)}`,
@@ -2332,9 +2371,10 @@ export async function runAction(admin: SupabaseClient, userId: string, action: G
               arriveAt: now + outMs,
               status: "out",
               returnAt: 0,
-              revealed: Math.random() < Math.min(TOWER_REVEAL_MAX, TOWER_REVEAL_CHANCE * towers),
-              // Contre un seigneur, personne à prévenir.
-              warned: victim.isLord,
+              // Halle : le guet niveau 2 donne toujours le nom de l'attaquant.
+              revealed: guet >= 2 || Math.random() < Math.min(TOWER_REVEAL_MAX, TOWER_REVEAL_CHANCE * towers),
+              // Contre un seigneur, personne à prévenir ; le guet niveau 1 prévient dès le départ.
+              warned: victim.isLord || (guet >= 1 && !fogged),
               loot: 0,
               ransom: 0,
             };
@@ -2349,6 +2389,10 @@ export async function runAction(admin: SupabaseClient, userId: string, action: G
             if (rpcError) throw new Error(`Départ impossible : ${rpcError.message}`);
             if ((data as { conflict?: boolean } | null)?.conflict) continue;
             message = `🏇 Ton armée part vers ${victim.name} : arrivée dans ${Math.round(outMs / 60_000)} min, retour ${Math.round(outMs / 60_000)} min plus tard.`;
+            if (!victim.isLord && march.warned) {
+              const from = march.revealed ? ` de ${me.name}` : "";
+              notify(admin, [victim.id], { title: "🔭 Le guet a vu partir une armée !", body: `Une armée${from} arrive vers ${new Date(march.arriveAt).toLocaleTimeString("fr-FR", { hour: "2-digit", minute: "2-digit", timeZone: "Europe/Paris" })}.`, tag: "march" });
+            }
             entities = await loadEntities(admin, season.id, userId);
           }
         }
@@ -2366,7 +2410,11 @@ export async function runAction(admin: SupabaseClient, userId: string, action: G
       // La dîme prélevée par la production est versée au chantier à chaque enregistrement.
       const paid = payTithe(finalState);
       finalState = paid.state;
-      const contribution = (outcome.ok ? (outcome.value.contribution ?? 0) : 0) + paid.paid;
+      // H2 : une part de la dîme part à la halle (ou à la loge) ; elle ne compte pas pour le beffroi.
+      const myGuild = guildOf(me, guildsOf.get(entities) ?? []);
+      const toHall = myGuild ? Math.floor(paid.paid * (finalState.hallTithe ?? HALL_TITHE_DEFAULT)) : 0;
+      if (toHall > 0) finalState = { ...finalState, totalContributed: finalState.totalContributed - toHall };
+      const contribution = (outcome.ok ? (outcome.value.contribution ?? 0) : 0) + paid.paid - toHall;
       // V4 : pendant la fête des bâtisseurs, les dons comptent double pour les paliers et les lots.
       const feast = eventActive(finalState, "fete", now) ? FEAST_GIFT_FACTOR : 1;
       const gift = recordGift(finalState, contribution * feast);
@@ -2396,6 +2444,8 @@ export async function runAction(admin: SupabaseClient, userId: string, action: G
       if (result.worksite) worksite = worksiteFromRow(result.worksite);
       await stageRewards(admin, season.id, stageAtLoad, worksite.stage);
       if (contribution > 0) await recordContribution(season.id, userId, finalState.totalContributed);
+      if (toHall > 0 && myGuild) await giveToGuild(admin, myGuild, userId, toHall, guildRate(myGuild.allianceId, me, entities, world, now), entities);
+      if (action.type === "sync" && (await absorbLodge(admin, me, entities, world, now))) message = "🏛️ Ta loge est versée dans la halle de ton alliance (la moitié de ce que tu lui avais donné).";
       if (contribution > 0) {
         // Le don compte aussi pour le lot du joueur, et pour celui de l'étape d'avant s'il est encore ouvert.
         const lotMessage = await giveToLots(admin, season.id, me, stageAtLoad, contribution * feast, entities, allianceNames);
@@ -2418,7 +2468,7 @@ export async function runAction(admin: SupabaseClient, userId: string, action: G
     const meNow = entities.get(userId) ?? me;
     // Les dernières lectures partent ensemble (les noms d'alliance ne changent qu'avec une action d'alliance).
     const namesP = ALLIANCE_ACTIONS.has(action.type) || CONFLICT_ACTIONS.has(action.type) ? loadAllianceNames(admin, season.id) : Promise.resolve(allianceNames);
-    const [intel, names, info, chronicle, hall, positions, dailyCounts] = await Promise.all([
+    const [intel, names, info, chronicle, hall, positions, dailyCounts, chiefs] = await Promise.all([
       loadIntel(admin, season.id, userId, now),
       namesP,
       namesP.then((n) => allianceInfo(admin, season.id, meNow, finalState, entities, n)),
@@ -2426,6 +2476,7 @@ export async function runAction(admin: SupabaseClient, userId: string, action: G
       loadHall(admin),
       loadPositions(admin, season.id, entities),
       loadDailyCounts(admin, season.id, userId, now),
+      meNow.allianceId !== null ? loadChiefs(admin, season.id) : Promise.resolve(new Map<number, string | null>()),
     ]);
     const titles = titlesFrom(hall);
     allianceNames = names;
@@ -2448,9 +2499,10 @@ export async function runAction(admin: SupabaseClient, userId: string, action: G
       event: eventView(userId, finalState, events, now, currentRate(meNow, finalState, now, worldFrom(worksite), flat), positions, new Map([...entities.values()].map((x) => [x.id, x.name])), entities),
       fortress: fortressView(meNow, finalState, conflicts.fortress, entities, allianceNames, now, intel.get(FORTRESS_INTEL) ?? null),
       chronicle,
-      map: mapView(positions),
+      map: { ...mapView(positions), halls: guildPlaces(entities, names) },
       incoming: incomingFor(userId, entities, now),
       daily: dailyView(finalState, dailyCounts, now),
+      guild: guildView(meNow, entities, chiefs, worldFrom(worksite), now),
     };
     return error ? { ok: false, error, snapshot } : { ok: true, snapshot, message };
   }
@@ -2919,15 +2971,16 @@ function eventPosAt(e: EventRow, positions: Map<string, MapPos>, t: number): Map
 async function travelToFortress(admin: SupabaseClient, seasonId: number, entities: Map<string, Entity>, fromId: string, army: Army): Promise<number> {
   const positions = await loadPositions(admin, seasonId, entities);
   const a = positions.get(fromId);
-  return travelMs(army, a ? mapDistance(a, FORTRESS_POS) : MAP_SPAWN_RADIUS);
+  const owner = entities.get(fromId);
+  return travelMs(army, a ? mapDistance(a, FORTRESS_POS) : MAP_SPAWN_RADIUS, owner ? armySpeedBonus(owner.state) : 0);
 }
 
 /** Durée de l'aller entre deux lieux de la carte pour une armée donnée. */
-async function travelBetween(admin: SupabaseClient, seasonId: number, entities: Map<string, Entity>, fromId: string, toId: string, army: Army): Promise<number> {
+async function travelBetween(admin: SupabaseClient, seasonId: number, entities: Map<string, Entity>, fromId: string, toId: string, army: Army, speedBonus = 0): Promise<number> {
   const positions = await loadPositions(admin, seasonId, entities);
   const a = positions.get(fromId);
   const b = positions.get(toId);
-  return travelMs(army, a && b ? mapDistance(a, b) : MAP_SPAWN_RADIUS);
+  return travelMs(army, a && b ? mapDistance(a, b) : MAP_SPAWN_RADIUS, speedBonus);
 }
 
 /** T5 : armées qui approchent de mon domaine (passé la mi-chemin). */
@@ -2935,7 +2988,7 @@ function incomingFor(meId: string, entities: Map<string, Entity>, now: number): 
   return [...entities.values()].flatMap((e) =>
     (e.state.marches ?? [])
       .filter((m) => m.kind === "raid" && m.target === meId && m.status === "out" && m.warned && !m.hidden && m.arriveAt > now)
-      .map((m) => ({ id: m.id, arriveAt: m.arriveAt, from: m.revealed ? e.name : null })),
+      .map((m) => ({ id: m.id, arriveAt: m.arriveAt, from: m.revealed ? e.name : null, ...(wingLevel(entities.get(meId)?.state.hall, "guet") >= 3 ? { troops: m.troops } : {}) })),
   );
 }
 
@@ -3174,5 +3227,223 @@ function dailyView(state: PlayerState, counts: DailyCounts, _now: number): Daily
     chestBonus: d.chest ? (state.dailyBoost ?? 0) : chestBonus(next),
     boostUntil: state.dailyBoostUntil ?? 0,
     resetAt: dailyStart(d.day + 1),
+  };
+}
+
+// ---------------------------------------------------------------------------
+// Halle de guilde (H1 à H6)
+// ---------------------------------------------------------------------------
+
+interface Guild {
+  id: number;
+  allianceId: number | null;
+  userId: string | null;
+  pos: MapPos;
+  stage: number;
+  progress: number;
+  cost: number;
+  received: number;
+  gifts: Record<string, number>;
+  wings: Wings;
+}
+
+/** Halles chargées avec les participants (même requête). */
+const guildsOf = new WeakMap<Map<string, Entity>, Guild[]>();
+
+async function loadGuilds(admin: SupabaseClient, seasonId: number): Promise<Guild[]> {
+  const { data } = await admin.from("guild_halls").select("*").eq("season_id", seasonId);
+  return (data ?? []).map((r) => ({
+    id: Number(r.id),
+    allianceId: r.alliance_id === null ? null : Number(r.alliance_id),
+    userId: (r.user_id as string | null) ?? null,
+    pos: [Number(r.x), Number(r.y)] as MapPos,
+    stage: Number(r.stage),
+    progress: Number(r.progress),
+    cost: Number(r.cost),
+    received: Number(r.received),
+    gifts: Object.fromEntries(Object.entries((r.gifts as Record<string, unknown>) ?? {}).map(([k, v]) => [k, Number(v) || 0])),
+    wings: cleanWings(r.wings),
+  }));
+}
+
+/** La halle qui profite à un joueur : celle de son alliance, ou sa loge s'il est seul. */
+function guildOf(e: Entity, guilds: Guild[]): Guild | undefined {
+  return e.allianceId !== null ? guilds.find((g) => g.allianceId === e.allianceId) : guilds.find((g) => g.userId === e.id);
+}
+
+/** Niveaux d'aile gratuits : un par étape du beffroi dont l'alliance (ou le joueur) a été maître d'œuvre. */
+function masterLevelsOf(g: Guild, lots: Lot[]): number {
+  const key = g.allianceId !== null ? `a:${g.allianceId}` : `p:${g.userId}`;
+  return lots.filter((l) => l.master && l.finishedAt !== null && l.owner === key).length;
+}
+
+/** Production cumulée (par seconde) des membres d'une halle. */
+function guildRate(allianceId: number | null, me: Entity, entities: Map<string, Entity>, world: WorldState, now: number): number {
+  const members = allianceId === null ? [me] : [...entities.values()].filter((e) => !e.isLord && e.allianceId === allianceId);
+  return members.reduce((s, e) => s + rateAt(e.state, world, now), 0);
+}
+
+async function loadChiefs(admin: SupabaseClient, seasonId: number): Promise<Map<number, string | null>> {
+  const { data } = await admin.from("alliances").select("id, chief_id").eq("season_id", seasonId);
+  return new Map((data ?? []).map((r) => [Number(r.id), (r.chief_id as string | null) ?? null]));
+}
+
+/** Le chef : celui qui a fondé l'alliance, ou à défaut (parti, ou alliance plus ancienne) le plus gros producteur. */
+function chiefOf(allianceId: number, chiefs: Map<number, string | null>, entities: Map<string, Entity>): string | null {
+  const members = [...entities.values()].filter((e) => !e.isLord && e.allianceId === allianceId);
+  const c = chiefs.get(allianceId);
+  if (c && members.some((m) => m.id === c)) return c;
+  return members.sort((a, b) => b.state.totalProduced - a.state.totalProduced)[0]?.id ?? null;
+}
+
+/** Verse de la pierre à une halle ; prévient les membres si une étape se termine. */
+async function giveToGuild(admin: SupabaseClient, g: Guild, userId: string, amount: number, perSecond: number, entities: Map<string, Entity>): Promise<number> {
+  if (!(amount >= 1)) return 0;
+  const lodge = g.allianceId === null;
+  const { data } = await admin.rpc("hall_give", { p_hall: g.id, p_user: userId, p_amount: Math.floor(amount), p_per_second: perSecond, p_max_stage: maxStages(lodge) });
+  const r = data as { ok?: boolean; stage?: number; completed?: number } | null;
+  const done = Number(r?.completed ?? 0);
+  if (done > 0) {
+    const to = lodge ? [g.userId!] : [...entities.values()].filter((e) => !e.isLord && e.allianceId === g.allianceId).map((e) => e.id);
+    notify(admin, to, { title: lodge ? "🏛️ Ta loge grandit" : "🏛️ La halle grandit", body: `Étape ${r?.stage} terminée : un niveau d'aile à placer.`, tag: "hall" });
+  }
+  return done;
+}
+
+/** H6 : un joueur qui a rejoint une alliance dotée d'une halle y verse la moitié de sa loge, qui disparaît. */
+async function absorbLodge(admin: SupabaseClient, me: Entity, entities: Map<string, Entity>, world: WorldState, now: number): Promise<boolean> {
+  const guilds = guildsOf.get(entities) ?? [];
+  const lodge = guilds.find((g) => g.userId === me.id);
+  const hall = me.allianceId !== null ? guilds.find((g) => g.allianceId === me.allianceId) : undefined;
+  if (!lodge || !hall) return false;
+  const { error } = await admin.from("guild_halls").delete().eq("id", lodge.id);
+  if (error) return false;
+  await giveToGuild(admin, hall, me.id, Math.floor(lodge.received / 2), guildRate(hall.allianceId, me, entities, world, now), entities);
+  return true;
+}
+
+type HallAction = Extract<GameAction, { type: "hall" }>;
+
+async function runHallAction(
+  admin: SupabaseClient,
+  seasonId: number,
+  me: Entity,
+  current: PlayerState,
+  entities: Map<string, Entity>,
+  action: HallAction,
+  world: WorldState,
+  now: number,
+  commit: (state: PlayerState, act: string, details: Record<string, unknown>) => Promise<"ok" | "conflict">,
+): Promise<"conflict" | { error?: string; message?: string; state?: PlayerState }> {
+  const guilds = guildsOf.get(entities) ?? [];
+  const mine = guildOf(me, guilds);
+  const lodge = me.allianceId === null;
+  const chiefs = lodge ? new Map<number, string | null>() : await loadChiefs(admin, seasonId);
+  const isChief = lodge || chiefOf(me.allianceId!, chiefs, entities) === me.id;
+  const perSecond = guildRate(me.allianceId, me, entities, world, now);
+  switch (action.op) {
+    case "found": {
+      if (mine) return { error: lodge ? "Tu as déjà une loge." : "Ton alliance a déjà sa halle." };
+      if (!isChief) return { error: "Seul le chef de l'alliance fonde la halle." };
+      const cost = Math.ceil(HALL_FOUND_HOURS * perSecond * 3600);
+      if (current.stone < cost) return { error: `Il faut ${cost.toLocaleString("fr-FR")} pierres pour fonder ${lodge ? "ta loge" : "la halle"}.` };
+      const positions = await loadPositions(admin, seasonId, entities);
+      const home = positions.get(me.id);
+      if (!home) return { error: "Ton domaine n'est pas encore sur la carte." };
+      const members = lodge ? [home] : [...entities.values()].filter((e) => !e.isLord && e.allianceId === me.allianceId).flatMap((e): MapPos[] => { const p = positions.get(e.id); return p ? [p] : []; });
+      const taken = [...fixedPlaces(), ...positions.values(), ...guilds.map((g) => g.pos)];
+      const spot = hallSpots(home, members, taken)[0];
+      if (!spot) return { error: "Aucune case libre près de ton domaine." };
+      const paid = { ...current, stone: current.stone - cost };
+      if ((await commit(paid, "hall_found", { cost, x: spot[0], y: spot[1] })) === "conflict") return "conflict";
+      const { error } = await admin.from("guild_halls").insert({
+        season_id: seasonId,
+        alliance_id: lodge ? null : me.allianceId,
+        user_id: lodge ? me.id : null,
+        x: spot[0],
+        y: spot[1],
+        cost: hallStageCost(1, perSecond),
+      });
+      if (error) {
+        // Fondée entre-temps par un autre, ou case prise : on rend la pierre.
+        await commit({ ...paid, stone: paid.stone + cost }, "hall_refund", { cost });
+        return { error: "La halle n'a pas pu être fondée, réessaie.", state: { ...paid, stone: paid.stone + cost } };
+      }
+      if (!lodge) await addChronicle(admin, seasonId, { kind: "hall", actor_id: me.id, details: { alliance: me.allianceId } });
+      return { message: lodge ? "🏛️ Ta loge est fondée. Verse-lui de la pierre pour la faire grandir." : "🏛️ La halle de guilde est fondée ! Chaque membre peut y verser de la pierre, et une part de sa dîme.", state: paid };
+    }
+    case "give": {
+      if (!mine) return { error: lodge ? "Fonde d'abord ta loge." : "Ton alliance n'a pas encore de halle." };
+      const amount = Math.floor(Number(action.amount));
+      if (!Number.isFinite(amount) || amount < 1) return { error: "Montant invalide." };
+      if (amount > current.stone) return { error: "Tu n'as pas autant de pierre." };
+      const paid = { ...current, stone: current.stone - amount };
+      if ((await commit(paid, "hall_give", { amount })) === "conflict") return "conflict";
+      const done = await giveToGuild(admin, mine, me.id, amount, perSecond, entities);
+      return { message: done > 0 ? `🏛️ Versé ! Étape terminée : un niveau d'aile à placer.` : `🏛️ ${amount.toLocaleString("fr-FR")} pierres versées à ${lodge ? "ta loge" : "la halle"}.`, state: paid };
+    }
+    case "tithe": {
+      const percent = Number(action.percent);
+      if (!Number.isInteger(percent) || percent < 0 || percent > HALL_TITHE_MAX * 100 || percent % 5 !== 0) return { error: "Part invalide." };
+      const next = { ...current, hallTithe: percent / 100 };
+      if ((await commit(next, "hall_tithe", { percent })) === "conflict") return "conflict";
+      return { message: `⛪ ${percent} % de ta dîme ira à ${lodge ? "ta loge" : "la halle"}, le reste au beffroi.`, state: next };
+    }
+    case "place": {
+      if (!mine) return { error: "Pas de halle." };
+      if (!isChief) return { error: "Seul le chef place les niveaux d'aile. Propose ton choix dans le canal d'alliance." };
+      const wing = String(action.wing) as WingId;
+      const available = mine.stage + masterLevelsOf(mine, lotsOf.get(entities) ?? []);
+      const blocked = wingBlocker(mine.wings, wing, available, lodge);
+      if (blocked) return { error: blocked };
+      const { data } = await admin.rpc("hall_place", { p_hall: mine.id, p_wing: wing, p_available: available, p_max_kinds: lodge ? LODGE_MAX_WINGS : WING_IDS.length });
+      if (!data) return { error: "Impossible de placer ce niveau, réessaie." };
+      const def = WINGS.find((w) => w.id === wing)!;
+      return { message: `${def.icon} ${def.name} niveau ${wingLevel(mine.wings, wing) + 1} : ${def.levels[wingLevel(mine.wings, wing)]}.` };
+    }
+  }
+  return { error: "Action inconnue." };
+}
+
+function guildPlaces(entities: Map<string, Entity>, names: Map<number, string>): HallPlace[] {
+  return (guildsOf.get(entities) ?? []).map((g) => ({
+    id: g.id,
+    name: g.allianceId !== null ? `Halle · ${names.get(g.allianceId) ?? "alliance"}` : `Loge de ${entities.get(g.userId ?? "")?.name ?? "?"}`,
+    allianceId: g.allianceId,
+    pos: [g.pos[0], g.pos[1]],
+    stage: g.stage,
+    lodge: g.allianceId === null,
+  }));
+}
+
+function guildView(me: Entity, entities: Map<string, Entity>, chiefs: Map<number, string | null>, world: WorldState, now: number): HallView {
+  const guilds = guildsOf.get(entities) ?? [];
+  const g = guildOf(me, guilds);
+  const lodge = me.allianceId === null;
+  const chiefId = lodge ? me.id : chiefOf(me.allianceId!, chiefs, entities);
+  const masterLevels = g ? masterLevelsOf(g, lotsOf.get(entities) ?? []) : 0;
+  return {
+    lodge,
+    chief: chiefId === me.id,
+    chiefName: chiefId ? (entities.get(chiefId)?.name ?? null) : null,
+    foundCost: Math.ceil(HALL_FOUND_HOURS * guildRate(me.allianceId, me, entities, world, now) * 3600),
+    dormantLodge: !lodge && guilds.some((x) => x.userId === me.id),
+    hall: g
+      ? {
+          pos: [g.pos[0], g.pos[1]],
+          stage: g.stage,
+          maxStages: maxStages(g.allianceId === null),
+          progress: g.progress,
+          cost: g.cost,
+          received: g.received,
+          gifts: Object.entries(g.gifts)
+            .map(([id, amount]) => ({ id, name: entities.get(id)?.name ?? "Ancien membre", amount }))
+            .sort((a, b) => b.amount - a.amount),
+          wings: g.wings,
+          available: g.stage + masterLevels,
+          placed: placedLevels(g.wings),
+          masterLevels,
+        }
+      : null,
   };
 }

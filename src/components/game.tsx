@@ -31,6 +31,7 @@ import {
   STAGES,
   UNITS,
   UPGRADES,
+  WINGS,
   type Category,
   type CombatantDef,
   type CombatantId,
@@ -53,6 +54,7 @@ import {
   clickValue,
   generatorCost,
   generatorRate,
+  armySpeedBonus,
   masteryBonus,
   nextTiers,
   lootOf,
@@ -1323,6 +1325,7 @@ function AllianceTab({ snap, live, now, run }: { snap: GameSnapshot; live: Playe
     <>
       <Marches snap={snap} now={now} run={run} />
       <Alliance snap={snap} run={run} />
+      <GuildHall snap={snap} live={live} run={run} />
       <Fortress snap={snap} live={live} now={now} run={run} />
       {snap.alliance && <Wars snap={snap} run={run} now={now} />}
       {allies.length > 0 && (
@@ -1657,7 +1660,7 @@ function Incoming({ snap, now }: { snap: GameSnapshot; now: number }) {
     <div className="event-banner incoming">
       {list.map((i) => (
         <div key={i.id}>
-          ⚠️ Une armée {i.from ? `de ${i.from} ` : ""}approche : arrivée dans {duration(i.arriveAt - now)}. Renforce tes défenses ou rappelle tes troupes !
+          ⚠️ Une armée {i.from ? `de ${i.from} ` : ""}approche{i.troops ? ` (${armyIcons(i.troops as Record<string, number>, "?")})` : ""} : arrivée dans {duration(i.arriveAt - now)}. Renforce tes défenses ou rappelle tes troupes !
         </div>
       ))}
     </div>
@@ -1777,6 +1780,123 @@ function Forge({ live, now, run, stagesDone }: { live: PlayerState; now: number;
 }
 
 /** Mon alliance : fondation, invitations, troupes postées. */
+/** Halle de guilde (H1 à H6), ou loge d'un joueur seul. */
+function GuildHall({ snap, live, run }: { snap: GameSnapshot; live: PlayerState; run: ReturnType<typeof useGame>["run"] }) {
+  const [amount, setAmount] = useState("");
+  const [busy, setBusy] = useState(false);
+  const g = snap.guild;
+  if (!g) return null;
+  const act = async (action: Parameters<typeof run>[0]) => {
+    setBusy(true);
+    await run(action);
+    setBusy(false);
+  };
+  const title = g.lodge ? "🏛️ Ta loge" : "🏛️ Halle de guilde";
+  const h = g.hall;
+  if (!h) {
+    return (
+      <div className="hall">
+        <h3 className="section-title">{title}</h3>
+        <p className="note">
+          {g.lodge
+            ? "Seul, tu peux fonder une petite loge près de ton domaine : 4 étapes et deux ailes au plus. Si tu rejoins une alliance qui a sa halle, la moitié de ce que tu lui as versé y passe."
+            : "Un chantier propre à l'alliance, posé sur la carte près de vos domaines. Chaque étape terminée donne un niveau d'aile : production, stock à l'abri, renforts, guet, écuries ou infirmerie. Il y a dix étapes, et dix-huit niveaux possibles."}
+        </p>
+        {g.dormantLodge && <p className="note">Ta loge attend : la moitié de ce que tu lui as versé rejoindra la halle dès qu&apos;elle sera fondée.</p>}
+        {g.chief ? (
+          <button className="btn btn-primary" disabled={busy || live.stone < g.foundCost} onClick={() => act({ type: "hall", op: "found" })}>
+            Fonder {g.lodge ? "ma loge" : "la halle"} · <span className="num">{formatNumber(g.foundCost)} 🪨</span>
+          </button>
+        ) : (
+          <p className="note">Seul le chef{g.chiefName ? ` (${g.chiefName})` : ""} peut la fonder.</p>
+        )}
+      </div>
+    );
+  }
+  const done = h.stage >= h.maxStages;
+  const pct = done ? 100 : Math.min(100, (h.progress / Math.max(1, h.cost)) * 100);
+  const free = h.available - h.placed;
+  const tithe = Math.round((live.hallTithe ?? 0.25) * 100);
+  const kinds = WINGS.filter((w) => (h.wings[w.id] ?? 0) > 0).length;
+  const give = (n: number) => {
+    if (n >= 1) void act({ type: "hall", op: "give", amount: Math.floor(n) });
+    setAmount("");
+  };
+  return (
+    <div className="hall">
+      <h3 className="section-title">{title}</h3>
+      <div className="bar" role="progressbar" aria-valuenow={Math.round(pct)} aria-valuemin={0} aria-valuemax={100}>
+        <span style={{ width: `${pct}%` }} />
+      </div>
+      <div className="bar-caption num">
+        <span>{done ? `${formatNumber(h.received)} pierres reçues` : `${formatNumber(h.progress)} / ${formatNumber(h.cost)}`}</span>
+        <span>{done ? `achevée (${h.maxStages}/${h.maxStages})` : `étape ${h.stage + 1}/${h.maxStages}`}</span>
+      </div>
+      <form
+        className="alliance-form"
+        onSubmit={(e) => {
+          e.preventDefault();
+          give(Number(amount.replace(/\s/g, "")));
+        }}
+      >
+        <input className="input num" inputMode="numeric" value={amount} placeholder="Pierres à verser" onChange={(e) => setAmount(e.target.value)} />
+        <button className="btn btn-primary" disabled={busy || !(Number(amount.replace(/\s/g, "")) >= 1)}>
+          Verser
+        </button>
+        <button type="button" className="btn" disabled={busy || live.stone < 1} onClick={() => give(live.stone / 10)}>
+          10 %
+        </button>
+      </form>
+      <label className="hall-tithe">
+        Part de ta dîme pour {g.lodge ? "ta loge" : "la halle"} :{" "}
+        <select className="input" value={tithe} disabled={busy} onChange={(e) => act({ type: "hall", op: "tithe", percent: Number(e.target.value) })}>
+          {Array.from({ length: 11 }, (_, i) => i * 5).map((p) => (
+            <option key={p} value={p}>
+              {p} %
+            </option>
+          ))}
+        </select>
+      </label>
+      <p className="note">
+        Le reste de ta dîme ({Math.round((live.tithe ?? 0) * 100)} % de ta production) continue d&apos;aller au beffroi. Ce qui est versé ici ne compte ni pour le beffroi, ni
+        pour les lots, ni pour les paliers de don, et ne peut être ni repris ni pillé.
+      </p>
+      <h4 className="hall-sub">
+        Ailes · {h.placed}/{h.available} niveaux placés{h.masterLevels > 0 ? ` (dont ${h.masterLevels} offert${h.masterLevels > 1 ? "s" : ""} par le beffroi)` : ""}
+      </h4>
+      {free > 0 && <p className="note">{g.chief ? `${free} niveau${free > 1 ? "x" : ""} à placer.` : `${free} niveau${free > 1 ? "x" : ""} à placer par ${g.chiefName ?? "le chef"} : propose ton choix dans le canal d'alliance.`}</p>}
+      <div className="list">
+        {WINGS.map((w) => {
+          const lvl = h.wings[w.id] ?? 0;
+          const blocked = lvl >= 3 || (g.lodge && lvl === 0 && kinds >= 2);
+          return (
+            <div key={w.id} className={`row${lvl === 0 ? " hall-off" : ""}`}>
+              <div className="row-icon" aria-hidden>
+                {w.icon}
+              </div>
+              <div>
+                <div className="row-title">
+                  {w.name}
+                  <span className="row-count num">{lvl}/3</span>
+                </div>
+                <div className="row-desc">{lvl > 0 ? w.levels[lvl - 1] : "Pas encore bâtie."}{lvl < 3 ? ` · niveau ${lvl + 1} : ${w.levels[lvl]}` : ""}</div>
+              </div>
+              {g.chief && free > 0 && !blocked && (
+                <button className="btn btn-primary" disabled={busy} onClick={() => act({ type: "hall", op: "place", wing: w.id })}>
+                  +1
+                </button>
+              )}
+            </div>
+          );
+        })}
+      </div>
+      {h.gifts.length > 0 && (
+        <p className="note num">Versements : {h.gifts.map((x) => `${x.id === snap.userId ? "toi" : x.name} ${formatNumber(x.amount)}`).join(" · ")}</p>
+      )}
+    </div>
+  );
+}
+
 function Alliance({ snap, run }: { snap: GameSnapshot; run: ReturnType<typeof useGame>["run"] }) {
   const [name, setName] = useState("");
   const [busy, setBusy] = useState(false);
@@ -2414,6 +2534,8 @@ function Chronicle({ entries, me, now, rivals, alliances = [] }: { entries: Chro
           text = d.master
             ? `👑 ${d.name} finit son lot de « ${stageName} » le premier et devient maître d'œuvre !`
             : `🏗️ ${d.name} finit son lot de « ${stageName} ».`;
+        } else if (e.kind === "hall") {
+          text = `🏛️ ${who(e.actorId, e.actorName, true)} ${e.actorId === me ? "as fondé" : "a fondé"} la halle de ${allianceName(e.details.alliance)}.`;
         } else if (e.kind === "gift") {
           text = `${e.actorName} a offert ${formatNumber(e.details.amount ?? 0)} pierres au chantier.`;
         } else {
@@ -2581,7 +2703,7 @@ function KingdomMap({ snap, live, now, run }: { snap: GameSnapshot; live: Player
   const army = cleanArmy({ ...live.troops } as Army);
   const travel =
     pickedPos && pickedDistance !== null
-      ? { to: [pickedPos[0], pickedPos[1]] as [number, number], label: `≈ ${Math.round(travelMs(armySize(army) > 0 ? army : ({ piquier: 1 } as Army), pickedDistance) / 60_000)} min` }
+      ? { to: [pickedPos[0], pickedPos[1]] as [number, number], label: `≈ ${Math.round(travelMs(armySize(army) > 0 ? army : ({ piquier: 1 } as Army), pickedDistance, armySpeedBonus(live)) / 60_000)} min` }
       : null;
   return (
     <>
@@ -2613,6 +2735,16 @@ function KingdomMap({ snap, live, now, run }: { snap: GameSnapshot; live: Player
             showNames={names || zoomed}
             travel={travel}
             meColor={allianceColor(myAlliance)}
+            halls={(map.halls ?? []).map((h) => ({
+              id: h.id,
+              pos: [h.pos[0], h.pos[1]] as [number, number],
+              name: h.name,
+              color: h.allianceId !== null ? allianceColor(h.allianceId) : undefined,
+              stage: h.stage,
+              maxStages: h.lodge ? 4 : 10,
+              lodge: h.lodge,
+              mine: h.allianceId !== null ? h.allianceId === myAlliance : snap.guild?.lodge === true && !!snap.guild.hall && snap.guild.hall.pos[0] === h.pos[0] && snap.guild.hall.pos[1] === h.pos[1],
+            }))}
           />
         </div>
         <ul className="map-legend" aria-label="Légende">
