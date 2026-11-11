@@ -70,6 +70,14 @@ import {
   SPY_RISK_PER_CELL,
   SPY_RISK_PER_GAP,
   SPY_SPEED,
+  RUMOR_FACTOR,
+  COUNTER_SECONDS,
+  COUNTER_MS,
+  RUMOR_SECONDS,
+  RUMOR_MS,
+  MOLE_SECONDS,
+  GRANARY_CUT_MS,
+  BLIND_MS,
   SABOTAGE_MIN_SUCCESS,
   SABOTAGE_DELAY,
   SABOTAGE_IMMUNITY_MS,
@@ -187,6 +195,13 @@ export interface PlayerState {
   spyLevel?: number;
   /** E3 : espions en route (aller simple). */
   spies?: SpyMission[];
+  /** E4 : taupes posées chez d'autres, contre-espionnage, fausse rumeur, sabotages subis (grenier, guet), journal des alertes. */
+  moles?: Mole[];
+  counterUntil?: number;
+  rumor?: { mode: "fort" | "faible"; until: number } | null;
+  granaryCutUntil?: number;
+  blindUntil?: number;
+  spyLog?: { at: number; text: string }[];
   academy: number;
   /** Protégé des sabotages jusqu'à cet horodatage. */
   sabotageImmuneUntil: number;
@@ -256,6 +271,54 @@ export interface SpyMission {
   arriveAt: number;
   /** Distance en cases, pour le risque d'être repéré. */
   distance: number;
+}
+
+/** E4 : une taupe chez la cible ; on retient ce qu'elle a déjà signalé. */
+export interface Mole {
+  id: string;
+  target: string;
+  until: number;
+  distance: number;
+  seen: string[];
+  shielded: boolean;
+  curfew: boolean;
+}
+
+/** E4 : armée affichée par la fausse rumeur (×2 ou ÷2). */
+export function rumorArmy(state: PlayerState, army: Army, now: number): Army {
+  const r = state.rumor;
+  if (!r || r.until <= now) return army;
+  const f = r.mode === "fort" ? RUMOR_FACTOR : 1 / RUMOR_FACTOR;
+  return Object.fromEntries(Object.entries(army).map(([id, n]) => [id, Math.max(1, Math.round((n ?? 0) * f))])) as Army;
+}
+
+/** E4 : contre-espionnage actif ? Il retire 2 à l'écart de tous ceux qui agissent contre soi. */
+export function counterActive(state: PlayerState, now: number): boolean {
+  return (state.counterUntil ?? 0) > now;
+}
+
+/** E4 : contre-espionnage et fausse rumeur se paient en minutes de production de base. */
+export function buyCounter(state: PlayerState, base: number, now: number): Result<PlayerState> {
+  const cost = Math.max(SPY_MIN_COST, Math.ceil(base * COUNTER_SECONDS));
+  if (cost > state.stone) return { ok: false, error: "Pas assez de pierre." };
+  return { ok: true, value: { ...state, stone: state.stone - cost, counterUntil: Math.max(now, state.counterUntil ?? 0) + COUNTER_MS } };
+}
+
+export function buyRumor(state: PlayerState, mode: string, base: number, now: number): Result<PlayerState> {
+  if (mode !== "fort" && mode !== "faible") return { ok: false, error: "Rumeur inconnue." };
+  const cost = Math.max(SPY_MIN_COST, Math.ceil(base * RUMOR_SECONDS));
+  if (cost > state.stone) return { ok: false, error: "Pas assez de pierre." };
+  return { ok: true, value: { ...state, stone: state.stone - cost, rumor: { mode, until: now + RUMOR_MS } } };
+}
+
+export function counterCost(base: number): number {
+  return Math.max(SPY_MIN_COST, Math.ceil(base * COUNTER_SECONDS));
+}
+export function rumorCost(base: number): number {
+  return Math.max(SPY_MIN_COST, Math.ceil(base * RUMOR_SECONDS));
+}
+export function moleCost(base: number): number {
+  return Math.max(SPY_MIN_COST, Math.ceil(base * MOLE_SECONDS));
 }
 
 /** E3 : durée du trajet d'un espion (vitesse 3, 1 minute au moins). */
@@ -1091,8 +1154,9 @@ export function buyArmy(state: PlayerState, kind: "unit" | "defense", id: string
  * Chez un joueur, les 2 dernières heures de production sont à l'abri, mais jamais plus de la moitié du stock.
  * Un seigneur n'a pas de stock à l'abri. Entre joueurs, le butin est plafonné à 2 h de production de l'attaquant.
  */
-export function lootOf(stone: number, rate: number, revenge: boolean, opts: { lord?: boolean; cap?: number; factor?: number; stagesDone?: number; extraSecured?: number } = {}): number {
-  const securedSeconds = SECURED_SECONDS + stagePerk(opts.stagesDone ?? 0, "securedSeconds") + (opts.extraSecured ?? 0);
+export function lootOf(stone: number, rate: number, revenge: boolean, opts: { lord?: boolean; cap?: number; factor?: number; stagesDone?: number; extraSecured?: number; securedFactor?: number } = {}): number {
+  // E4 : un grenier saboté ne met plus à l'abri que la moitié.
+  const securedSeconds = (SECURED_SECONDS + stagePerk(opts.stagesDone ?? 0, "securedSeconds") + (opts.extraSecured ?? 0)) * (opts.securedFactor ?? 1);
   const secured = opts.lord ? 0 : Math.min(rate * securedSeconds, stone * (1 - MIN_EXPOSED_SHARE));
   const loot = Math.floor(Math.max(0, stone - secured) * (revenge ? REVENGE_LOOT_RATE : RAID_LOOT_RATE) * (opts.factor ?? 1));
   return opts.cap !== undefined ? Math.min(loot, Math.floor(opts.cap)) : loot;
@@ -1301,6 +1365,7 @@ export function resolveRaid(
   const lootBonus = masterActive(attacker, "loot", now) ? 1 + MASTER_BONUSES.loot.value : 1;
   const stolen = lootOf(victim.stone, ctx.victimRate, revenge, {
     extraSecured: extraSecured(victim, now),
+    securedFactor: (victim.granaryCutUntil ?? 0) > now ? 0.5 : 1,
     lord: !!ctx.defenderArmy,
     // Un seigneur prend au plus 30 minutes de la production de sa victime, revanche comprise.
     cap: ctx.attackerIsLord ? ctx.victimRate * LORD_LOOT_CAP_SECONDS : playerVsPlayer && ctx.attackerRate !== undefined ? ctx.attackerRate * PVP_LOOT_CAP_SECONDS : undefined,
@@ -1450,10 +1515,12 @@ export function buyAcademy(state: PlayerState): Result<PlayerState> {
  * et au moins quelques minutes de la production du saboteur.
  */
 export function sabotageCost(saboteur: PlayerState, target: PlayerState, world: WorldState, now: number): number {
-  const level = target.academy ?? 0;
-  const levelPrice = level > 0 ? ACADEMY_BASE_COST * ACADEMY_COST_GROWTH ** (level - 1) : 0;
-  return Math.max(SABOTAGE_MIN_COST, Math.ceil(baseRate(saboteur, world, now) * SABOTAGE_COST_SECONDS), Math.ceil(levelPrice * SABOTAGE_LEVEL_SHARE));
+  void target;
+  // E4 : 10 minutes de production de base, quelle que soit la cible.
+  return Math.max(SABOTAGE_MIN_COST, Math.ceil(baseRate(saboteur, world, now) * SABOTAGE_COST_SECONDS));
 }
+
+export type SabotageAim = "academie" | "grenier" | "guet";
 
 /** E4 : réussite d'un sabotage selon l'écart de niveau d'espionnage (les tours ne comptent plus). */
 export function sabotageChance(gap: number): number {
@@ -1461,16 +1528,18 @@ export function sabotageChance(gap: number): number {
 }
 
 /** Pourquoi on ne peut pas saboter cette cible, ou null. */
-export function sabotageBlocker(target: PlayerState, now: number, saboteur?: PlayerState): string | null {
+export function sabotageBlocker(target: PlayerState, now: number, saboteur?: PlayerState, aim: SabotageAim = "academie"): string | null {
   if (saboteur && inCurfew(saboteur, now)) return "Tu es en couvre-feu : pas de sabotage pendant ta plage.";
   if (inCurfew(target, now)) return "Ce domaine est en couvre-feu.";
   if (target.sabotageImmuneUntil > now) return "Sa garde est sur le qui-vive après un sabotage récent.";
-  if ((target.academy ?? 0) === 0 && (target.research ?? []).length === 0) return "Rien à saboter : pas d'académie ni de recherche en cours.";
+  if (aim === "academie" && (target.academy ?? 0) === 0 && (target.research ?? []).length === 0) return "Rien à saboter : pas d'académie ni de recherche en cours.";
   return null;
 }
 
 /** Effet d'un sabotage réussi sur la cible. */
-export function applySabotage(target: PlayerState, now: number): PlayerState {
+export function applySabotage(target: PlayerState, now: number, aim: SabotageAim = "academie"): PlayerState {
+  if (aim === "grenier") return { ...target, granaryCutUntil: now + GRANARY_CUT_MS, sabotageImmuneUntil: now + SABOTAGE_IMMUNITY_MS };
+  if (aim === "guet") return { ...target, blindUntil: now + BLIND_MS, sabotageImmuneUntil: now + SABOTAGE_IMMUNITY_MS };
   // La recherche en cours prend du retard, et toute la file avec elle.
   const queue = target.research ?? [];
   const delay = queue[0] && queue[0].endsAt > now ? Math.ceil((queue[0].endsAt - now) * SABOTAGE_DELAY) : 0;

@@ -16,6 +16,13 @@ import {
   spyRisk,
   spyTravelMs,
   sabotageChance,
+  rumorArmy,
+  lootOf,
+  buyCounter,
+  buyRumor,
+  counterActive,
+  applySabotage,
+  sabotageBlocker,
   researchCost,
   startResearch,
   newPlayerState,
@@ -406,5 +413,46 @@ describe("coup de pouce en défense", () => {
     const helped = raidArmies(attacker, player({ catchUp: 0.6 }), { victimId: "v", now: NOW });
     expect(plain.attackBonus).toBe(1);
     expect(helped.attackBonus).toBeCloseTo(1 / 1.6);
+  });
+});
+
+describe("espionnage, deuxième livraison", () => {
+  it("la fausse rumeur double ou divise l'armée affichée, pendant 2 h", () => {
+    const base = { ...player(), stone: 1e9 };
+    const fort = buyRumor(base, "fort", 10, NOW);
+    if (!fort.ok) throw new Error(fort.error);
+    expect(rumorArmy(fort.value, { milicien: 10 }, NOW + 1)).toEqual({ milicien: 20 });
+    expect(rumorArmy(fort.value, { milicien: 10 }, NOW + 2 * 3_600_000 + 1)).toEqual({ milicien: 10 });
+    const faible = buyRumor(base, "faible", 10, NOW);
+    if (!faible.ok) throw new Error(faible.error);
+    expect(rumorArmy(faible.value, { milicien: 10 }, NOW + 1)).toEqual({ milicien: 5 });
+    expect(buyRumor(base, "moyen", 10, NOW).ok).toBe(false);
+  });
+
+  it("le contre-espionnage dure 6 h et se prolonge au rachat", () => {
+    const r = buyCounter({ ...player(), stone: 1e9 }, 10, NOW);
+    if (!r.ok) throw new Error(r.error);
+    expect(counterActive(r.value, NOW + 6 * 3_600_000 - 1)).toBe(true);
+    expect(counterActive(r.value, NOW + 6 * 3_600_000 + 1)).toBe(false);
+    const again = buyCounter(r.value, 10, NOW + 1000);
+    if (!again.ok) throw new Error(again.error);
+    expect(again.value.counterUntil).toBe(NOW + 12 * 3_600_000);
+    expect(r.value.stone).toBe(1e9 - 1800);
+  });
+
+  it("le sabotage du grenier et du guet ne demande ni académie ni recherche", () => {
+    const target = player();
+    expect(sabotageBlocker(target, NOW, undefined, "academie")).not.toBeNull();
+    expect(sabotageBlocker(target, NOW, undefined, "grenier")).toBeNull();
+    const g = applySabotage(target, NOW, "grenier");
+    expect(g.granaryCutUntil).toBe(NOW + 2 * 3_600_000);
+    expect(sabotageBlocker(g, NOW + 1, undefined, "guet")).not.toBeNull();
+    expect(applySabotage(target, NOW, "guet").blindUntil).toBe(NOW + 3_600_000);
+  });
+
+  it("un grenier saboté ne met que la moitié à l'abri", () => {
+    const full = lootOf(100_000, 1, false, {});
+    const cut = lootOf(100_000, 1, false, { securedFactor: 0.5 });
+    expect(cut).toBeGreaterThan(full);
   });
 });

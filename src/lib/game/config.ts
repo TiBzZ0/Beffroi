@@ -246,6 +246,7 @@ export const DAILY_QUESTS = [
   { id: "repousser", family: "combattre", icon: "🛡️", label: "Repousse un raid", goal: 1 },
   { id: "renforts", family: "combattre", icon: "🤝", label: "Envoie des renforts à un allié", goal: 1 },
   { id: "recherche", family: "combattre", icon: "⚗️", label: "Termine une recherche", goal: 1 },
+  { id: "espion", family: "combattre", icon: "🕵️", label: "Envoie une reconnaissance", goal: 1 },
   { id: "veines", family: "participer", icon: "✨", label: "Prends 5 veines d'or", goal: 5 },
   { id: "evenement", family: "participer", icon: "🎪", label: "Prends part à un événement", goal: 1 },
   { id: "message", family: "participer", icon: "💬", label: "Écris un message dans le chat", goal: 1 },
@@ -580,7 +581,8 @@ export const ACADEMY_BASE_COST = 50_000;
 export const ACADEMY_COST_GROWTH = 3;
 /** Sabotage de l'académie d'un rival : la moitié du prix du niveau visé, et au moins 3 min de sa propre production (1 000 au minimum). */
 export const SABOTAGE_LEVEL_SHARE = 0.5;
-export const SABOTAGE_COST_SECONDS = 180;
+/** E4 : un sabotage coûte 10 minutes de production de base. */
+export const SABOTAGE_COST_SECONDS = 600;
 export const SABOTAGE_MIN_COST = 1_000;
 /** Réussite : 60 %, −5 % par tour d'archers de la cible, 10 % au moins. */
 /** Refonte de l'espionnage (E4) : réussite 50 % + 10 % par niveau d'écart, entre 10 et 90 %. */
@@ -827,3 +829,17 @@ export const SPY_RISK_MAX = 0.95;
 export const SPY_BAN_COUNT = 3;
 export const SPY_BAN_WINDOW_MS = 24 * 3_600_000;
 export const SPY_BAN_MS = 6 * 3_600_000;
+/** E4 : taupe (5 min, 2 h, écart +1 au moins, deux actives au plus), contre-espionnage (3 min, 6 h, −2 à l'écart), fausse rumeur (3 min, 2 h, ×2 ou ÷2). */
+export const MOLE_SECONDS = 5 * 60;
+export const MOLE_MS = 2 * 3_600_000;
+export const MOLE_MAX = 2;
+export const MOLE_MIN_GAP = 1;
+export const COUNTER_SECONDS = 3 * 60;
+export const COUNTER_MS = 6 * 3_600_000;
+export const COUNTER_GAP = 2;
+export const RUMOR_SECONDS = 3 * 60;
+export const RUMOR_MS = 2 * 3_600_000;
+export const RUMOR_FACTOR = 2;
+/** Sabotage du grenier (stock à l'abri ÷ 2 pendant 2 h) et du guet (aucune alerte d'approche pendant 1 h). */
+export const GRANARY_CUT_MS = 2 * 3_600_000;
+export const BLIND_MS = 3_600_000;

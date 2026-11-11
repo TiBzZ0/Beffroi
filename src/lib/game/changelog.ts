@@ -359,4 +359,15 @@ export const CHANGELOG: ChangeEntry[] = [
       "🗼 Les tours d'archers ne repèrent plus les espions et ne gênent plus les saboteurs : c'est le niveau d'espionnage qui compte. Une armée qui approche dévoile le nom de son chef si ton niveau d'espionnage vaut au moins le sien.",
     ],
   },
+  {
+    id: 43,
+    date: "11 novembre",
+    items: [
+      "🐀 Nouvelle action : la taupe. Pour 5 minutes de production, elle s'installe 2 h chez un joueur dont tu dépasses le niveau d'espionnage d'au moins un cran. Elle te prévient quand il fait partir une armée (et quelle part de ses troupes), perd son bouclier, entre ou sort de couvre-feu. Deux taupes au plus. Elle peut être démasquée à la pose et à chaque alerte, à demi-risque.",
+      "🛡️ Contre-espionnage : pour 3 minutes de production, pendant 6 h, quiconque t'espionne, te sabote ou pose une taupe chez toi a deux crans de moins. Un espion repéré chez toi rapporte des chiffres faussés.",
+      "🧨 Le sabotage coûte désormais 10 minutes de production de base et vise au choix l'académie, le grenier (moitié du stock à l'abri pendant 2 h) ou le guet (aucune alerte d'approche pendant 1 h). Réussite de 50 % plus 10 % par cran d'écart. Raté, le saboteur est toujours vu ; réussi, il peut l'être.",
+      "🗣️ Fausse rumeur : pour 3 minutes de production, pendant 2 h, tout le monde voit ton armée deux fois plus grosse ou deux fois plus petite. Seul un espion d'au moins deux crans au-dessus de toi voit la vérité.",
+      "🕵️ Nouvelle quête du jour pour qui a un niveau d'espionnage : envoyer une reconnaissance.",
+    ],
+  },
 ];

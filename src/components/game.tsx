@@ -80,6 +80,9 @@ import {
   upgradeUnlocked,
   attackArmy,
   travelMs,
+  counterCost,
+  rumorCost,
+  type SabotageAim,
   type PlayerState,
 } from "@/lib/game/engine";
 import { formatNumber, formatRate } from "@/lib/game/format";
@@ -1287,7 +1290,7 @@ function Army({ snap, live, now, run }: { snap: GameSnapshot; live: PlayerState;
             riposte en face. Une partie des troupes perdues revient de l&apos;infirmerie au bout de 30 minutes.
           </p>
           <Marches snap={snap} now={now} run={run} />
-          <Spies snap={snap} live={live} now={now} />
+          <Spies snap={snap} live={live} now={now} run={run} />
           <Garrison live={live} run={run} />
           <CurfewCard live={live} now={now} run={run} />
         </>
@@ -1313,9 +1316,10 @@ function Raids({ snap, live, now, run }: { snap: GameSnapshot; live: PlayerState
   const distanceTo = (id: string) => (mine && snap.map?.places[id] ? mapDistance(mine, snap.map.places[id]) : undefined);
   const players = snap.rivals.filter((r) => !r.isLord && !r.allied);
   const lords = snap.rivals.filter((r) => r.isLord && (level === null || r.difficulty === level));
-  const sabotage = (target: string) => act(target, { type: "sabotage", target });
+  const sabotage = (target: string, aim: SabotageAim) => act(target, { type: "sabotage", target, aim });
+  const mole = (target: string) => act(target, { type: "mole", target });
   const row = (r: RivalView) => (
-    <RivalRow key={r.id} r={r} now={now} busy={busy} onRaid={raid} onSpy={spy} spyPrice={spyPrice} stone={live.stone} onSabotage={sabotage} stagesDone={stagesDoneAt(worldFrom(snap.worksite), now)} me={live} distance={distanceTo(r.id)} />
+    <RivalRow key={r.id} r={r} now={now} busy={busy} onRaid={raid} onSpy={spy} spyPrice={spyPrice} stone={live.stone} onSabotage={sabotage} onMole={mole} stagesDone={stagesDoneAt(worldFrom(snap.worksite), now)} me={live} distance={distanceTo(r.id)} />
   );
   const views: [RaidView, string][] = [
     ["seigneurs", `Seigneurs (${snap.rivals.filter((r) => r.isLord).length})`],
@@ -1485,6 +1489,7 @@ function RivalRow({
   spyPrice,
   stone: myStone,
   onSabotage,
+  onMole,
   stagesDone = 0,
   me,
   distance,
@@ -1496,7 +1501,8 @@ function RivalRow({
   onSpy: (id: string) => void;
   spyPrice: number;
   stone: number;
-  onSabotage: (id: string) => void;
+  onSabotage: (id: string, aim: SabotageAim) => void;
+  onMole?: (id: string) => void;
   stagesDone?: number;
   me?: PlayerState;
   distance?: number;
@@ -1504,12 +1510,13 @@ function RivalRow({
   const [sim, setSim] = useState<number | null>(null);
   const [composing, setComposing] = useState(false);
   const [chosen, setChosen] = useState<Record<string, number> | null>(null);
+  const [aiming, setAiming] = useState(false);
   const sabotagePrice = r.sabotageCost ?? 0;
   const intel = r.intelUntil > now;
   // La pierre du rival progresse en direct entre deux nouvelles du serveur.
   const stone = r.stone + (r.rate * Math.max(0, now - r.stoneAt)) / 1000;
   // Mêmes règles que le serveur : plafond PvP, coefficient d'équité, stock à l'abri des étapes.
-  const loot = lootOf(stone, r.rate, r.revenge, { lord: r.isLord, cap: r.lootCap, factor: r.fairness, stagesDone, extraSecured: r.lootSafe });
+  const loot = lootOf(stone, r.rate, r.revenge, { lord: r.isLord, cap: r.lootCap, factor: r.fairness, stagesDone, extraSecured: r.lootSafe, securedFactor: r.granaryCut ? 0.5 : 1 });
   const shielded = r.shieldUntil > now;
   const blocked = r.blocker !== null;
   const pct = Math.round(r.chance * 100);
@@ -1547,6 +1554,9 @@ function RivalRow({
               ? `🕵️ ${armyIcons(r.army)} (rapport encore ${duration(r.intelUntil - now)})`
               : armyIcons(r.army)}
         </div>
+        {r.rumorUnmasked && <div className="row-desc">🗣️ Rumeur démasquée : ton espion a vu son armée réelle, pas celle qu&apos;il fait courir.</div>}
+        {r.granaryCut && <div className="row-desc">🧨 Grenier saboté : la moitié seulement de son stock est à l&apos;abri.</div>}
+        {(r.moleUntil ?? 0) > now && <div className="row-desc num">🐀 Ta taupe est chez lui encore {duration((r.moleUntil ?? 0) - now)}.</div>}
         {intel && <SpyReport r={r} now={now} />}
         <div className="row-desc">
           {r.blocker ??
@@ -1600,21 +1610,52 @@ function RivalRow({
             </span>
           </button>
         )}
-        {r.sabotageBlocker !== undefined && (
+        {onMole && r.moleUntil !== undefined && r.moleUntil <= now && (
           <button
             className="btn"
-            disabled={busy !== null || r.sabotageBlocker !== null || myStone < sabotagePrice}
-            onClick={() => onSabotage(r.id)}
-            title={r.sabotageBlocker ?? "Abat un niveau de son académie et retarde sa recherche. La réussite dépend de l'écart de niveau d'espionnage."}
+            disabled={busy !== null || myStone < (r.molePrice ?? 0)}
+            onClick={() => onMole(r.id)}
+            title="La taupe s'installe tout de suite pour 2 h : elle te prévient quand il fait partir une armée, perd son bouclier, entre ou sort de couvre-feu. Il faut un niveau d'espionnage au moins un cran au-dessus du sien. Elle peut être démasquée, à demi-risque, à chaque alerte."
           >
+            🐀 Taupe
+            <span className="cost num">{formatNumber(r.molePrice ?? 0)} 🪨</span>
+          </button>
+        )}
+        {r.sabotageBlocker !== undefined && (
+          <button className="btn" aria-expanded={aiming} disabled={busy !== null || myStone < sabotagePrice} onClick={() => setAiming(!aiming)} title="Choisis ce que vise ton saboteur. La réussite dépend de l'écart de niveau d'espionnage ; raté, il est toujours repéré.">
             🧨 Saboter
             <span className="cost num">{formatNumber(sabotagePrice)} 🪨</span>
           </button>
         )}
       </div>
+      {aiming && r.sabotageBlockers && (
+        <div className="row-actions">
+          {SABOTAGE_AIMS.map(([aim, label, desc]) => (
+            <button
+              key={aim}
+              className="btn"
+              disabled={busy !== null || r.sabotageBlockers![aim] !== null || myStone < sabotagePrice}
+              title={r.sabotageBlockers![aim] ?? desc}
+              onClick={() => {
+                setAiming(false);
+                onSabotage(r.id, aim);
+              }}
+            >
+              {label}
+              <span className="cost num">{desc}</span>
+            </button>
+          ))}
+        </div>
+      )}
     </div>
   );
 }
+
+const SABOTAGE_AIMS: [SabotageAim, string, string][] = [
+  ["academie", "🎓 Académie", "un niveau perdu, recherche retardée"],
+  ["grenier", "🌾 Grenier", "stock à l'abri ÷ 2 pendant 2 h"],
+  ["guet", "🔭 Guet", "aucune alerte d'approche pendant 1 h"],
+];
 
 /** T3 : composer l'armée envoyée, type par type ; trajet et chance portent sur ce choix. */
 function SendArmy({
@@ -1755,15 +1796,26 @@ function Incoming({ snap, now }: { snap: GameSnapshot; now: number }) {
 }
 
 /** E7 : bloc Espionnage de l'onglet Armée : niveau, espions en route, espions surpris chez moi. */
-function Spies({ snap, live, now }: { snap: GameSnapshot; live: PlayerState; now: number }) {
+function Spies({ snap, live, now, run }: { snap: GameSnapshot; live: PlayerState; now: number; run: ReturnType<typeof useGame>["run"] }) {
+  const [busy, setBusy] = useState(false);
   const out = (live.spies ?? []).filter((sp) => sp.arriveAt > now);
+  const moles = (live.moles ?? []).filter((m) => m.until > now);
+  const log = [...(live.spyLog ?? [])].reverse().slice(0, 8);
   const caught = (snap.chronicle ?? []).filter((e) => e.kind === "spy" && e.targetId === snap.userId).slice(0, 5);
   const nameOf = (key: string) => (key === "fortress" ? snap.fortress.name : key.startsWith("hall:") ? "une halle" : (snap.rivals.find((r) => r.id === key)?.name ?? "?"));
+  const base = baseRate(live, worldFrom(snap.worksite), now);
+  const counter = (live.counterUntil ?? 0) > now;
+  const rumor = live.rumor && live.rumor.until > now ? live.rumor : null;
+  const act = async (action: Parameters<typeof run>[0]) => {
+    setBusy(true);
+    await run(action);
+    setBusy(false);
+  };
   return (
     <div className="spies">
       <h3 className="section-title">🕵️ Espionnage · niveau {live.spyLevel ?? 0}</h3>
-      {out.length === 0 ? (
-        <p className="note">Aucun espion en route. Envoie-en un depuis la fiche d&apos;une cible ; le niveau se monte à la Forge.</p>
+      {out.length === 0 && moles.length === 0 ? (
+        <p className="note">Aucun espion en route ni taupe en place. Envoie-en depuis la fiche d&apos;une cible ; le niveau se monte à la Forge.</p>
       ) : (
         <ul className="num">
           {out.map((sp) => (
@@ -1771,11 +1823,54 @@ function Spies({ snap, live, now }: { snap: GameSnapshot; live: PlayerState; now
               🕵️ vers {nameOf(sp.target)} : arrivée dans {duration(sp.arriveAt - now)}
             </li>
           ))}
+          {moles.map((m) => (
+            <li key={m.id}>
+              🐀 taupe chez {nameOf(m.target)} : encore {duration(m.until - now)}
+            </li>
+          ))}
         </ul>
+      )}
+      {log.length > 0 && (
+        <div className="note">
+          {log.map((l, i) => (
+            <div key={`${l.at}-${i}`}>
+              <span className="num">{new Date(l.at).toLocaleTimeString("fr-FR", { hour: "2-digit", minute: "2-digit" })}</span> {l.text}
+            </div>
+          ))}
+        </div>
+      )}
+      <div className="row-actions">
+        <button
+          className="btn"
+          disabled={busy || live.stone < counterCost(base)}
+          onClick={() => act({ type: "counter" })}
+          title="Pendant 6 h, quiconque espionne, sabote ou pose une taupe chez toi a deux crans de moins. Un espion repéré chez toi rapporte des chiffres faussés. Racheter prolonge."
+        >
+          🛡️ Contre-espionnage
+          <span className="cost num">{counter ? `actif ${duration((live.counterUntil ?? 0) - now)} · ` : ""}{formatNumber(counterCost(base))} 🪨</span>
+        </button>
+        {(["fort", "faible"] as const).map((mode) => (
+          <button
+            key={mode}
+            className="btn"
+            disabled={busy || live.stone < rumorCost(base)}
+            onClick={() => act({ type: "rumor", mode })}
+            title={`Pendant 2 h, tout le monde voit ton armée ${mode === "fort" ? "deux fois plus grosse" : "deux fois plus petite"}, rapports d'espion compris, sauf ceux d'un espion au moins deux crans au-dessus de toi.`}
+          >
+            🗣️ {mode === "fort" ? "Rumeur : je suis fort" : "Rumeur : je suis faible"}
+            <span className="cost num">{rumor?.mode === mode ? `active ${duration(rumor.until - now)} · ` : ""}{formatNumber(rumorCost(base))} 🪨</span>
+          </button>
+        ))}
+      </div>
+      {((live.granaryCutUntil ?? 0) > now || (live.blindUntil ?? 0) > now) && (
+        <p className="note num">
+          {(live.granaryCutUntil ?? 0) > now ? `🧨 Ton grenier est saboté : moitié du stock à l'abri encore ${duration((live.granaryCutUntil ?? 0) - now)}. ` : ""}
+          {(live.blindUntil ?? 0) > now ? `🧨 Ton guet est aveugle encore ${duration((live.blindUntil ?? 0) - now)}.` : ""}
+        </p>
       )}
       {caught.length > 0 && (
         <p className="note">
-          Surpris chez toi : {caught.map((e) => ((e.details as { named?: boolean }).named === false ? "un espion inconnu" : e.actorName)).join(", ")}.
+          Surpris chez toi : {caught.map((e) => `${(e.details as { named?: boolean }).named === false ? "un espion inconnu" : e.actorName}${(e.details as { mole?: boolean }).mole ? " (taupe)" : ""}`).join(", ")}.
         </p>
       )}
     </div>
@@ -2766,16 +2861,24 @@ function Chronicle({ entries, me, now, rivals, alliances = [] }: { entries: Chro
             ? `🏰 ${who(e.actorId, e.actorName, true)} ${e.actorId === me ? "as pris" : "a pris"} la forteresse pour ${allianceName(e.details.alliance)} !`
             : `🏰 ${who(e.actorId, e.actorName, true)} ${e.actorId === me ? "t'es brisé" : "s'est brisé"} sur les murs de la forteresse.`;
         } else if (e.kind === "sabotage") {
-          const target = e.targetId === me ? "ton académie" : `l'académie de ${e.targetName}`;
-          text = e.details.success
+          const d = e.details as { success?: boolean; aim?: string; named?: boolean; spotted?: boolean };
+          const part = d.aim === "grenier" ? "grenier" : d.aim === "guet" ? "guet" : "académie";
+          const target = e.targetId === me ? `ton ${part === "académie" ? "académie" : part}` : `${part === "académie" ? "l'académie" : `le ${part}`} de ${e.targetName}`;
+          const hidden = e.actorId !== me && d.named === false;
+          text = d.success
             ? e.actorId === me
               ? `🧨 Tu as saboté ${target}.`
-              : `🧨 Un saboteur a frappé ${target}${e.targetId === me ? " : un niveau perdu et ta recherche retardée" : ""}.`
-            : `🧨 ${who(e.actorId, e.actorName, true)} ${e.actorId === me ? "as été pris" : "a été pris"} en train de saboter ${target}.`;
+              : `🧨 ${hidden || d.named === undefined ? "Un saboteur" : `Un saboteur de ${e.actorName}`} a frappé ${target}.`
+            : hidden
+              ? `🧨 Un saboteur inconnu a été pris en train de saboter ${target}.`
+              : `🧨 ${who(e.actorId, e.actorName, true)} ${e.actorId === me ? "as été pris" : "a été pris"} en train de saboter ${target}.`;
         } else if (e.kind === "spy") {
           const d = e.details as { fortress?: boolean; hall?: string };
           const where = d.fortress ? "la forteresse" : d.hall ? d.hall : e.targetId === me ? "ton domaine" : e.targetName || "un seigneur";
-          text = e.actorId === me ? `🕵️ Ton espion a été surpris chez ${where}.` : `🕵️ ${e.actorId ? who(e.actorId, e.actorName, true) : "Un espion inconnu"} a été surpris à espionner ${where}.`;
+          const mole = (e.details as { mole?: boolean }).mole;
+          text = e.actorId === me
+            ? `${mole ? "🐀 Ta taupe a été démasquée" : "🕵️ Ton espion a été surpris"} chez ${where}.`
+            : `${mole ? "🐀" : "🕵️"} ${e.actorId ? who(e.actorId, e.actorName, true) : mole ? "Une taupe inconnue" : "Un espion inconnu"} ${mole ? "a été démasqué avec sa taupe chez" : "a été surpris à espionner"} ${where}.`;
         } else if (e.kind === "lot") {
           const d = e.details as { stage?: number; name?: string; master?: boolean };
           const stageName = STAGES[d.stage ?? 0]?.name ?? "l'étape";
@@ -3060,7 +3163,8 @@ function KingdomMap({ snap, live, now, run }: { snap: GameSnapshot; live: Player
                 onSpy={(t) => act(t, { type: "spy", target: t })}
                 spyPrice={spyPrice}
                 stone={live.stone}
-                onSabotage={(t) => act(t, { type: "sabotage", target: t })}
+                onSabotage={(t, aim) => act(t, { type: "sabotage", target: t, aim })}
+                onMole={(t) => act(t, { type: "mole", target: t })}
                 stagesDone={stagesDoneAt(worldFrom(snap.worksite), now)}
                 me={live}
               />

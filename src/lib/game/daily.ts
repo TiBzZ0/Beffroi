@@ -22,7 +22,7 @@ export interface DailyState {
 }
 
 /** Compteurs du jour, relevés par le serveur. */
-export type DailyCounts = Partial<Record<"don" | "ateliers" | "savoir" | "seigneur" | "repousser" | "renforts" | "veines" | "evenement" | "message", number>>;
+export type DailyCounts = Partial<Record<"don" | "ateliers" | "savoir" | "seigneur" | "repousser" | "renforts" | "veines" | "evenement" | "message" | "espion", number>>;
 
 /** Ce qui rend une quête possible pour ce joueur. */
 export interface DailyContext {
@@ -31,6 +31,8 @@ export interface DailyContext {
   allies: number;
   upgradesLeft: number;
   levels: number;
+  /** E4 : niveau d'espionnage (la quête « reconnaissance » le demande). */
+  spyLevel?: number;
 }
 
 const DAY_MS = 86_400_000;
@@ -66,6 +68,7 @@ function feasible(id: DailyQuestId, ctx: DailyContext): boolean {
   if (id === "savoir") return ctx.upgradesLeft > 0;
   if (id === "seigneur") return ctx.troops > 0;
   if (id === "renforts") return ctx.allies > 0;
+  if (id === "espion") return (ctx.spyLevel ?? 0) >= 1;
   return true;
 }
 

@@ -81,6 +81,15 @@ export interface RivalView {
   academy?: number;
   researching?: boolean;
   sabotageBlocker?: string | null;
+  /** E4 : sabotage par cible (académie, grenier, guet). */
+  sabotageBlockers?: { academie: string | null; grenier: string | null; guet: string | null };
+  /** E4 : fin de ma taupe chez lui (0 sans taupe). */
+  moleUntil?: number;
+  molePrice?: number;
+  /** E4 : son armée affichée est une fausse rumeur, démasquée par un rapport à +2. */
+  rumorUnmasked?: boolean;
+  /** E4 : son grenier est saboté (moitié du stock à l'abri). */
+  granaryCut?: boolean;
   sabotageCost?: number;
   revenge: boolean;
   /** Raison pour laquelle on ne peut pas le raider maintenant, ou null. */
@@ -332,7 +341,10 @@ export type GameAction =
   | { type: "curfew"; start: number | null }
   | { type: "vein" }
   | { type: "master_choice"; choice: "production" | "defense" | "loot" }
-  | { type: "sabotage"; target: string };
+  | { type: "sabotage"; target: string; aim?: "academie" | "grenier" | "guet" }
+  | { type: "mole"; target: string }
+  | { type: "counter" }
+  | { type: "rumor"; mode: "fort" | "faible" };
 
 export interface EventView {
   id: number;

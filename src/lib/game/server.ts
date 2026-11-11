@@ -118,6 +118,10 @@ import {
   WING_IDS,
   WINGS,
   type WingId,
+  MOLE_MS,
+  MOLE_MAX,
+  MOLE_MIN_GAP,
+  COUNTER_GAP,
 } from "./config";
 import { banditSpot, caravanPath, caravanPos, colossusPos, fixedPlaces, pickSpawn } from "./map";
 import { drawNextEvent, tourneyPodium } from "./events";
@@ -142,6 +146,13 @@ import {
   spyRisk,
   spyTravelMs,
   type SpyMission,
+  type Mole,
+  type SabotageAim,
+  rumorArmy,
+  counterActive,
+  buyCounter,
+  buyRumor,
+  moleCost,
   type ResearchId,
 
   productionPerSecond,
@@ -245,7 +256,7 @@ interface PlayerRow {
   upgrades: string[];
   total_produced: number;
   total_contributed: number;
-  military?: { levels?: Record<string, number>; research?: { id: string; endsAt: number }[] | { id: string; endsAt: number } | null; academy?: number; sabotageImmuneUntil?: number; ruinImmuneUntil?: number; elanUntil?: number; tithe?: number; titheOwed?: number; titheSet?: boolean; share?: StageShare | null; donorTiers?: number; curfew?: Curfew | null; seen?: PlayerState["seen"] | null; veinAt?: number; frenzyUntil?: number; quest?: number | null; questFlags?: string[]; wounded?: Record<string, number>; healAt?: number; marches?: unknown; boostProdUntil?: number; boostSafeUntil?: number; merchantEvent?: number; daily?: unknown; dailyBoostUntil?: number; dailyBoost?: number; hallTithe?: number; spyLevel?: number; spies?: unknown } | null;
+  military?: { levels?: Record<string, number>; research?: { id: string; endsAt: number }[] | { id: string; endsAt: number } | null; academy?: number; sabotageImmuneUntil?: number; ruinImmuneUntil?: number; elanUntil?: number; tithe?: number; titheOwed?: number; titheSet?: boolean; share?: StageShare | null; donorTiers?: number; curfew?: Curfew | null; seen?: PlayerState["seen"] | null; veinAt?: number; frenzyUntil?: number; quest?: number | null; questFlags?: string[]; wounded?: Record<string, number>; healAt?: number; marches?: unknown; boostProdUntil?: number; boostSafeUntil?: number; merchantEvent?: number; daily?: unknown; dailyBoostUntil?: number; dailyBoost?: number; hallTithe?: number; spyLevel?: number; spies?: unknown; moles?: unknown; counterUntil?: number; rumor?: { mode?: string; until?: number } | null; granaryCutUntil?: number; blindUntil?: number; spyLog?: unknown } | null;
   total_clicks: number;
   last_update: string;
   last_click_at: string;
@@ -371,6 +382,12 @@ function toEntity(row: PlayerRow): Entity {
       research: [row.military?.research ?? []].flat().map((r) => ({ id: r.id as ResearchId, endsAt: Number(r.endsAt) })),
       spyLevel: Math.max(0, Math.floor(Number(row.military?.spyLevel ?? 0) || 0)),
       spies: cleanSpies(row.military?.spies),
+      moles: cleanMoles(row.military?.moles),
+      counterUntil: Number(row.military?.counterUntil ?? 0) || 0,
+      rumor: row.military?.rumor && (row.military.rumor.mode === "fort" || row.military.rumor.mode === "faible") ? { mode: row.military.rumor.mode, until: Number(row.military.rumor.until) || 0 } : null,
+      granaryCutUntil: Number(row.military?.granaryCutUntil ?? 0) || 0,
+      blindUntil: Number(row.military?.blindUntil ?? 0) || 0,
+      spyLog: Array.isArray(row.military?.spyLog) ? (row.military.spyLog as { at?: unknown; text?: unknown }[]).filter((x) => x && typeof x.text === "string").slice(-SPY_LOG_MAX).map((x) => ({ at: Number(x.at) || 0, text: String(x.text) })) : [],
       academy: Number(row.military?.academy ?? 0),
       sabotageImmuneUntil: Number(row.military?.sabotageImmuneUntil ?? 0),
       ruinImmuneUntil: Number(row.military?.ruinImmuneUntil ?? 0),
@@ -426,7 +443,7 @@ function toJson(e: Entity, state: PlayerState, extra: Record<string, unknown> = 
     troops: state.troops,
     defenses: state.defenses,
     stationed: state.stationed,
-    military: { levels: state.levels, research: state.research, academy: state.academy, sabotageImmuneUntil: state.sabotageImmuneUntil, ruinImmuneUntil: state.ruinImmuneUntil, elanUntil: state.elanUntil, tithe: state.tithe, titheOwed: state.titheOwed, titheSet: state.titheSet, share: state.share, donorTiers: state.donorTiers, curfew: state.curfew, seen: state.seen ?? null, veinAt: state.veinAt, frenzyUntil: state.frenzyUntil, quest: state.quest, questFlags: state.questFlags, wounded: state.wounded, healAt: state.healAt, marches: state.marches ?? [], boostProdUntil: state.boostProdUntil, boostSafeUntil: state.boostSafeUntil, merchantEvent: state.merchantEvent, daily: state.daily ?? null, dailyBoostUntil: state.dailyBoostUntil, dailyBoost: state.dailyBoost, hallTithe: state.hallTithe, spyLevel: state.spyLevel ?? 0, spies: state.spies ?? [] },
+    military: { levels: state.levels, research: state.research, academy: state.academy, sabotageImmuneUntil: state.sabotageImmuneUntil, ruinImmuneUntil: state.ruinImmuneUntil, elanUntil: state.elanUntil, tithe: state.tithe, titheOwed: state.titheOwed, titheSet: state.titheSet, share: state.share, donorTiers: state.donorTiers, curfew: state.curfew, seen: state.seen ?? null, veinAt: state.veinAt, frenzyUntil: state.frenzyUntil, quest: state.quest, questFlags: state.questFlags, wounded: state.wounded, healAt: state.healAt, marches: state.marches ?? [], boostProdUntil: state.boostProdUntil, boostSafeUntil: state.boostSafeUntil, merchantEvent: state.merchantEvent, daily: state.daily ?? null, dailyBoostUntil: state.dailyBoostUntil, dailyBoost: state.dailyBoost, hallTithe: state.hallTithe, spyLevel: state.spyLevel ?? 0, spies: state.spies ?? [], moles: state.moles ?? [], counterUntil: state.counterUntil ?? 0, rumor: state.rumor ?? null, granaryCutUntil: state.granaryCutUntil ?? 0, blindUntil: state.blindUntil ?? 0, spyLog: (state.spyLog ?? []).slice(-SPY_LOG_MAX) },
     click_strikes: state.clickStrikes,
     click_paused_until: iso(state.clickPausedUntil),
     ...extra,
@@ -994,7 +1011,7 @@ async function loadChronicle(admin: SupabaseClient, seasonId: number, entities: 
     .limit(40);
   const name = (id: string | null) => (id ? (entities.get(id)?.name ?? "Un inconnu") : "");
   // E5 : un espion surpris sans être reconnu reste anonyme, sauf pour son maître.
-  const hidden = (r: { kind: unknown; actor_id: unknown; details: unknown }) => r.kind === "spy" && (r.details as { named?: boolean } | null)?.named === false && r.actor_id !== viewer;
+  const hidden = (r: { kind: unknown; actor_id: unknown; details: unknown }) => (r.kind === "spy" || r.kind === "sabotage") && (r.details as { named?: boolean } | null)?.named === false && r.actor_id !== viewer;
   return (data ?? []).map((r) => ({
     id: Number(r.id),
     at: Date.parse(r.created_at as string),
@@ -1890,19 +1907,28 @@ function rivalsFor(
       const seesStock = e.isLord ? gap >= 1 : gap >= 2;
       const seesMoves = !e.isLord && !allied && gap >= 1;
       const seesInner = !e.isLord && !allied && gap >= 3;
-      const seen = seesArmy ? fight.defense : {};
+      // E4 : la fausse rumeur trompe tout le monde, sauf un rapport à +2 ou plus ; un rapport falsifié brouille les chiffres.
+      const rumored = !open && gap < 2 ? rumorArmy(s, fight.defense, now) : fight.defense;
+      const rumorUnmasked = !open && gap >= 2 && !!s.rumor && s.rumor.until > now;
+      const noisy = !open && intelUntil > 0 && report!.noise === true;
+      const jitter = (n: number, what: string) => (noisy ? Math.max(0, Math.round(n * noiseFactor(report!.until, what))) : n);
+      const shown = noisy ? (Object.fromEntries(Object.entries(rumored).map(([id, n]) => [id, jitter(n ?? 0, id)])) as Army) : rumored;
+      const seen = seesArmy ? shown : {};
+      const stone = jitter(s.stone, "stone");
       const fair = e.isLord ? 1 : fairness(ctx.relativeSize, revenge);
-      const loot = lootOf(s.stone, rate, revenge, { lord: e.isLord, cap: e.isLord ? undefined : myRate * PVP_LOOT_CAP_SECONDS, factor: fair, stagesDone: stagesDoneAt(world, now), extraSecured: extraSecured(s, now) });
+      const loot = lootOf(stone, rate, revenge, { lord: e.isLord, cap: e.isLord ? undefined : myRate * PVP_LOOT_CAP_SECONDS, factor: fair, stagesDone: stagesDoneAt(world, now), extraSecured: extraSecured(s, now), securedFactor: (s.granaryCutUntil ?? 0) > now ? 0.5 : 1 });
       // Rançon attendue en cas de victoire : la défense, abattue.
       const ransom = e.isLord || !seesStock ? 0 : ransomOf(fight.defense as Army, fair);
-      const exact = estimateChance(fight.attack, fight.defense, fight.opts);
+      const exact = estimateChance(fight.attack, shown, fight.opts);
       const fog = eventActive(myState, "brouillard", now);
       const names = (key: string) => (key === "fortress" ? FORTRESS_NAME : key.startsWith("hall:") ? "une halle" : key.includes(":") ? "un événement" : (entities.get(key)?.name ?? "?"));
       return {
         ransom,
         fairness: fair,
         ...(open ? {} : { spyGap: intelUntil > 0 ? report!.gap : null }),
-        ...(seesArmy ? {} : { armyHint: armyHint(fight.defense, fight.attack), ...(fog ? {} : { chanceWord: chanceWord(exact) }) }),
+        ...(seesArmy ? {} : { armyHint: armyHint(rumored, fight.attack), ...(fog ? {} : { chanceWord: chanceWord(exact) }) }),
+        ...(rumorUnmasked ? { rumorUnmasked: true } : {}),
+        ...(seesStock && (s.granaryCutUntil ?? 0) > now ? { granaryCut: true } : {}),
         stoneKnown: seesStock,
         ...(seesMoves
           ? {
@@ -1922,7 +1948,7 @@ function rivalsFor(
         temper: e.lord?.temper,
         difficulty: e.lord?.difficulty,
         retaliateOnly: e.lord?.retaliateOnly,
-        stone: seesStock ? s.stone : 0,
+        stone: seesStock ? stone : 0,
         stoneAt: now,
         rate,
         loot: seesStock ? loot : 0,
@@ -1940,7 +1966,17 @@ function rivalsFor(
         curfew: e.isLord ? undefined : inCurfew(s, now),
         revenge,
         blocker: raidBlocker(myState, s, ctx),
-        ...(e.isLord || allied ? {} : { academy: s.academy, researching: s.research.length > 0, sabotageBlocker: sabotageBlocker(s, now, myState), sabotageCost: sabotageCost(myState, s, world, now) }),
+        ...(e.isLord || allied
+          ? {}
+          : {
+              academy: s.academy,
+              researching: s.research.length > 0,
+              sabotageBlocker: sabotageBlocker(s, now, myState),
+              sabotageBlockers: { academie: sabotageBlocker(s, now, myState, "academie"), grenier: sabotageBlocker(s, now, myState, "grenier"), guet: sabotageBlocker(s, now, myState, "guet") },
+              sabotageCost: sabotageCost(myState, s, world, now),
+              moleUntil: (myState.moles ?? []).find((m) => m.target === e.id && m.until > now)?.until ?? 0,
+              molePrice: moleCost(baseRate(myState, world, now)),
+            }),
       };
     })
     .sort((a, b) => Number(a.isLord) - Number(b.isLord) || (a.difficulty ?? 0) - (b.difficulty ?? 0) || b.loot - a.loot);
@@ -2282,24 +2318,36 @@ export async function runAction(admin: SupabaseClient, userId: string, action: G
       }
     } else if (action.type === "sabotage") {
       const target = entities.get(String(action.target));
+      const aim: SabotageAim = action.aim === "grenier" || action.aim === "guet" ? action.aim : "academie";
       const targetState = target ? advanceEntity(target, now, world, flat) : null;
       const cost = targetState ? sabotageCost(current, targetState, world, now) : 0;
       if (!target || !targetState || target.id === me.id || target.isLord) error = "Cible inconnue.";
       else if (isAllied(me, target)) error = "On ne sabote pas un allié.";
       else if (current.stone < cost) error = `Il faut ${Math.ceil(cost).toLocaleString("fr-FR")} pierres pour payer un saboteur.`;
-      else error = sabotageBlocker(targetState, now, current);
+      else error = sabotageBlocker(targetState, now, current, aim);
       if (!error && target && targetState) {
-        const success = Math.random() < sabotageChance(spyLevelOf(me) - spyLevelOf(target));
+        const gap = spyLevelOf(me) - defenseSpyLevel(target, now);
+        const success = Math.random() < sabotageChance(gap);
+        // E5 : un sabotage raté est toujours repéré ; réussi, il l'est selon le risque d'un espion.
+        const positions = await loadPositions(admin, season.id, entities);
+        const from = positions.get(me.id);
+        const to = positions.get(target.id);
+        const spotted = !success || Math.random() < spyRisk(gap, from && to ? mapDistance(from, to) : MAP_SPAWN_RADIUS);
+        const named = spotted && defenseSpyLevel(target, now) >= spyLevelOf(me) - 1;
         const mine = { ...current, stone: current.stone - cost };
-        const list = success ? [{ e: me, state: mine }, { e: target, state: applySabotage(targetState, now) }] : [{ e: me, state: mine }];
-        if ((await writeStates(admin, season.id, list, "sabotage", { target: target.id, cost, success })) === "conflict") continue;
+        const list = success ? [{ e: me, state: mine }, { e: target, state: applySabotage(targetState, now, aim) }] : [{ e: me, state: mine }];
+        if ((await writeStates(admin, season.id, list, "sabotage", { target: target.id, cost, success, aim, spotted })) === "conflict") continue;
         finalState = mine;
-        await addChronicle(admin, season.id, { kind: "sabotage", actor_id: me.id, target_id: target.id, details: { success } });
+        await addChronicle(admin, season.id, { kind: "sabotage", actor_id: me.id, target_id: target.id, details: { success, aim, spotted, named } });
+        const what = aim === "grenier" ? "ton grenier" : aim === "guet" ? "ton guet" : "ton académie";
+        const effect = aim === "grenier" ? "Pendant 2 h, seule la moitié de ton stock est à l'abri." : aim === "guet" ? "Pendant 1 h, aucune alerte d'approche." : "Un niveau perdu et ta recherche prend du retard.";
+        const by = named ? ` C'était un saboteur de ${me.name}.` : spotted ? " Son maître reste inconnu." : "";
         notify(admin, [target.id], success
-          ? { title: "🧨 Ton académie a été sabotée", body: "Un niveau perdu et ta recherche prend du retard.", tag: "sabotage" }
-          : { title: "🧨 Saboteur arrêté", body: `${me.name} a été pris en train de saboter ton académie.`, tag: "sabotage" });
+          ? { title: `🧨 On a saboté ${what}`, body: `${effect}${by}`, tag: "sabotage" }
+          : { title: "🧨 Saboteur arrêté", body: `Il visait ${what}.${by}`, tag: "sabotage" });
+        const done = aim === "grenier" ? `le grenier de ${target.name} ne met plus que la moitié à l'abri pendant 2 h` : aim === "guet" ? `le guet de ${target.name} est aveugle pendant 1 h` : `l'académie de ${target.name} perd un niveau et sa recherche prend du retard`;
         message = success
-          ? `🧨 Sabotage réussi : l'académie de ${target.name} perd un niveau et sa recherche prend du retard.`
+          ? `🧨 Sabotage réussi : ${done}.${spotted ? " Ton saboteur a pourtant été vu en repartant." : ""}`
           : `🧨 Ton saboteur a été pris dans le domaine de ${target.name}.`;
       } else {
         const { data } = await admin.rpc("commit_state", { p_season: season.id, p_state: toJson(me, current, {}), p_touch: true, p_contribution: 0, p_stage_bases: stageSizes, p_active_window_days: ACTIVE_WINDOW_DAYS, p_action: null, p_details: null });
@@ -2325,6 +2373,52 @@ export async function runAction(admin: SupabaseClient, userId: string, action: G
       if (!("error" in r)) {
         finalState = next;
         message = r.message;
+      }
+    } else if (action.type === "mole") {
+      // E4 : la taupe s'installe tout de suite ; elle peut être démasquée dès son arrivée.
+      const r = await placeMole(admin, season.id, me, current, entities, String(action.target), world, now);
+      if ("error" in r) error = r.error;
+      const next = "error" in r ? current : r.state;
+      const { data, error: rpcError } = await admin.rpc("commit_state", {
+        p_season: season.id,
+        p_state: toJson(me, next, {}),
+        p_touch: true,
+        p_contribution: 0,
+        p_stage_bases: stageSizes,
+        p_active_window_days: ACTIVE_WINDOW_DAYS,
+        p_action: "error" in r ? null : "mole",
+        p_details: "error" in r ? null : { target: String(action.target), cost: r.cost, caught: r.caught },
+      });
+      if (rpcError) throw new Error(`Enregistrement impossible : ${rpcError.message}`);
+      if ((data as { conflict?: boolean } | null)?.conflict) continue;
+      if (!("error" in r)) {
+        finalState = next;
+        message = r.message;
+        if (r.caught) await moleCaught(admin, season.id, me, r.target, now);
+      }
+    } else if (action.type === "counter" || action.type === "rumor") {
+      // E4 : contre-espionnage (6 h) et fausse rumeur (2 h), payés en minutes de production de base.
+      const base = baseRate(current, world, now);
+      const r = action.type === "counter" ? buyCounter(current, base, now) : buyRumor(current, String(action.mode), base, now);
+      const next = r.ok ? r.value : current;
+      if (!r.ok) error = r.error;
+      const { data, error: rpcError } = await admin.rpc("commit_state", {
+        p_season: season.id,
+        p_state: toJson(me, next, {}),
+        p_touch: true,
+        p_contribution: 0,
+        p_stage_bases: stageSizes,
+        p_active_window_days: ACTIVE_WINDOW_DAYS,
+        p_action: r.ok ? action.type : null,
+        p_details: r.ok ? { cost: current.stone - next.stone, ...(action.type === "rumor" ? { mode: String(action.mode) } : {}) } : null,
+      });
+      if (rpcError) throw new Error(`Enregistrement impossible : ${rpcError.message}`);
+      if ((data as { conflict?: boolean } | null)?.conflict) continue;
+      if (r.ok) {
+        finalState = next;
+        message = action.type === "counter"
+          ? "🛡️ Contre-espionnage en place pour 6 h : quiconque agit contre toi perd deux crans, et ses espions repérés rapportent des chiffres faussés."
+          : `🗣️ La rumeur court pour 2 h : on te croit ${String(action.mode) === "fort" ? "deux fois plus fort" : "deux fois plus faible"} que tu ne l'es.`;
       }
     } else if (action.type === "raid") {
       // T3 : l'armée choisie part sur la route ; le combat se jouera à l'arrivée.
@@ -2377,7 +2471,8 @@ export async function runAction(admin: SupabaseClient, userId: string, action: G
               // Halle : le guet niveau 2 donne toujours le nom de l'attaquant.
               revealed: guet >= 2 || spyLevelOf(victim) >= spyLevelOf(me),
               // Contre un seigneur, personne à prévenir ; le guet niveau 1 prévient dès le départ.
-              warned: victim.isLord || (guet >= 1 && !fogged),
+              // E4 : un guet saboté ne voit rien partir.
+              warned: victim.isLord || (guet >= 1 && !fogged && (victimState.blindUntil ?? 0) <= now),
               loot: 0,
               ransom: 0,
             };
@@ -2570,6 +2665,8 @@ async function settleMarches(
     .filter((x) => x.sp.arriveAt <= now)
     .sort((a, b) => a.sp.arriveAt - b.sp.arriveAt)[0];
   if (spy) return settleSpy(admin, seasonId, spy.e, spy.sp, entities, fortress, names);
+  const mole = await settleMoles(admin, seasonId, entities, now);
+  if (mole !== "none") return mole;
   const due = [...entities.values()]
     .flatMap((e) => (e.state.marches ?? []).map((m) => ({ e, m, at: marchDue(m) })))
     .filter((d) => d.at <= now)
@@ -2770,7 +2867,8 @@ async function settleMarches(
 
   if (!m.warned) {
     // T5 : alerte à mi-chemin ; V14 : pas d'alerte dans le brouillard.
-    const fog = eventActive(owner.state, "brouillard", at);
+    // E4 : un guet saboté laisse passer l'armée sans alerte, comme le brouillard.
+    const fog = eventActive(owner.state, "brouillard", at) || (!!victim && !victim.isLord && (victim.state.blindUntil ?? 0) > at);
     const r = await commit(owner, replace(owner.state, { ...m, warned: true, ...(fog ? { revealed: false, hidden: true } : {}) }));
     if (r === "changed" && victim && !victim.isLord && !fog) {
       const from = m.revealed ? ` de ${owner.name}` : "";
@@ -3214,6 +3312,7 @@ function dailyContextOf(me: Entity, state: PlayerState, entities: Map<string, En
     allies: me.allianceId === null ? 0 : [...entities.values()].filter((e) => !e.isLord && e.id !== me.id && e.allianceId === me.allianceId).length,
     upgradesLeft: UPGRADES.filter((u) => !state.upgrades.includes(u.id)).length,
     levels: levelSum(state),
+    spyLevel: state.spyLevel ?? 0,
   };
 }
 
@@ -3685,6 +3784,16 @@ function cleanSpies(raw: unknown): SpyMission[] {
     .map((m) => ({ id: String(m.id), kind: "recon" as const, target: String(m.target), departAt: Number(m.departAt) || 0, arriveAt: Number(m.arriveAt) || 0, distance: Math.max(0, Number(m.distance) || 0) }));
 }
 
+/** Alertes de taupe gardées dans le journal. */
+const SPY_LOG_MAX = 20;
+
+function cleanMoles(raw: unknown): Mole[] {
+  if (!Array.isArray(raw)) return [];
+  return raw
+    .filter((m) => m && typeof m === "object" && typeof m.id === "string" && typeof m.target === "string")
+    .map((m) => ({ id: String(m.id), target: String(m.target), until: Number(m.until) || 0, distance: Math.max(0, Number(m.distance) || 0), seen: Array.isArray(m.seen) ? m.seen.map(String).slice(-30) : [], shielded: !!m.shielded, curfew: !!m.curfew }));
+}
+
 /** Niveau d'espionnage : celui de la recherche, ou un niveau fixe pour un seigneur. */
 function spyLevelOf(e: Entity): number {
   if (e.lord) return LORD_SPY_LEVEL[e.lord.difficulty as 1 | 2 | 3 | 4] ?? 0;
@@ -3702,13 +3811,15 @@ interface Intel {
   until: number;
   /** Écart de niveau au moment du rapport (anciens rapports : 0, l'armée exacte). */
   gap: number;
+  /** E4 : rapport falsifié par le contre-espionnage de la cible. */
+  noise?: boolean;
 }
 
 /** Rapports encore valables de moi et de mes alliés : cible → meilleur rapport. */
 async function loadIntelFor(admin: SupabaseClient, seasonId: number, spyIds: string[], now: number): Promise<Map<string, Intel>> {
   const { data } = await admin
     .from("spy_reports")
-    .select("target_id, target_key, gap, expires_at")
+    .select("target_id, target_key, gap, noise, expires_at")
     .eq("season_id", seasonId)
     .in("spy_id", spyIds)
     .gt("expires_at", iso(now));
@@ -3719,7 +3830,7 @@ async function loadIntelFor(admin: SupabaseClient, seasonId: number, spyIds: str
     const until = ms(r.expires_at as string);
     const prev = out.get(key);
     // Le rapport le plus détaillé l'emporte ; à détail égal, le plus récent.
-    if (!prev || gap > prev.gap || (gap === prev.gap && until > prev.until)) out.set(key, { until, gap });
+    if (!prev || gap > prev.gap || (gap === prev.gap && until > prev.until)) out.set(key, { until, gap, noise: r.noise === true });
   }
   return out;
 }
@@ -3732,7 +3843,20 @@ function targetSpyLevel(key: string, entities: Map<string, Entity>, fortress: Fo
     return g?.allianceId != null ? allianceSpyLevel(g.allianceId, entities) : 0;
   }
   const e = entities.get(key);
-  return e ? spyLevelOf(e) : 0;
+  return e ? defenseSpyLevel(e, Date.now()) : 0;
+}
+
+/** E4 : niveau opposé à qui agit contre soi ; le contre-espionnage y ajoute 2. */
+function defenseSpyLevel(e: Entity, now: number): number {
+  return spyLevelOf(e) + (!e.isLord && counterActive(e.state, now) ? COUNTER_GAP : 0);
+}
+
+/** E4 : facteur de falsification d'un rapport (0,7 à 1,3), stable pour un même rapport. */
+function noiseFactor(seed: number, what: string): number {
+  let h = Math.floor(seed) ^ 0x9e3779b9;
+  for (const c of what) h = Math.imul(h ^ c.charCodeAt(0), 0x85ebca6b) >>> 0;
+  h = Math.imul(h ^ (h >>> 13), 0xc2b2ae35) >>> 0;
+  return 0.7 + 0.6 * ((h >>> 0) / 0xffffffff);
 }
 
 function spyTargetName(key: string, entities: Map<string, Entity>, names: Map<number, string>): string {
@@ -3811,6 +3935,93 @@ async function sendSpy(
   };
 }
 
+/** E4 : pose une taupe chez un joueur (aussitôt, jet de repérage à demi-risque). */
+async function placeMole(
+  admin: SupabaseClient,
+  seasonId: number,
+  me: Entity,
+  current: PlayerState,
+  entities: Map<string, Entity>,
+  key: string,
+  world: WorldState,
+  now: number,
+): Promise<{ error: string } | { state: PlayerState; message: string; cost: number; caught: boolean; target: Entity }> {
+  const target = entities.get(key);
+  if (!target || target.id === me.id || target.isLord) return { error: "Une taupe ne se pose que chez un autre joueur." };
+  if (isAllied(me, target)) return { error: "On n'espionne pas un allié." };
+  const moles = (current.moles ?? []).filter((m) => m.until > now);
+  if (moles.length >= MOLE_MAX) return { error: `${MOLE_MAX} taupes actives au plus.` };
+  if (moles.some((m) => m.target === key)) return { error: "Tu as déjà une taupe chez lui." };
+  const gap = spyLevelOf(me) - defenseSpyLevel(target, now);
+  if (gap < MOLE_MIN_GAP) return { error: "Il faut un niveau d'espionnage au moins un cran au-dessus du sien pour poser une taupe." };
+  const cost = moleCost(baseRate(current, world, now));
+  if (current.stone < cost) return { error: `Il faut ${Math.ceil(cost).toLocaleString("fr-FR")} pierres pour poser une taupe.` };
+  const ban = await spyBanUntil(admin, seasonId, me.id, key, now);
+  if (ban > now) return { error: "Trop de tes espions ont été surpris là-bas : on les y attend encore." };
+  const positions = await loadPositions(admin, seasonId, entities);
+  const from = positions.get(me.id);
+  const to = positions.get(key);
+  const distance = from && to ? mapDistance(from, to) : MAP_SPAWN_RADIUS;
+  const caught = Math.random() < spyRisk(gap, distance) / 2;
+  const paid = { ...current, stone: current.stone - cost, moles };
+  if (caught) return { cost, caught, target, state: paid, message: `🐀 Ta taupe a été démasquée en s'installant chez ${target.name}.` };
+  const t = target.state;
+  const mole: Mole = { id: marchId(), target: key, until: now + MOLE_MS, distance, seen: (t.marches ?? []).map((m) => m.id), shielded: t.shieldUntil > now, curfew: inCurfew(t, now) };
+  return { cost, caught, target, state: { ...paid, moles: [...moles, mole] }, message: `🐀 Ta taupe est en place chez ${target.name} pour 2 h : elle te préviendra de ses départs d'armée, de son bouclier et de son couvre-feu.` };
+}
+
+/** E4 : une taupe repérée ; la cible est prévenue comme pour un espion. */
+async function moleCaught(admin: SupabaseClient, seasonId: number, owner: Entity, target: Entity, now: number) {
+  const named = defenseSpyLevel(target, now) >= spyLevelOf(owner) - 1;
+  await addChronicle(admin, seasonId, { kind: "spy", actor_id: owner.id, target_id: target.id, details: { key: target.id, named, mole: true } });
+  notify(admin, [target.id], { title: "🐀 Une taupe démasquée chez toi", body: named ? `Elle travaillait pour ${owner.name}.` : "Son maître reste inconnu.", tag: "spy" });
+}
+
+/** E4 : les taupes observent leur cible ; une alerte à la fois, et un jet de repérage à demi-risque par alerte. */
+async function settleMoles(admin: SupabaseClient, seasonId: number, entities: Map<string, Entity>, now: number): Promise<"none" | "changed" | "conflict"> {
+  for (const owner of entities.values()) {
+    for (const mo of owner.state.moles ?? []) {
+      const target = entities.get(mo.target);
+      const log: string[] = [];
+      let next: Mole | null = mo;
+      if (!target || mo.until <= now) {
+        next = null;
+        log.push(`🐀 Ta taupe chez ${target?.name ?? "ta cible"} a fini sa mission.`);
+      } else {
+        const t = target.state;
+        const fresh = (t.marches ?? []).filter((m) => m.status === "out" && !mo.seen.includes(m.id) && m.kind !== "reinforce" && m.kind !== "station" && m.kind !== "hall_station");
+        for (const m of fresh) {
+          const sent = armyValue(m.troops);
+          const stayed = armyValue(cleanArmy(troopsHere(t)));
+          const share = Math.round((100 * sent) / Math.max(1, sent + stayed));
+          const dest = m.target === "fortress" ? FORTRESS_NAME : m.target.startsWith("hall:") ? "une halle" : m.target.includes(":") ? "un événement" : (entities.get(m.target)?.name ?? "un domaine");
+          log.push(`🐀 ${target.name} fait partir une armée vers ${dest} : environ ${share} % de ses troupes, ${100 - share} % restent au domaine.`);
+        }
+        const shielded = t.shieldUntil > now;
+        if (mo.shielded && !shielded) log.push(`🐀 ${target.name} n'a plus de bouclier.`);
+        const curfew = inCurfew(t, now);
+        if (curfew !== mo.curfew) log.push(curfew ? `🐀 ${target.name} entre en couvre-feu.` : `🐀 ${target.name} sort du couvre-feu.`);
+        if (fresh.length === 0 && shielded === mo.shielded && curfew === mo.curfew) continue;
+        next = { ...mo, seen: [...mo.seen, ...fresh.map((m) => m.id)].slice(-30), shielded, curfew };
+        const gap = spyLevelOf(owner) - defenseSpyLevel(target, now);
+        if (log.some(() => Math.random() < spyRisk(gap, mo.distance) / 2)) {
+          next = null;
+          log.push(`🐀 Ta taupe chez ${target.name} a été démasquée.`);
+        }
+      }
+      const moles = (owner.state.moles ?? []).flatMap((x) => (x.id === mo.id ? (next ? [next] : []) : [x]));
+      const spyLog = [...(owner.state.spyLog ?? []), ...log.map((text) => ({ at: now, text }))].slice(-SPY_LOG_MAX);
+      const { data } = await admin.rpc("commit_state", { p_season: seasonId, p_state: toJson(owner, { ...owner.state, moles, spyLog }), p_touch: false, p_contribution: 0, p_stage_bases: stageSizes, p_active_window_days: ACTIVE_WINDOW_DAYS, p_action: null, p_details: null });
+      if ((data as { conflict?: boolean } | null)?.conflict) return "conflict";
+      const alerts = log.filter((x) => !x.includes("a fini sa mission"));
+      if (alerts.length > 0) notify(admin, [owner.id], { title: "🐀 Ta taupe a parlé", body: alerts.join(" "), tag: "spy" });
+      if (target && !next && mo.until > now) await moleCaught(admin, seasonId, owner, target, now);
+      return "changed";
+    }
+  }
+  return "none";
+}
+
 /** E3 à E5 : un espion arrive. Il peut être repéré ; le rapport est livré dans tous les cas. */
 async function settleSpy(
   admin: SupabaseClient,
@@ -3829,12 +4040,15 @@ async function settleSpy(
   const gap = mine - theirs;
   const caught = Math.random() < spyRisk(gap, sp.distance);
   const entity = entities.get(sp.target);
+  // E4 : un espion repéré chez qui fait du contre-espionnage rapporte des chiffres faussés.
+  const noise = caught && !!entity && !entity.isLord && counterActive(entity.state, sp.arriveAt);
   await admin.from("spy_reports").insert({
     season_id: seasonId,
     spy_id: owner.id,
     target_id: entity ? entity.id : null,
     target_key: sp.target,
     gap,
+    noise,
     expires_at: iso(sp.arriveAt + SPY_INTEL_MS),
   });
   const where = spyTargetName(sp.target, entities, names);
