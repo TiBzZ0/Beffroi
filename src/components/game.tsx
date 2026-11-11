@@ -377,6 +377,38 @@ function WhatsNew() {
   );
 }
 
+/** Bouton « Ce qui change » : tout l'historique des règles, du plus récent au plus ancien. */
+function ChangelogButton() {
+  const [open, setOpen] = useState(false);
+  return (
+    <>
+      <button className="btn btn-ghost" title="Ce qui change" aria-label="Voir ce qui change (patchnote)" onClick={() => setOpen(true)}>
+        📜
+      </button>
+      {open && (
+        <div className="modal-backdrop" role="dialog" aria-modal="true" aria-label="Ce qui change" onClick={() => setOpen(false)}>
+          <div className="modal panel" onClick={(e) => e.stopPropagation()}>
+            <h2>📜 Ce qui change</h2>
+            {[...CHANGELOG].reverse().map((c) => (
+              <section key={c.id}>
+                <h3>{c.date}</h3>
+                <ul>
+                  {c.items.map((t) => (
+                    <li key={t}>{t}</li>
+                  ))}
+                </ul>
+              </section>
+            ))}
+            <button className="btn btn-primary" onClick={() => setOpen(false)}>
+              Fermer
+            </button>
+          </div>
+        </div>
+      )}
+    </>
+  );
+}
+
 /** Cloche : active ou coupe les notifications (raids, sabotages, forteresse, événements). */
 function PushButton() {
   const push = usePush();
@@ -475,6 +507,7 @@ function TopBar({ snap, now }: { snap: GameSnapshot; now: number }) {
           <br />
           fin dans {days} j {hours} h
         </div>
+        <ChangelogButton />
         <PushButton />
         <form action={signOut}>
           <button className="btn btn-ghost" title="Se déconnecter" aria-label="Se déconnecter">
