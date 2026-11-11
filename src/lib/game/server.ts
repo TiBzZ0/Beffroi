@@ -2839,7 +2839,7 @@ async function resolveGroupEvent(
   }
   const r = await write([...byEntity.values()], { ...ev.data, resolved: true, outcome });
   if (r !== "changed") return r;
-  if (ev.kind === "siege" && outcome === "lost") await admin.rpc("siege_damage", { p_season: seasonId, p_share: SIEGE_STAGE_LOSS });
+  if (ev.kind === "siege" && outcome === "lost") await admin.rpc("siege_damage", { p_season: seasonId, p_share: SIEGE_STAGE_LOSS, p_stages: STAGES.length });
   const ids = [...byEntity.keys()];
   if (ev.kind === "convoi") {
     if (ids.length) notify(admin, ids, won ? { title: "👑 Le convoi est passé !", body: "Ton escorte rentre avec 45 minutes de ta production.", tag: "event" } : { title: "👑 Le convoi est tombé", body: "L'embuscade a eu raison de l'escorte. Tes blessés passent par l'infirmerie.", tag: "event" });
