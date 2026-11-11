@@ -295,4 +295,12 @@ export const CHANGELOG: ChangeEntry[] = [
       "💰 Le trésor enfoui vaut maintenant 4 heures de la production médiane, au lieu de 2.",
     ],
   },
+  {
+    id: 36,
+    date: "11 novembre",
+    items: [
+      "🕰️ Les dernières étapes du beffroi demandent plus d'efforts : l'horloge astronomique vaut 12 heures de la production de tous les joueurs actifs, et le beffroi légendaire 24 heures. La flèche en cours ne change pas.",
+      "🧱 Les parts de chantier, les lots d'alliance et leurs paliers grandissent de la même façon pour ces deux étapes.",
+    ],
+  },
 ];

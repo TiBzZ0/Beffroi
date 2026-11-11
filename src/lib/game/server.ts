@@ -68,6 +68,7 @@ import {
   COMBATANTS,
   SEASON_DAYS,
   STAGE_MIN_SIZE,
+  stageHours,
   MAX_TITHE,
   NEW_PLAYER_TITHE,
   DONOR_TIER_BONUS,
@@ -575,7 +576,7 @@ async function ensureLots(admin: SupabaseClient, seasonId: number, worksite: Wor
         p_owner: lotOwnerOf(e),
         p_alliance: e.allianceId,
         p_user: e.id,
-        p_share: shareSize(advance(e.state, now, world), world, now),
+        p_share: shareSize(advance(e.state, now, world), world, now, worksite.stage),
       }),
     ),
   );
@@ -738,8 +739,7 @@ function lordRates(entities: Map<string, Entity>, world: WorldState, now: number
   // Joueurs actifs : vus dans la fenêtre d'activité du chantier.
   const rates = activeHumans(entities, now).map((e) => productionPerSecond(e.state, world, stagesDoneAt(world, now))).sort((a, b) => a - b);
   // Au passage, on retient la taille d'une étape qui s'ouvrirait maintenant.
-  const size = stageSize(rates);
-  stageSizes = STAGES.map(() => size);
+  stageSizes = STAGES.map((_, i) => stageSize(rates, stageHours(i)));
   const mid = median(rates);
   // Les seigneurs faciles suivent le quart le plus faible des joueurs, pour que les petits aient une cible.
   const low = rates.length === 0 ? 0 : rates[Math.floor((rates.length - 1) * 0.25)];

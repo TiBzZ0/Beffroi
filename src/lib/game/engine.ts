@@ -82,6 +82,7 @@ import {
   type UpgradeDef,
   STAGE_MIN_SIZE,
   STAGE_SIZE_HOURS,
+  stageHours,
   MAX_TITHE,
   CURFEW_MINUTES,
   CURFEW_DELAY_MS,
@@ -768,13 +769,14 @@ export function payTithe(state: PlayerState): { state: PlayerState; paid: number
  */
 export function openShare(state: PlayerState, stage: number, world: WorldState, now: number, fixed?: number): PlayerState {
   if (stage >= STAGES.length || state.share?.stage === stage) return state;
-  const size = fixed && fixed > 0 ? Math.ceil(fixed) : shareSize(state, world, now);
+  const size = fixed && fixed > 0 ? Math.ceil(fixed) : shareSize(state, world, now, stage);
   return { ...state, share: { stage, size, given: 0, tiers: 0 } };
 }
 
-/** Part de chantier d'un joueur : 4 h de sa production actuelle. */
-export function shareSize(state: PlayerState, world: WorldState, now: number): number {
-  return Math.max(1, Math.ceil(productionPerSecond(state, world, stagesDoneAt(world, now)) * SHARE_HOURS * 3600));
+/** Part de chantier d'un joueur : autant d'heures de sa production actuelle que l'étape en compte (4 h, puis 12 h et 24 h). */
+export function shareSize(state: PlayerState, world: WorldState, now: number, stage?: number): number {
+  const hours = stage === undefined ? SHARE_HOURS : SHARE_HOURS * (stageHours(stage) / STAGE_SIZE_HOURS);
+  return Math.max(1, Math.ceil(productionPerSecond(state, world, stagesDoneAt(world, now)) * hours * 3600));
 }
 
 /** Compte un don dans la part de chantier ; renvoie les paliers franchis et les écus gagnés. */
@@ -797,9 +799,9 @@ export function recordGift(state: PlayerState, amount: number): { state: PlayerS
 }
 
 /** Taille d'une étape à son ouverture : 4 h de la production cumulée des joueurs actifs. */
-export function stageSize(activeRates: number[]): number {
+export function stageSize(activeRates: number[], hours = STAGE_SIZE_HOURS): number {
   const sum = activeRates.reduce((a, r) => a + (Number.isFinite(r) && r > 0 ? r : 0), 0);
-  return Math.max(STAGE_MIN_SIZE, Math.ceil(sum * STAGE_SIZE_HOURS * 3600));
+  return Math.max(STAGE_MIN_SIZE, Math.ceil(sum * hours * 3600));
 }
 
 // ---------------------------------------------------------------------------

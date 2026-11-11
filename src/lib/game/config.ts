@@ -175,6 +175,11 @@ export const LORD_GIFT_MAX_SHARE = 0.25;
 export const STAGE_BASES = STAGES.map((s) => s.basePerPlayer);
 /** Taille d'une étape à son ouverture : tant d'heures de la production cumulée des joueurs actifs. */
 export const STAGE_SIZE_HOURS = 4;
+/** Durée de chaque étape en heures de production (taille, parts de chantier, lots et paliers) : on ralentit la fin du beffroi. */
+export const STAGE_HOURS_BY_STAGE: readonly number[] = [4, 4, 4, 4, 4, 4, 12, 24];
+export function stageHours(stage: number): number {
+  return STAGE_HOURS_BY_STAGE[stage] ?? STAGE_SIZE_HOURS;
+}
 /** Dîme automatique : au plus 20 % de la production passive, 5 % pour un nouveau compte, 10 % conseillés. */
 export const MAX_TITHE = 0.2;
 export const NEW_PLAYER_TITHE = 0.05;
