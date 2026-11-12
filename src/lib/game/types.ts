@@ -148,6 +148,11 @@ export interface ChronicleEntry {
     rounds?: number;
     /** B7 : pertes de chaque round et effectifs restants. */
     log?: { attackerLost: Record<string, number>; defenderLost: Record<string, number>; attackerLeft: number; defenderLeft: number }[];
+    /** R10 : armées au départ et blessés (visibles des deux camps seulement). */
+    attackerStart?: Record<string, number>;
+    defenderStart?: Record<string, number>;
+    attackerWounded?: Record<string, number>;
+    defenderWounded?: Record<string, number>;
     allyShares?: Record<string, number>;
     attackerLost?: Record<string, number>;
     defenderLost?: Record<string, number>;
@@ -331,6 +336,7 @@ export type GameAction =
   | { type: "fortress_recall" }
   | { type: "event_attack"; troops?: Record<string, number>; camp?: string }
   | { type: "research"; id: string }
+  | { type: "research_cancel"; endsAt: number }
   | { type: "merchant"; choice: MerchantChoice }
   | { type: "march_recall"; id: string }
   | { type: "tournament_join"; troops: Record<string, number> }

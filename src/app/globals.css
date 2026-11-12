@@ -103,6 +103,11 @@ a {
 .btn-ghost {
   background: transparent;
 }
+.btn-small {
+  min-height: 32px;
+  padding: 4px 8px;
+  font-size: 0.85em;
+}
 
 /* ---------- Authentification ---------- */
 .auth-wrap {

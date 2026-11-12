@@ -165,6 +165,7 @@ import {
   troopsHere,
   startResearch,
   buyAcademy,
+  cancelResearch,
   buyFromMerchant,
   landMarch,
   mineReward,
@@ -256,7 +257,7 @@ interface PlayerRow {
   upgrades: string[];
   total_produced: number;
   total_contributed: number;
-  military?: { levels?: Record<string, number>; research?: { id: string; endsAt: number }[] | { id: string; endsAt: number } | null; academy?: number; sabotageImmuneUntil?: number; ruinImmuneUntil?: number; elanUntil?: number; tithe?: number; titheOwed?: number; titheSet?: boolean; share?: StageShare | null; donorTiers?: number; curfew?: Curfew | null; seen?: PlayerState["seen"] | null; veinAt?: number; frenzyUntil?: number; quest?: number | null; questFlags?: string[]; wounded?: Record<string, number>; healAt?: number; marches?: unknown; boostProdUntil?: number; boostSafeUntil?: number; merchantEvent?: number; daily?: unknown; dailyBoostUntil?: number; dailyBoost?: number; hallTithe?: number; spyLevel?: number; spies?: unknown; moles?: unknown; counterUntil?: number; rumor?: { mode?: string; until?: number } | null; granaryCutUntil?: number; blindUntil?: number; spyLog?: unknown } | null;
+  military?: { levels?: Record<string, number>; research?: { id: string; endsAt: number; cost?: number }[] | { id: string; endsAt: number } | null; academy?: number; sabotageImmuneUntil?: number; ruinImmuneUntil?: number; elanUntil?: number; tithe?: number; titheOwed?: number; titheSet?: boolean; share?: StageShare | null; donorTiers?: number; curfew?: Curfew | null; seen?: PlayerState["seen"] | null; veinAt?: number; frenzyUntil?: number; quest?: number | null; questFlags?: string[]; wounded?: Record<string, number>; healAt?: number; marches?: unknown; boostProdUntil?: number; boostSafeUntil?: number; merchantEvent?: number; daily?: unknown; dailyBoostUntil?: number; dailyBoost?: number; hallTithe?: number; spyLevel?: number; spies?: unknown; moles?: unknown; counterUntil?: number; rumor?: { mode?: string; until?: number } | null; granaryCutUntil?: number; blindUntil?: number; spyLog?: unknown } | null;
   total_clicks: number;
   last_update: string;
   last_click_at: string;
@@ -379,7 +380,7 @@ function toEntity(row: PlayerRow): Entity {
       ),
       levels: armyCounts(row.military?.levels ?? {}, [...UNIT_IDS, ...DEFENSE_IDS]),
       // Anciennes lignes : une seule recherche (objet) au lieu d'une file.
-      research: [row.military?.research ?? []].flat().map((r) => ({ id: r.id as ResearchId, endsAt: Number(r.endsAt) })),
+      research: [row.military?.research ?? []].flat().map((r) => ({ id: r.id as ResearchId, endsAt: Number(r.endsAt), ...(Number.isFinite(Number((r as { cost?: unknown }).cost)) && (r as { cost?: unknown }).cost !== undefined ? { cost: Number((r as { cost?: unknown }).cost) } : {}) })),
       spyLevel: Math.max(0, Math.floor(Number(row.military?.spyLevel ?? 0) || 0)),
       spies: cleanSpies(row.military?.spies),
       moles: cleanMoles(row.military?.moles),
@@ -1014,10 +1015,29 @@ async function loadChronicle(admin: SupabaseClient, seasonId: number, entities: 
     .eq("season_id", seasonId)
     .order("created_at", { ascending: false })
     .limit(40);
+  // R10 : les 20 derniers combats du joueur restent visibles, même tombés hors des 40 dernières lignes.
+  const fights = viewer
+    ? (
+        await admin
+          .from("chronicle")
+          .select("id, kind, actor_id, target_id, details, created_at")
+          .eq("season_id", seasonId)
+          .in("kind", ["raid", "fortress", "hall_siege"])
+          .or(`actor_id.eq.${viewer},target_id.eq.${viewer}`)
+          .order("created_at", { ascending: false })
+          .limit(20)
+      ).data ?? []
+    : [];
+  const seenIds = new Set((data ?? []).map((r) => Number(r.id)));
+  const rows = [...(data ?? []), ...fights.filter((r) => !seenIds.has(Number(r.id)))].sort((a, b) => Date.parse(b.created_at as string) - Date.parse(a.created_at as string));
+  const myAlliance = entities.get(viewer)?.allianceId ?? null;
+  // R10 : le détail du combat (armées et rounds) n'est montré qu'aux deux camps.
+  const party = (r: { actor_id: unknown; target_id: unknown; details: unknown }) =>
+    !!viewer && (r.actor_id === viewer || r.target_id === viewer || (myAlliance !== null && (r.details as { target?: unknown } | null)?.target === myAlliance));
   const name = (id: string | null) => (id ? (entities.get(id)?.name ?? "Un inconnu") : "");
   // E5 : un espion surpris sans être reconnu reste anonyme, sauf pour son maître.
   const hidden = (r: { kind: unknown; actor_id: unknown; details: unknown }) => (r.kind === "spy" || r.kind === "sabotage") && (r.details as { named?: boolean } | null)?.named === false && r.actor_id !== viewer;
-  return (data ?? []).map((r) => ({
+  return rows.map((r) => ({
     id: Number(r.id),
     at: Date.parse(r.created_at as string),
     kind: r.kind as ChronicleEntry["kind"],
@@ -1025,8 +1045,18 @@ async function loadChronicle(admin: SupabaseClient, seasonId: number, entities: 
     actorName: hidden(r) ? "Un espion inconnu" : name(r.actor_id as string | null),
     targetId: r.target_id as string | null,
     targetName: name(r.target_id as string | null),
-    details: (r.details ?? {}) as ChronicleEntry["details"],
+    details: (party(r) ? (r.details ?? {}) : stripFight((r.details ?? {}) as Record<string, unknown>)) as ChronicleEntry["details"],
   }));
+}
+
+function stripFight(d: Record<string, unknown>): Record<string, unknown> {
+  const { log, attackerStart, defenderStart, attackerWounded, defenderWounded, ...rest } = d;
+  void log;
+  void attackerStart;
+  void defenderStart;
+  void attackerWounded;
+  void defenderWounded;
+  return rest;
 }
 
 /** Clé des rapports d'espion portant sur la forteresse. */
@@ -2038,7 +2068,7 @@ async function awaySummary(admin: SupabaseClient, seasonId: number, me: Entity, 
 }
 
 function chronicleDetails(r: RaidReport, chance: number) {
-  return { success: r.success, chance, rounds: r.rounds, stolen: r.stolen, ransom: r.ransom, allyShares: r.allyShares, destroyed: r.destroyed, attackerLost: r.attackerLost, defenderLost: r.defenderLost, revenge: r.revenge, log: r.log };
+  return { success: r.success, chance, rounds: r.rounds, stolen: r.stolen, ransom: r.ransom, allyShares: r.allyShares, destroyed: r.destroyed, attackerLost: r.attackerLost, defenderLost: r.defenderLost, revenge: r.revenge, log: r.log, attackerStart: r.attackerStart, defenderStart: r.defenderStart, attackerWounded: r.attackerWounded, defenderWounded: r.defenderWounded };
 }
 
 /** « 3 miliciens, 1 chevalier » */
@@ -2103,6 +2133,10 @@ function applySimpleAction(state: PlayerState, action: GameAction, now: number, 
       const r = startResearch(state, String(action.id), now, stagesDoneAt(world, now), baseRate(state, world, now));
       return r.ok ? { ok: true, value: { state: r.value, log: { action: "research", details: { id: action.id, level: queuedLevel(state, action.id as ResearchId) + 1 } } } } : r;
     }
+    case "research_cancel": {
+      const r = cancelResearch(state, Number(action.endsAt), now, baseRate(state, world, now));
+      return r.ok ? { ok: true, value: { state: r.value.state, message: `↩️ Recherche annulée : ${r.value.refund.toLocaleString("fr-FR")} pierres rendues.`, log: { action: "research_cancel", details: { endsAt: action.endsAt, refund: r.value.refund } } } } : r;
+    }
     case "curfew": {
       const r = setCurfew(state, action.start === null ? null : Number(action.start), now);
       return r.ok ? { ok: true, value: { state: r.value, log: { action: "curfew", details: { start: action.start } } } } : r;
@@ -2123,7 +2157,7 @@ function applySimpleAction(state: PlayerState, action: GameAction, now: number, 
       return r.ok ? { ok: true, value: { state: r.value, log: { action: "tithe", details: { percent: action.percent } } } } : r;
     }
     case "academy": {
-      const r = buyAcademy(state);
+      const r = buyAcademy(state, now);
       return r.ok ? { ok: true, value: { state: r.value, log: { action: "academy", details: { level: r.value.academy } } } } : r;
     }
     case "upgrade": {
@@ -2840,7 +2874,7 @@ async function settleMarches(
     const healed = addWounded(aState, woundedOf(fight.attackerLost, fight.success ? WOUNDED_WINNER : WOUNDED_ATTACKER_BEATEN), at);
     const back: March = { ...m, troops: survivors, status: "back", returnAt: at + outMs, outcome: fight.success ? "won" : "lost" };
     const after = replace(healed, armySize(survivors) > 0 ? back : null);
-    const details = { success: fight.success, chance, rounds: fight.rounds, alliance: owner.allianceId, attackerLost: fight.attackerLost, defenderLost: fight.defenderLost, log: fight.log };
+    const details = { success: fight.success, chance, rounds: fight.rounds, alliance: owner.allianceId, attackerLost: fight.attackerLost, defenderLost: fight.defenderLost, log: fight.log, attackerStart: fight.attackerStart, defenderStart: fight.defenderStart };
     const r = await applyFortress(admin, seasonId, fortress, owner, after, fight.success ? owner.allianceId : fortress.holder, fight.success ? {} : theirs.stationed, fight.success, "fortress_attack", details);
     if (r === "conflict") return "conflict";
     if (fortress.holder !== null) {
@@ -3510,7 +3544,7 @@ async function settleHallMarch(
   const wanted = m.wing && (live[m.wing] ?? 0) > 0 ? m.wing : (Object.entries(live).sort((a, b) => (b[1] ?? 0) - (a[1] ?? 0))[0]?.[0] as WingId | undefined);
   const disabled = fight.success && wanted ? { ...g.disabled, [wanted]: at + HALL_WING_DOWN_MS } : g.disabled;
   const immune = fight.success ? at + HALL_SIEGE_IMMUNITY_MS : g.immuneUntil;
-  const details = { success: fight.success, chance, rounds: fight.rounds, alliance: owner.allianceId, target: g.allianceId, wing: fight.success ? wanted ?? null : null, ransom, attackerLost: fight.attackerLost, defenderLost: fight.defenderLost, log: fight.log };
+  const details = { success: fight.success, chance, rounds: fight.rounds, alliance: owner.allianceId, target: g.allianceId, wing: fight.success ? wanted ?? null : null, ransom, attackerLost: fight.attackerLost, defenderLost: fight.defenderLost, log: fight.log, attackerStart: fight.attackerStart, defenderStart: fight.defenderStart };
   const r = await applyHall(admin, seasonId, g, [{ e: owner, state: after }], garrison, disabled, immune, "hall_siege", details);
   if (r === "conflict") return "conflict";
   const wingName = wanted ? WINGS.find((w) => w.id === wanted)?.name : null;

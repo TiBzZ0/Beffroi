@@ -580,6 +580,8 @@ export const ACADEMY_SPEED = 0.1;
 export const ACADEMY_BASE_COST = 50_000;
 export const ACADEMY_COST_GROWTH = 3;
 /** Sabotage de l'académie d'un rival : la moitié du prix du niveau visé, et au moins 3 min de sa propre production (1 000 au minimum). */
+/** R2 : une recherche annulée rend la moitié de son prix. */
+export const RESEARCH_REFUND = 0.5;
 export const SABOTAGE_LEVEL_SHARE = 0.5;
 /** E4 : un sabotage coûte 10 minutes de production de base. */
 export const SABOTAGE_COST_SECONDS = 600;

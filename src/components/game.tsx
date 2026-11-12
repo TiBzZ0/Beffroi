@@ -25,6 +25,7 @@ import {
   VEIN_VISIBLE_MS,
   ACADEMY_SPEED,
   RESEARCH_QUEUE_MAX,
+  RESEARCH_REFUND,
   DEFENSES,
   GENERATORS,
   STAGES,
@@ -1984,7 +1985,7 @@ function Forge({ live, now, run, stagesDone, base }: { live: PlayerState; now: n
             Académie militaire <span className="badge">niv. {live.academy ?? 0}</span>
           </div>
           <div className="row-desc">
-            Recherches {Math.round((live.academy ?? 0) * ACADEMY_SPEED * 100)} % plus rapides (+{Math.round(ACADEMY_SPEED * 100)} % par niveau, pour les recherches lancées ensuite).
+            Recherches {Math.round((live.academy ?? 0) * ACADEMY_SPEED * 100)} % plus rapides (+{Math.round(ACADEMY_SPEED * 100)} % par niveau, recherche en cours et file comprises).
             {live.sabotageImmuneUntil > now ? ` Garde renforcée contre les saboteurs encore ${duration(live.sabotageImmuneUntil - now)}.` : ""}
           </div>
         </div>
@@ -2006,7 +2007,10 @@ function Forge({ live, now, run, stagesDone, base }: { live: PlayerState; now: n
             const level = (r.id === "espionnage" ? (live.spyLevel ?? 0) : levelOf(live, r.id)) + queue.slice(0, i + 1).filter((q) => q.id === r.id).length;
             return (
               <li key={`${r.id}-${r.endsAt}`}>
-                {i === 0 ? "⏳" : "⌛"} {def?.icon} {def?.name} niveau {level} : {i === 0 ? `encore ${duration(r.endsAt - now)}` : `fini dans ${duration(r.endsAt - now)}`}
+                {i === 0 ? "⏳" : "⌛"} {def?.icon} {def?.name} niveau {level} : {i === 0 ? `encore ${duration(r.endsAt - now)}` : `fini dans ${duration(r.endsAt - now)}`}{" "}
+                <button className="btn btn-small" onClick={() => void run({ type: "research_cancel", endsAt: r.endsAt })} title="Annule cette recherche : la moitié de son prix te revient, et les suivantes avancent d'autant.">
+                  ↩️ Annuler{r.cost ? ` (rend ${formatNumber(Math.floor(r.cost * RESEARCH_REFUND))} 🪨)` : ""}
+                </button>
               </li>
             );
           })}
@@ -2917,7 +2921,7 @@ function Chronicle({ entries, me, now, rivals, alliances = [] }: { entries: Chro
           <li key={e.id} className={e.targetId === me ? "hit" : undefined}>
             <span>
               {text}
-              {e.details.log && e.details.log.length > 0 && (e.kind === "raid" || e.kind === "fortress") && <RoundsReport log={e.details.log} />}
+              {e.details.log && e.details.log.length > 0 && (e.kind === "raid" || e.kind === "fortress" || e.kind === "hall_siege") && <RoundsReport log={e.details.log} details={e.details} />}
             </span>
             <span className="when">{ago(e.at)}</span>
           </li>
@@ -3244,18 +3248,49 @@ function Chat({ userId, hasAlliance, now }: { userId: string; hasAlliance: boole
 }
 
 /** B7 : déroulé d'une bataille, round par round. */
-function RoundsReport({ log, open = false }: { log: NonNullable<ChronicleEntry["details"]["log"]>; open?: boolean }) {
+function RoundsReport({ log, open = false, details }: { log: NonNullable<ChronicleEntry["details"]["log"]>; open?: boolean; details?: ChronicleEntry["details"] }) {
+  // R10 : avec les armées de départ, on montre ce qu'il reste de chaque camp, type par type, après chaque round.
+  const aStart = details?.attackerStart;
+  const dStart = details?.defenderStart;
+  const left = (start: Record<string, number>, upTo: number, side: "attackerLost" | "defenderLost") => {
+    const out = { ...start };
+    for (const r of log.slice(0, upTo)) for (const [id, n] of Object.entries(r[side])) out[id] = Math.max(0, (out[id] ?? 0) - (n ?? 0));
+    return Object.fromEntries(Object.entries(out).filter(([, n]) => n > 0));
+  };
   return (
     <details className="rounds" open={open}>
-      <summary>Déroulé en {log.length} round{log.length > 1 ? "s" : ""}</summary>
+      <summary>{aStart ? "Rapport de combat" : "Déroulé"} en {log.length} round{log.length > 1 ? "s" : ""}</summary>
+      {aStart && dStart && (
+        <p className="num">
+          Au départ : l&apos;assaillant {armyIcons(aStart, "rien")}, le défenseur {armyIcons(dStart, "rien")}.
+        </p>
+      )}
       <ol>
         {log.map((r, i) => (
           <li key={i}>
-            <strong>Round {i + 1}</strong> · l&apos;assaillant perd {armyIcons(r.attackerLost, "rien")}, le défenseur perd {armyIcons(r.defenderLost, "rien")}. Restent{" "}
-            <span className="num">{formatNumber(r.attackerLeft)}</span> contre <span className="num">{formatNumber(r.defenderLeft)}</span>.
+            <strong>Round {i + 1}</strong> · l&apos;assaillant perd {armyIcons(r.attackerLost, "rien")}, le défenseur perd {armyIcons(r.defenderLost, "rien")}.{" "}
+            {aStart && dStart ? (
+              <>
+                Restent {armyIcons(left(aStart, i + 1, "attackerLost"), "personne")} contre {armyIcons(left(dStart, i + 1, "defenderLost"), "personne")}.
+              </>
+            ) : (
+              <>
+                Restent <span className="num">{formatNumber(r.attackerLeft)}</span> contre <span className="num">{formatNumber(r.defenderLeft)}</span>.
+              </>
+            )}
           </li>
         ))}
       </ol>
+      {details && (details.attackerLost || details.defenderLost) && (
+        <p className="num">
+          Bilan : l&apos;assaillant perd {armyIcons(details.attackerLost ?? {}, "rien")}
+          {details.attackerWounded && Object.keys(details.attackerWounded).length ? ` (dont blessés ${armyIcons(details.attackerWounded)})` : ""}, le défenseur perd{" "}
+          {armyIcons(details.defenderLost ?? {}, "rien")}
+          {details.defenderWounded && Object.keys(details.defenderWounded).length ? ` (dont blessés ${armyIcons(details.defenderWounded)})` : ""}
+          {(details.stolen ?? 0) > 0 ? ` · butin ${formatNumber(details.stolen ?? 0)} 🪨` : ""}
+          {(details.ransom ?? 0) > 0 ? ` · rançon ${formatNumber(details.ransom ?? 0)} 🪨` : ""}.
+        </p>
+      )}
     </details>
   );
 }

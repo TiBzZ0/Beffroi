@@ -23,6 +23,9 @@ export interface BattleResult {
   defenderLeft: Army;
   /** B7 : pertes de chaque round, et effectifs restants à la fin du round. */
   log: RoundLog[];
+  /** R10 : armées au départ du combat. */
+  attackerStart: Army;
+  defenderStart: Army;
 }
 
 export interface RoundLog {
@@ -171,6 +174,8 @@ function add(a: Army, b: Army): Army {
 export function battle(attacker: Army, defender: Army, rng: () => number, opts: BattleOptions = {}): BattleResult {
   let att = cleanArmy(attacker);
   let def = cleanArmy(defender);
+  const attackerStart = att;
+  const defenderStart = def;
   let attackerLost: Army = {};
   let defenderLost: Army = {};
   let rounds = 0;
@@ -191,7 +196,7 @@ export function battle(attacker: Army, defender: Army, rng: () => number, opts: 
     attackerLost = add(attackerLost, onAtt);
     log.push({ attackerLost: onAtt, defenderLost: onDef, attackerLeft: armySize(att), defenderLeft: armySize(def) });
   }
-  return { success: armySize(att) > 0 && !canFight(def), rounds, attackerLost, defenderLost, attackerLeft: att, defenderLeft: def, log };
+  return { success: armySize(att) > 0 && !canFight(def), rounds, attackerLost, defenderLost, attackerLeft: att, defenderLeft: def, log, attackerStart, defenderStart };
 }
 
 /** Générateur pseudo-aléatoire reproductible (mulberry32). */

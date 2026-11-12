@@ -36,6 +36,7 @@ import {
   RESEARCH_BASE_MS,
   RESEARCH_TIME_GROWTH,
   ACADEMY_SPEED,
+  RESEARCH_REFUND,
   ACADEMY_BASE_COST,
   ACADEMY_COST_GROWTH,
   SABOTAGE_COST_SECONDS,
@@ -189,7 +190,8 @@ export interface PlayerState {
   /** Améliorations militaires : niveau de chaque type, recherche en cours, académie. */
   levels: Levels;
   /** File de recherches (3 au plus), dans l'ordre ; chacune a son heure de fin. */
-  research: { id: ResearchId; endsAt: number }[];
+  /** File de recherche ; `cost` : prix payé (R2, pour rembourser la moitié à l'annulation). */
+  research: { id: ResearchId; endsAt: number; cost?: number }[];
   /** E1 : niveau d'espionnage (0 à 10). */
   spyLevel?: number;
   /** E3 : espions en route (aller simple). */
@@ -1246,6 +1248,9 @@ export interface RaidReport {
   revenge: boolean;
   /** B7 : déroulé round par round. */
   log?: RoundLog[];
+  /** R10 : armées au départ. */
+  attackerStart?: Army;
+  defenderStart?: Army;
 }
 
 export function raidArmies(attacker: PlayerState, victim: PlayerState, ctx: Pick<RaidContext, "attackerArmy" | "defenderArmy" | "victimId" | "now" | "stagesDone">) {
@@ -1367,6 +1372,8 @@ export function resolveRaid(
     fairness: 1,
     revenge,
     log: fight.log,
+    attackerStart: fight.attackerStart,
+    defenderStart: fight.defenderStart,
   };
   if (!fight.success) return { ok: true, value: { attacker: attackerAfter, victim: victimArmyAfter, report: base } };
 
@@ -1507,17 +1514,43 @@ export function startResearch(state: PlayerState, id: string, now: number, stage
   const cost = researchCost(s, rid, base);
   if (cost > s.stone) return { ok: false, error: "Pas assez de pierre." };
   const start = Math.max(now, queue[queue.length - 1]?.endsAt ?? now);
-  return { ok: true, value: { ...s, stone: s.stone - cost, research: [...queue, { id: rid, endsAt: start + researchTime(s, rid, stagesDone) }] } };
+  return { ok: true, value: { ...s, stone: s.stone - cost, research: [...queue, { id: rid, endsAt: start + researchTime(s, rid, stagesDone), cost }] } };
 }
 
 export function academyCost(state: PlayerState): number {
   return Math.ceil(ACADEMY_BASE_COST * ACADEMY_COST_GROWTH ** (state.academy ?? 0));
 }
 
-export function buyAcademy(state: PlayerState): Result<PlayerState> {
+export function buyAcademy(state: PlayerState, now = 0): Result<PlayerState> {
   const cost = academyCost(state);
   if (cost > state.stone) return { ok: false, error: "Pas assez de pierre." };
-  return { ok: true, value: { ...state, stone: state.stone - cost, academy: (state.academy ?? 0) + 1 } };
+  const level = state.academy ?? 0;
+  // R2 : la recherche en cours et la file profitent tout de suite du nouveau niveau.
+  const factor = (1 + ACADEMY_SPEED * level) / (1 + ACADEMY_SPEED * (level + 1));
+  let prevOld = now;
+  let prevNew = now;
+  const research = (state.research ?? []).map((r) => {
+    const span = Math.max(0, r.endsAt - Math.max(prevOld, now));
+    prevOld = r.endsAt;
+    prevNew = Math.max(prevNew, now) + Math.ceil(span * factor);
+    return { ...r, endsAt: prevNew };
+  });
+  return { ok: true, value: { ...state, stone: state.stone - cost, academy: level + 1, research } };
+}
+
+/** R2 : annule une recherche (en cours ou en file) ; la moitié du prix revient, les suivantes avancent d'autant. */
+export function cancelResearch(state: PlayerState, endsAt: number, now: number, base = 0): Result<{ state: PlayerState; refund: number }> {
+  const s = settleResearch(state, now);
+  const queue = s.research ?? [];
+  const i = queue.findIndex((r) => r.endsAt === endsAt);
+  if (i < 0) return { ok: false, error: "Cette recherche n'est plus dans la file." };
+  const r = queue[i];
+  const paid = r.cost ?? researchCost({ ...s, research: queue.slice(0, i) }, r.id, base);
+  const refund = Math.floor(paid * RESEARCH_REFUND);
+  const start = i === 0 ? now : Math.max(now, queue[i - 1].endsAt);
+  const freed = Math.max(0, r.endsAt - start);
+  const research = [...queue.slice(0, i), ...queue.slice(i + 1).map((q) => ({ ...q, endsAt: q.endsAt - freed }))];
+  return { ok: true, value: { refund, state: { ...s, stone: s.stone + refund, research } } };
 }
 
 /**

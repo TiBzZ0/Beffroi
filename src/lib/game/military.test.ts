@@ -83,3 +83,35 @@ describe("rapport de bataille (B7)", () => {
     expect(sum("defenderLost")).toBe(Object.values(fight.defenderLost).reduce((x, n) => x + (n ?? 0), 0));
   });
 });
+
+describe("R2 : annuler une recherche, académie qui accélère la file", () => {
+  it("rend la moitié du prix et avance les suivantes", async () => {
+    const { cancelResearch } = await import("./engine");
+    let s = { ...newPlayerState(0), stone: 1e12 };
+    const a = startResearch(s, "piquier", 0);
+    if (!a.ok) throw new Error(a.error);
+    const b = startResearch(a.value, "milicien", 0);
+    if (!b.ok) throw new Error(b.error);
+    s = b.value;
+    const [first, second] = s.research;
+    const r = cancelResearch(s, first.endsAt, 0);
+    if (!r.ok) throw new Error(r.error);
+    expect(r.value.refund).toBe(Math.floor((first.cost ?? 0) / 2));
+    expect(r.value.state.research).toHaveLength(1);
+    expect(r.value.state.research[0].endsAt).toBe(second.endsAt - first.endsAt);
+  });
+
+  it("un niveau d'académie raccourcit la recherche en cours et la file", () => {
+    const s0 = { ...newPlayerState(0), stone: 1e12 };
+    const a = startResearch(s0, "piquier", 0);
+    if (!a.ok) throw new Error(a.error);
+    const b = startResearch(a.value, "milicien", 0);
+    if (!b.ok) throw new Error(b.error);
+    const before = b.value.research.map((r) => r.endsAt);
+    const up = buyAcademy(b.value, 0);
+    if (!up.ok) throw new Error(up.error);
+    const after = up.value.research.map((r) => r.endsAt);
+    expect(after[0]).toBeLessThan(before[0]);
+    expect(after[1] - after[0]).toBeLessThan(before[1] - before[0]);
+  });
+});

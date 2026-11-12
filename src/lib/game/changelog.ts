@@ -388,4 +388,13 @@ export const CHANGELOG: ChangeEntry[] = [
       "⚔️ L'onglet Armée affiche la valeur en pierre de chaque troupe et fortification.",
     ],
   },
+  {
+    id: 46,
+    date: "12 novembre",
+    items: [
+      "↩️ Une recherche, en cours ou en file, peut être annulée : la moitié de son prix te revient, et les suivantes avancent d'autant.",
+      "🎓 Agrandir l'académie accélère aussi la recherche en cours et celles en file, plus seulement les suivantes.",
+      "📜 Rapport de combat détaillé dans la chronique (raids, forteresse, halle) : armées au départ, ce qu'il reste de chaque camp après chaque round, puis le bilan. Seuls les deux camps le voient, et tes 20 derniers combats y restent.",
+    ],
+  },
 ];
