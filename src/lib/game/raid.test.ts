@@ -159,10 +159,10 @@ describe("raids", () => {
     expect(r.ok && r.value.report.destroyed).toEqual({});
   });
 
-  it("refuse les raids sur bouclier, en double, trop rapprochés ou sans troupes", () => {
+  it("refuse les raids sur bouclier, en double ou sans troupes ; plus de repos entre deux raids (R1)", () => {
     expect(resolveRaid(player(), player({ shieldUntil: NOW + 1 }), ctx()).ok).toBe(false);
     expect(resolveRaid(player({ lastRaidTarget: "v" }), player(), ctx()).ok).toBe(false);
-    expect(resolveRaid(player({ lastRaidAt: NOW - 1000 }), player(), ctx()).ok).toBe(false);
+    expect(resolveRaid(player({ lastRaidAt: NOW - 1000 }), player(), ctx()).ok).toBe(true);
     expect(resolveRaid(player({ troops: {} }), player(), ctx()).ok).toBe(false);
   });
 
@@ -305,11 +305,10 @@ describe("butin partagé", () => {
 });
 
 describe("guerres et forteresse", () => {
-  it("en guerre, les boucliers tombent mais le repos et la règle de cible restent", () => {
+  it("en guerre, les boucliers tombent mais la règle de cible reste", () => {
     const victim = player({ troops: {}, shieldUntil: NOW + 3_600_000 });
     expect(resolveRaid(player(), victim, ctx()).ok).toBe(false);
     expect(resolveRaid(player(), victim, ctx({ atWar: true })).ok).toBe(true);
-    expect(resolveRaid(player({ lastRaidAt: NOW - 1000 }), victim, ctx({ atWar: true })).ok).toBe(false);
     expect(resolveRaid(player({ lastRaidTarget: "v" }), victim, ctx({ atWar: true })).ok).toBe(false);
   });
 

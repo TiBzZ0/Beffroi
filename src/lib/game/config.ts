@@ -768,7 +768,7 @@ export interface WingDef {
 }
 
 export const WINGS: readonly WingDef[] = [
-  { id: "loge", name: "Loge des bâtisseurs", icon: "🧱", levels: ["+3 % de production", "+6 % de production", "+9 % de production"] },
+  { id: "loge", name: "Loge des bâtisseurs", icon: "🧱", levels: ["+5 % de production", "+10 % de production", "+15 % de production"] },
   { id: "grenier", name: "Grenier commun", icon: "🌾", levels: ["+30 min de stock à l'abri", "+1 h de stock à l'abri", "+1 h 30 de stock à l'abri"] },
   { id: "armes", name: "Salle d'armes", icon: "⚔️", levels: ["Renforts 10 % plus forts, 20 % plus rapides", "Renforts 20 % plus forts, 40 % plus rapides", "Renforts 30 % plus forts, 60 % plus rapides"] },
   { id: "guet", name: "Guet", icon: "🔭", levels: ["Alerte dès le départ de l'armée ennemie", "Le nom de l'attaquant est toujours connu", "La composition de l'armée est connue"] },
@@ -794,7 +794,7 @@ export const HALL_MIN_GAP = 2;
 export const HALL_TITHE_MAX = 0.5;
 export const HALL_TITHE_DEFAULT = 0.25;
 /** Effets des ailes, par niveau (index 0 = aile absente). */
-export const WING_PRODUCTION = [0, 0.03, 0.06, 0.09];
+export const WING_PRODUCTION = [0, 0.05, 0.1, 0.15];
 export const WING_SAFE_SECONDS = [0, 1800, 3600, 5400];
 export const WING_REINFORCE_STRENGTH = [0, 0.1, 0.2, 0.3];
 export const WING_REINFORCE_SPEED = [0, 0.2, 0.4, 0.6];

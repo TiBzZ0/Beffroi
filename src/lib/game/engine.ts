@@ -85,7 +85,6 @@ import {
   DEFENSE_REPAIR_RATE,
   DEFENSES,
   GUARDS_PER_DOMAIN,
-  RAID_COOLDOWN_MS,
   RAID_DESTROY_RATE,
   RAID_LOOT_RATE,
   REVENGE_ATTACK_BONUS,
@@ -238,7 +237,8 @@ export interface PlayerState {
   /** Prime de lot (D2) : +10 % de production tant que moins de ce nombre d'étapes sont finies. Fixé par le serveur. */
   lotBonusUntilStage?: number;
   /** Bonus du maître d'œuvre (D3) pour les membres du premier lot fini. Fixé par le serveur. */
-  masterBonus?: { kind: MasterBonusKind; from: number; until: number };
+  /** R6 : bonus de maître d'œuvre, un par genre au plus à la fois ; un second du même genre allonge le premier. */
+  masterBonuses?: { kind: MasterBonusKind; from: number; until: number }[];
   /** Coup de pouce aux joueurs distancés (0.3 = +30 % de production et de défense). Fixé par le serveur, jamais enregistré. */
   catchUp?: number;
   /** Derniers événements du royaume (en cours et récents), pour leurs effets. Fixé par le serveur, jamais enregistré. */
@@ -629,10 +629,20 @@ export function clickValue(state: PlayerState, world: WorldState, stagesDone: nu
 }
 
 /** Bonus de production de l'élan (0 sans marteau) : +20 % avec le Marteau de maître, +50 % avec le runique en plus. */
+/** R6 : enchaîne les bonus d'un même genre (chacun ajoute 24 h à la fin du précédent s'il tombe pendant). */
+export function chainMasterBonuses(list: { kind: MasterBonusKind; from: number; until: number }[]): { kind: MasterBonusKind; from: number; until: number }[] {
+  const out: { kind: MasterBonusKind; from: number; until: number }[] = [];
+  for (const b of [...list].sort((a, c) => a.from - c.from)) {
+    const last = [...out].reverse().find((x) => x.kind === b.kind);
+    if (last && b.from < last.until) last.until += b.until - b.from;
+    else out.push({ ...b });
+  }
+  return out;
+}
+
 /** Le bonus de maître d'œuvre `kind` est-il actif à `t` ? */
 export function masterActive(state: PlayerState, kind: MasterBonusKind, t: number): boolean {
-  const m = state.masterBonus;
-  return !!m && m.kind === kind && t >= m.from && t < m.until;
+  return (state.masterBonuses ?? []).some((m) => m.kind === kind && t >= m.from && t < m.until);
 }
 
 export function elanBonus(state: PlayerState): number {
@@ -675,7 +685,7 @@ export function advance(state: PlayerState, now: number, world: WorldState, opts
   state = settleWounded(settleCurfew(settleResearch(state, now), now), now);
   if (now <= state.lastUpdate) return state;
   const start = Math.max(state.lastUpdate, now - OFFLINE_CAP_MS);
-  const events = [...world.stageCompletedAt, state.burnedUntil, state.elanUntil ?? 0, state.frenzyUntil ?? 0, state.masterBonus?.from ?? 0, state.masterBonus?.until ?? 0, state.boostProdUntil ?? 0, state.dailyBoostUntil ?? 0, ...(state.eventMods ?? []).flatMap((e) => [e.from, e.until])];
+  const events = [...world.stageCompletedAt, state.burnedUntil, state.elanUntil ?? 0, state.frenzyUntil ?? 0, ...(state.masterBonuses ?? []).flatMap((m) => [m.from, m.until]), state.boostProdUntil ?? 0, state.dailyBoostUntil ?? 0, ...(state.eventMods ?? []).flatMap((e) => [e.from, e.until])];
   const breakpoints = events.filter((t) => t > start && t < now).sort((a, b) => a - b);
   let gain = 0;
   let tithed = 0;
@@ -1273,11 +1283,11 @@ export function raidBlocker(attacker: PlayerState, victim: PlayerState, ctx: Omi
   if (eventActive(attacker, "treve", ctx.now) || eventActive(victim, "treve", ctx.now)) return "Trêve des cloches : aucune armée ne part.";
   if (inCurfew(attacker, ctx.now)) return "Tu es en couvre-feu : pas d'attaque pendant ta plage.";
   if (inCurfew(victim, ctx.now)) return "Ce domaine est en couvre-feu.";
-  // En guerre, seuls les boucliers tombent ; le repos et la règle « pas deux fois la même cible » restent.
+  // En guerre, seuls les boucliers tombent ; la règle « pas deux fois la même cible » restent.
   const free = revenge;
   if (!ctx.atWar && victim.shieldUntil > ctx.now) return "Cette cible est sous bouclier.";
   if (!free && !ctx.allowRepeat && attacker.lastRaidTarget === ctx.victimId) return "Pas deux raids de suite contre la même cible.";
-  if (!free && !ctx.attackerIsLord && !ctx.marching && ctx.now - attacker.lastRaidAt < RAID_COOLDOWN_MS) return "Tes troupes se reposent encore.";
+  // R1 : plus de repos entre deux raids pour les joueurs : le trajet le remplace.
   if (!free && !ctx.atWar && !ctx.attackerIsLord && !ctx.defenderArmy && ctx.relativeSize !== undefined && ctx.relativeSize < MIN_TARGET_SIZE) return "Ce domaine est trop petit pour toi.";
   if (armySize(ctx.attackerArmy ?? attackArmy(attacker)) === 0) return "Il te faut des troupes pour lancer un raid.";
   return null;

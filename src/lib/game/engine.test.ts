@@ -354,7 +354,7 @@ describe("lots du chantier", () => {
   });
 
   it("maître d'œuvre : +15 % de production pendant 24 h", () => {
-    const s = { ...withGenerators({ tailleur: 10 }), masterBonus: { kind: "production" as const, from: T0 + 10_000, until: T0 + 20_000 } };
+    const s = { ...withGenerators({ tailleur: 10 }), masterBonuses: [{ kind: "production" as const, from: T0 + 10_000, until: T0 + 20_000 }] };
     expect(advance(s, T0 + 30_000, noWorld).stone).toBeCloseTo(300 + 10 * 10 * 0.15);
   });
 });
@@ -422,5 +422,21 @@ describe("corps de métier et compagnonnage", () => {
     expect(t.mastery.missing).toBe(25);
     expect(t.companion).toEqual({ missing: 5, bonus: 0.01, target: "merveille" });
     expect(nextTiers(base({}), "guilde").companion).toBeNull();
+  });
+});
+
+describe("R6 : bonus de maître d'œuvre", () => {
+  it("un second bonus du même genre allonge le premier, un autre genre s'ajoute à côté", async () => {
+    const { chainMasterBonuses } = await import("./engine");
+    const H = 3_600_000;
+    const out = chainMasterBonuses([
+      { kind: "production", from: 0, until: 24 * H },
+      { kind: "production", from: 10 * H, until: 34 * H },
+      { kind: "loot", from: 5 * H, until: 29 * H },
+    ]);
+    expect(out).toEqual([
+      { kind: "production", from: 0, until: 48 * H },
+      { kind: "loot", from: 5 * H, until: 29 * H },
+    ]);
   });
 });

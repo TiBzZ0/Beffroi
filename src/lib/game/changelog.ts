@@ -375,4 +375,17 @@ export const CHANGELOG: ChangeEntry[] = [
     date: "11 novembre",
     items: ["🏛️ Fonder la halle donne tout de suite un niveau d'aile à placer, en plus d'un par étape terminée."],
   },
+  {
+    id: 45,
+    date: "12 novembre",
+    items: [
+      "🙏 Merci à un joueur pour sa liste de retours : voici une première série de corrections.",
+      "🏇 Plus de repos de 5 minutes après un envoi d'armée : tu peux raider un seigneur pendant que d'autres troupes sont au filon ou ailleurs.",
+      "🐎 Les écuries de la halle accélèrent toutes tes troupes, et la durée affichée dans la composition de l'armée en tient enfin compte.",
+      "🕵️ Espionner un seigneur est gratuit. L'espion voyage toujours et compte dans tes trois espions.",
+      "🧱 Loge des bâtisseurs plus forte : +5 %, +10 % et +15 % de production.",
+      "👑 Les bonus de maître d'œuvre se cumulent : un de chaque genre peut être actif en même temps, et un second du même genre ajoute 24 h au premier.",
+      "⚔️ L'onglet Armée affiche la valeur en pierre de chaque troupe et fortification.",
+    ],
+  },
 ];

@@ -59,7 +59,7 @@ describe("halle de guilde", () => {
     const s = { ...newPlayerState(0), hall: { loge: 2, grenier: 1, ecuries: 3, armes: 1, infirmerie: 3 } };
     const base = newPlayerState(0);
     const world = { stageCompletedAt: [] };
-    expect(productionMultiplier(s, world, 0) / productionMultiplier(base, world, 0)).toBeCloseTo(1.06);
+    expect(productionMultiplier(s, world, 0) / productionMultiplier(base, world, 0)).toBeCloseTo(1.1);
     expect(extraSecured(s, 0) - extraSecured(base, 0)).toBe(1800);
     expect(armySpeedBonus(s)).toBeCloseTo(0.3);
     expect(armySpeedBonus(s, true)).toBeCloseTo(0.5);

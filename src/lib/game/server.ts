@@ -65,7 +65,6 @@ import {
   COLOSSUS_BOUNTY,
   FORTRESS_WALLS,
   FORTRESS_WALLS_POWER,
-  RAID_COOLDOWN_MS,
   WAR_MS,
   WAR_DELAY_MS,
   type UnitId,
@@ -147,6 +146,7 @@ import {
   spyTravelMs,
   type SpyMission,
   type Mole,
+  chainMasterBonuses,
   type SabotageAim,
   rumorArmy,
   counterActive,
@@ -596,6 +596,7 @@ function masterBonusOf(l: Lot, now: number): { kind: MasterBonusKind; from: numb
 }
 
 function applyLotBonuses(entities: Map<string, Entity>, lots: Lot[], now: number) {
+  const bonuses = new Map<string, { kind: MasterBonusKind; from: number; until: number }[]>();
   for (const l of lots) {
     if (l.finishedAt === null) continue;
     const bonus = masterBonusOf(l, now);
@@ -604,9 +605,13 @@ function applyLotBonuses(entities: Map<string, Entity>, lots: Lot[], now: number
       if (!e || e.isLord) continue;
       let state = e.state;
       if (m.given >= LOT_PRIME_SHARE * m.share) state = { ...state, lotBonusUntilStage: Math.max(state.lotBonusUntilStage ?? 0, l.stage + 2) };
-      if (bonus && bonus.until > now && (!state.masterBonus || state.masterBonus.until < bonus.until)) state = { ...state, masterBonus: bonus };
+      if (bonus) bonuses.set(uid, [...(bonuses.get(uid) ?? []), bonus]);
       e.state = state;
     }
+  }
+  for (const [uid, list] of bonuses) {
+    const e = entities.get(uid);
+    if (e) e.state = { ...e.state, masterBonuses: chainMasterBonuses(list).filter((b) => b.until > now) };
   }
 }
 
@@ -1133,7 +1138,6 @@ function fortressBlocker(me: Entity, state: PlayerState, f: FortressRow, now: nu
   if (inCurfew(state, now)) return "Tu es en couvre-feu : pas d'attaque pendant ta plage.";
   // A13 : 30 minutes sans assaut après une prise, le temps de poster une garnison.
   if (f.holder !== null && now < f.capturedAt + FORTRESS_TRUCE_MS) return `La forteresse vient de changer de mains : pas d'assaut avant ${new Date(f.capturedAt + FORTRESS_TRUCE_MS).toLocaleTimeString("fr-FR", { hour: "2-digit", minute: "2-digit", timeZone: "Europe/Paris" })}.`;
-  if (!army && now - state.lastRaidAt < RAID_COOLDOWN_MS) return "Tes troupes se reposent encore.";
   if (armySize(army ?? attackArmy(state)) === 0) return "Il te faut des troupes pour l'assaut.";
   return null;
 }
@@ -2313,7 +2317,7 @@ export async function runAction(admin: SupabaseClient, userId: string, action: G
       else {
         await admin.from("stage_lots").update({ master_choice: choice, master_from: iso(now) }).eq("season_id", season.id).eq("stage", lot.stage).eq("owner", lot.owner).is("master_choice", null);
         entities = await loadEntities(admin, season.id, userId);
-        finalState = { ...finalState, masterBonus: entities.get(userId)?.state.masterBonus };
+        finalState = { ...finalState, masterBonuses: entities.get(userId)?.state.masterBonuses };
         message = `👑 Bonus choisi pour 24 h : ${MASTER_BONUSES[choice as MasterBonusKind].label}.`;
       }
     } else if (action.type === "sabotage") {
@@ -3923,7 +3927,8 @@ async function sendSpy(
   else if (isAllied(me, target)) return { error: "On n'espionne pas un allié." };
   if ((current.spies ?? []).length >= SPY_MAX_ACTIVE) return { error: `${SPY_MAX_ACTIVE} espions en route au plus.` };
   if ((current.spies ?? []).some((sp) => sp.target === key)) return { error: "Un de tes espions y va déjà." };
-  const cost = spyCost(current, world, now);
+  // R5 : la reconnaissance d'un seigneur est gratuite.
+  const cost = target?.isLord ? 0 : spyCost(current, world, now);
   if (current.stone < cost) return { error: `Il faut ${Math.ceil(cost).toLocaleString("fr-FR")} pierres pour payer un espion.` };
   const ban = await spyBanUntil(admin, seasonId, me.id, key, now);
   if (ban > now) return { error: `Trop de tes espions ont été surpris là-bas : on les y attend jusqu'à ${new Date(ban).toLocaleTimeString("fr-FR", { hour: "2-digit", minute: "2-digit", timeZone: "Europe/Paris" })}.` };

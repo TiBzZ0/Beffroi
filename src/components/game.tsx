@@ -27,7 +27,6 @@ import {
   RESEARCH_QUEUE_MAX,
   DEFENSES,
   GENERATORS,
-  RAID_COOLDOWN_MS,
   STAGES,
   UNITS,
   UPGRADES,
@@ -668,9 +667,11 @@ function Hero({ snap, rate, clickGain, game }: { snap: GameSnapshot; rate: numbe
           {(snap.state.lotBonusUntilStage ?? 0) > snap.worksite.stageCompletedAt.length && (
             <div className="catch-up">🏗️ Prime de lot : +10 % de production jusqu&apos;à la fin de l&apos;étape suivante</div>
           )}
-          {snap.state.masterBonus && snap.state.masterBonus.until > game.serverNow() && snap.state.masterBonus.from <= game.serverNow() && (
-            <div className="catch-up">👑 Maître d&apos;œuvre : {MASTER_BONUSES[snap.state.masterBonus.kind].label} encore {duration(snap.state.masterBonus.until - game.serverNow())}</div>
-          )}
+          {(snap.state.masterBonuses ?? [])
+            .filter((b) => b.until > game.serverNow() && b.from <= game.serverNow())
+            .map((b) => (
+              <div key={b.kind} className="catch-up">👑 Maître d&apos;œuvre : {MASTER_BONUSES[b.kind].label} encore {duration(b.until - game.serverNow())}</div>
+            ))}
           {(snap.state.dailyBoostUntil ?? 0) > game.serverNow() && (
             <div className="catch-up">
               🎁 Coffre du jour : +{Math.round((snap.state.dailyBoost ?? 0) * 100)} % de production encore {duration((snap.state.dailyBoostUntil ?? 0) - game.serverNow())}
@@ -1599,13 +1600,13 @@ function RivalRow({
         {!r.allied && !(r.isLord && r.difficulty === 1) && (
           <button
             className="btn"
-            disabled={busy !== null || myStone < spyPrice}
+            disabled={busy !== null || (!r.isLord && myStone < spyPrice)}
             onClick={() => onSpy(r.id)}
             title="L'espion part sur la route ; son rapport dure 1 h et profite à ton alliance. Ce qu'il voit dépend de l'écart entre ton niveau d'espionnage et celui de la cible."
           >
             🕵️ Espionner
             <span className="cost num">
-              {formatNumber(spyPrice)} 🪨 · {Math.max(1, Math.round(spyTravelMs(distance ?? MAP_SPAWN_RADIUS) / 60_000))} min
+              {r.isLord ? "gratuit" : `${formatNumber(spyPrice)} 🪨`} · {Math.max(1, Math.round(spyTravelMs(distance ?? MAP_SPAWN_RADIUS) / 60_000))} min
               {r.spyGap !== null && r.spyGap !== undefined ? ` · repéré ${Math.round(spyRisk(r.spyGap, distance ?? MAP_SPAWN_RADIUS) * 100)} %` : ""}
             </span>
           </button>
@@ -1681,7 +1682,7 @@ function SendArmy({
 }) {
   const have = me.troops as Record<string, number>;
   const army = Object.fromEntries(UNITS.map((u) => [u.id, Math.min(have[u.id] ?? 0, Math.max(0, Math.floor(chosen[u.id] ?? 0)))]).filter(([, n]) => (n as number) > 0)) as Record<string, number>;
-  const out = travelMs(army as Army, distance);
+  const out = travelMs(army as Army, distance, armySpeedBonus(me));
   const chance = estimateChance(army as Army, r.army as Army, { attackBonus: r.revenge ? REVENGE_ATTACK_BONUS : 1, attackerLevels: me.levels });
   const away = (me.marches ?? []).length;
   return (
@@ -3281,7 +3282,11 @@ function Garrison({ live, run }: { live: PlayerState; run: ReturnType<typeof use
           <div>
             <div className="row-title">
               {d.name}
-              {n > 0 && <span className="row-count num">{n}</span>}
+              {n > 0 && (
+                <span className="row-count num" title={`${n.toLocaleString("fr-FR")} ${d.name.toLowerCase()}, d'une valeur de ${formatNumber(n * d.cost)} pierres`}>
+                  {formatNumber(n)} · {formatNumber(n * d.cost)} 🪨
+                </span>
+              )}
               {kind === "unit" && (live.wounded as Record<string, number> | undefined)?.[d.id] ? (
                 <span className="badge" title="À l'infirmerie : ils reviennent bientôt">🩹 {(live.wounded as Record<string, number>)[d.id]}</span>
               ) : null}
