@@ -1313,7 +1313,7 @@ function Raids({ snap, live, now, run }: { snap: GameSnapshot; live: PlayerState
     setBusy(null);
   };
   const spy = (target: string) => act(target, { type: "spy", target });
-  const raid = (target: string, troops?: Record<string, number>) => act(target, { type: "raid", target, troops });
+  const raid = (target: string, troops?: Record<string, number>, allies?: boolean) => act(target, { type: "raid", target, troops, allies });
   const mine = snap.map?.places[snap.userId];
   const distanceTo = (id: string) => (mine && snap.map?.places[id] ? mapDistance(mine, snap.map.places[id]) : undefined);
   const players = snap.rivals.filter((r) => !r.isLord && !r.allied);
@@ -1499,7 +1499,7 @@ function RivalRow({
   r: RivalView;
   now: number;
   busy: string | null;
-  onRaid: (id: string, troops?: Record<string, number>) => void;
+  onRaid: (id: string, troops?: Record<string, number>, allies?: boolean) => void;
   onSpy: (id: string) => void;
   spyPrice: number;
   stone: number;
@@ -1579,9 +1579,9 @@ function RivalRow({
             chosen={chosen ?? (me.troops as Record<string, number>)}
             setChosen={setChosen}
             busy={busy !== null}
-            onSend={(troops) => {
+            onSend={(troops, allies) => {
               setComposing(false);
-              onRaid(r.id, troops);
+              onRaid(r.id, troops, allies);
             }}
             onClose={() => setComposing(false)}
           />
@@ -1678,13 +1678,18 @@ function SendArmy({
   chosen: Record<string, number>;
   setChosen: (a: Record<string, number>) => void;
   busy: boolean;
-  onSend: (troops: Record<string, number>) => void;
+  onSend: (troops: Record<string, number>, allies: boolean) => void;
   onClose: () => void;
 }) {
+  const [withAllies, setWithAllies] = useState(true);
   const have = me.troops as Record<string, number>;
+  // R3 : renforts de mes alliés présents chez moi, emmenés si la case est cochée.
+  const guests = sumGroups(Object.values(me.stationed ?? {}) as Record<string, number>[]);
+  const hasGuests = Object.keys(guests).length > 0;
   const army = Object.fromEntries(UNITS.map((u) => [u.id, Math.min(have[u.id] ?? 0, Math.max(0, Math.floor(chosen[u.id] ?? 0)))]).filter(([, n]) => (n as number) > 0)) as Record<string, number>;
-  const out = travelMs(army as Army, distance, armySpeedBonus(me));
-  const chance = estimateChance(army as Army, r.army as Army, { attackBonus: r.revenge ? REVENGE_ATTACK_BONUS : 1, attackerLevels: me.levels });
+  const all = withAllies && hasGuests ? sumGroups([army, guests]) : army;
+  const out = travelMs(all as Army, distance, armySpeedBonus(me));
+  const chance = estimateChance(all as Army, r.army as Army, { attackBonus: r.revenge ? REVENGE_ATTACK_BONUS : 1, attackerLevels: me.levels });
   const away = (me.marches ?? []).length;
   return (
     <div className="simulator send-army">
@@ -1706,19 +1711,27 @@ function SendArmy({
         </label>
       ))}
       {UNITS.every((u) => (have[u.id] ?? 0) === 0) && <p className="note">Toutes tes troupes sont en route ou à l&apos;infirmerie.</p>}
+      {hasGuests && (
+        <label className="send-line">
+          <span>
+            🤝 Renforts de mes alliés <span className="num">({armyIcons(guests)})</span>
+          </span>
+          <input type="checkbox" checked={withAllies} onChange={(e) => setWithAllies(e.target.checked)} />
+        </label>
+      )}
       <p className="note">
         {r.chance < 0
           ? r.chanceWord
             ? `Chance ${r.chanceWord} (avec toute ton armée). Pour un pourcentage précis, envoie un espion.`
             : "Chance cachée par le brouillard : envoie un espion."
-          : `Chance estimée : ${Math.round(chance * 100)} %.`} Les troupes envoyées ne défendent plus ton domaine pendant le trajet.
+          : `Chance estimée : ${Math.round(chance * 100)} %.`} Les troupes envoyées, renforts compris, ne défendent plus ton domaine pendant le trajet.
         {away > 0 ? ` Armées déjà en route : ${away}/${MAX_MARCHES}.` : ""}
       </p>
       <div className="qty">
         <button className="btn" onClick={() => setChosen({ ...have })}>
           Tout envoyer
         </button>
-        <button className="btn btn-primary" disabled={busy || Object.keys(army).length === 0 || away >= MAX_MARCHES} onClick={() => onSend(army)}>
+        <button className="btn btn-primary" disabled={busy || Object.keys(army).length === 0 || away >= MAX_MARCHES} onClick={() => onSend(army, withAllies && hasGuests)}>
           🏇 Envoyer
         </button>
         <button className="btn btn-ghost" onClick={onClose}>
@@ -1727,6 +1740,12 @@ function SendArmy({
       </div>
     </div>
   );
+}
+
+function sumGroups(groups: Record<string, number>[]): Record<string, number> {
+  const out: Record<string, number> = {};
+  for (const g of groups) for (const [id, n] of Object.entries(g)) if (n > 0) out[id] = (out[id] ?? 0) + n;
+  return out;
 }
 
 /** T3, T4 : mes armées en route, avec le rappel. */
@@ -3163,7 +3182,7 @@ function KingdomMap({ snap, live, now, run }: { snap: GameSnapshot; live: Player
                 r={rival}
                 now={now}
                 busy={busy}
-                onRaid={(t, troops) => act(t, { type: "raid", target: t, troops })}
+                onRaid={(t, troops, allies) => act(t, { type: "raid", target: t, troops, allies })}
                 distance={pickedDistance ?? undefined}
                 onSpy={(t) => act(t, { type: "spy", target: t })}
                 spyPrice={spyPrice}

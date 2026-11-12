@@ -146,6 +146,7 @@ import {
   spyTravelMs,
   type SpyMission,
   type Mole,
+  withAllies,
   chainMasterBonuses,
   type SabotageAim,
   rumorArmy,
@@ -1882,7 +1883,15 @@ async function runAllianceAction(
       if (!host) return { error: "Domaine inconnu." };
       const hostState = advanceOf(host);
       const group = hostState.stationed?.[me.id];
-      if (!group || Object.keys(group).length === 0) return { error: "Tu n'as pas de troupes là-bas." };
+      if (!group || Object.keys(group).length === 0) {
+        // R3 : renforts partis en raid avec l'hôte : le rappel attend leur retour.
+        const away = (hostState.marches ?? []).find((m) => m.allies?.[me.id] && armySize(m.allies[me.id]) > 0);
+        if (!away) return { error: "Tu n'as pas de troupes là-bas." };
+        if ((away.recallAllies ?? []).includes(me.id)) return { error: "Ton rappel est déjà demandé : tes troupes repartiront à leur retour." };
+        const marches = (hostState.marches ?? []).map((m) => (m.id === away.id ? { ...m, recallAllies: [...(m.recallAllies ?? []), me.id] } : m));
+        if ((await writeStates(admin, seasonId, [{ e: host, state: { ...hostState, marches } }], "recall", { host: host.id, pending: true })) === "conflict") return "conflict";
+        return { message: `Tes troupes sont en raid avec ${host.name} : elles rentreront chez toi dès leur retour.`, state: current };
+      }
       if ((current.marches ?? []).length >= MAX_MARCHES) return { error: `${MAX_MARCHES} armées en route au plus.` };
       // T6 : elles quittent l'allié tout de suite et rentrent par la route.
       const outMs = await travelBetween(admin, seasonId, entities, host.id, me.id, group as Army, armySpeedBonus(current, true));
@@ -2494,7 +2503,10 @@ export async function runAction(admin: SupabaseClient, userId: string, action: G
             const from = positions.get(me.id);
             const to = positions.get(victim.id);
             const distance = from && to ? mapDistance(from, to) : MAP_SPAWN_RADIUS;
-            const outMs = travelMs(sent, distance, armySpeedBonus(current));
+            // R3 : les renforts présents partent avec l'armée (case cochée par défaut).
+            const allies = action.allies === false ? {} : Object.fromEntries(Object.entries(current.stationed ?? {}).filter(([, g]) => armySize(g as Army) > 0).map(([o, g]) => [o, { ...g } as Army]));
+            const withAll = withAllies(sent, allies);
+            const outMs = travelMs(withAll, distance, armySpeedBonus(current));
             const guet = victim.isLord ? 0 : wingLevel(victimState.hall, "guet");
             const fogged = eventActive(current, "brouillard", now);
             const march: March = {
@@ -2513,9 +2525,11 @@ export async function runAction(admin: SupabaseClient, userId: string, action: G
               warned: victim.isLord || (guet >= 1 && !fogged && (victimState.blindUntil ?? 0) <= now),
               loot: 0,
               ransom: 0,
+              ...(Object.keys(allies).length > 0 ? { allies } : {}),
             };
             finalState = {
               ...sending.value.state,
+              ...(Object.keys(allies).length > 0 ? { stationed: {} } : {}),
               marches: [...(current.marches ?? []), march],
               lastRaidAt: now,
               lastRaidTarget: victim.id,
@@ -2524,7 +2538,7 @@ export async function runAction(admin: SupabaseClient, userId: string, action: G
             const { data, error: rpcError } = await admin.rpc("commit_state", { p_season: season.id, p_state: toJson(me, finalState, {}), p_touch: true, p_contribution: 0, p_stage_bases: stageSizes, p_active_window_days: ACTIVE_WINDOW_DAYS, p_action: "march", p_details: { target: victim.id, troops: sent, arriveAt: march.arriveAt } });
             if (rpcError) throw new Error(`Départ impossible : ${rpcError.message}`);
             if ((data as { conflict?: boolean } | null)?.conflict) continue;
-            message = `🏇 Ton armée part vers ${victim.name} : arrivée dans ${Math.round(outMs / 60_000)} min, retour ${Math.round(outMs / 60_000)} min plus tard.`;
+            message = `🏇 Ton armée part vers ${victim.name}${Object.keys(allies).length > 0 ? ", avec les renforts de tes alliés" : ""} : arrivée dans ${Math.round(outMs / 60_000)} min, retour ${Math.round(outMs / 60_000)} min plus tard.`;
             if (!victim.isLord && march.warned) {
               const from = march.revealed ? ` de ${me.name}` : "";
               notify(admin, [victim.id], { title: "🔭 Le guet a vu partir une armée !", body: `Une armée${from} arrive vers ${new Date(march.arriveAt).toLocaleTimeString("fr-FR", { hour: "2-digit", minute: "2-digit", timeZone: "Europe/Paris" })}.`, tag: "march" });
@@ -2670,6 +2684,10 @@ function cleanMarches(raw: unknown): March[] {
       loot: Math.max(0, Number(m.loot) || 0),
       ransom: Math.max(0, Number(m.ransom) || 0),
       ...(["won", "lost", "turned", "recalled"].includes(m.outcome) ? { outcome: m.outcome } : {}),
+      ...(m.allies && typeof m.allies === "object"
+        ? { allies: Object.fromEntries(Object.entries(m.allies as Record<string, unknown>).map(([o, g]) => [o, armyCounts((g ?? {}) as Record<string, number>, UNIT_IDS) as Army]).filter(([, g]) => armySize(g as Army) > 0)) }
+        : {}),
+      ...(Array.isArray(m.recallAllies) ? { recallAllies: (m.recallAllies as unknown[]).map(String) } : {}),
     }));
 }
 
@@ -2750,6 +2768,24 @@ async function settleMarches(
     const landed = owner.isLord
       ? { ...s, stone: s.stone + m.loot, totalPlundered: s.totalPlundered + m.loot, marches: (s.marches ?? []).filter((x) => x.id !== m.id) }
       : landMarch(s, m.id);
+    // R3 : un allié qui a demandé le rappel pendant le raid voit ses renforts repartir dès leur retour.
+    const pending = (m.recallAllies ?? []).filter((o) => landed.stationed?.[o] && entities.get(o));
+    if (pending.length > 0) {
+      const stationed = { ...landed.stationed };
+      const list: { e: Entity; state: PlayerState }[] = [];
+      for (const o of pending) {
+        const ally = entities.get(o)!;
+        const group = stationed[o] as Army;
+        delete stationed[o];
+        const outMs = await travelBetween(admin, seasonId, entities, owner.id, o, group, armySpeedBonus(ally.state, true));
+        const home: March = { id: marchId(), kind: "reinforce", target: owner.id, troops: { ...group }, departAt: now - outMs, arriveAt: now, status: "back", returnAt: now + outMs, revealed: true, warned: true, loot: 0, ransom: 0, outcome: "recalled" };
+        list.push({ e: ally, state: { ...ally.state, marches: [...(ally.state.marches ?? []), home] } });
+      }
+      list.unshift({ e: owner, state: { ...landed, stationed } });
+      if ((await writeStates(admin, seasonId, list, "recall", { host: owner.id, pending: true })) === "conflict") return "conflict";
+      if (!owner.isLord && (m.loot > 0 || m.ransom > 0)) notify(admin, [owner.id], { title: "🏇 Ton armée est rentrée", body: `Elle rapporte ${Math.floor(m.loot + m.ransom).toLocaleString("fr-FR")} pierres.`, tag: "march" });
+      return "changed";
+    }
     const r = await commit(owner, landed);
     if (r === "changed" && !owner.isLord && (m.loot > 0 || m.ransom > 0)) {
       notify(admin, [owner.id], { title: "🏇 Ton armée est rentrée", body: `Elle rapporte ${Math.floor(m.loot + m.ransom).toLocaleString("fr-FR")} pierres.`, tag: "march" });
@@ -2934,6 +2970,7 @@ async function settleMarches(
     attackerRate: aRate,
     relativeSize: victim.isLord || owner.isLord ? undefined : relativeSize(sizeOf(vState, vRate), attackerSizeOf(owner.id, aState, entities, aRate)),
     attackerArmy: m.troops,
+    allyArmies: m.allies,
     attackerIsLord: owner.isLord,
     marching: true,
     allowRepeat: true,
@@ -2946,14 +2983,28 @@ async function settleMarches(
   // V13 : un seigneur repoussé sous la lune rouge laisse une rançon au défenseur.
   const moonRansom = owner.isLord && !rep.success && eventActive(vState, "lune", at) ? Math.floor(armyValue(m.troops) * RED_MOON_RANSOM) : 0;
   if (moonRansom > 0) fight.value.victim = { ...fight.value.victim, stone: fight.value.victim.stone + moonRansom };
-  const survivors = cleanArmy(Object.fromEntries((Object.entries(m.troops) as [string, number][]).map(([id, n]) => [id, n - ((rep.attackerLost as Record<string, number>)[id] ?? 0)])) as Army);
-  const back: March = { ...m, troops: survivors, status: "back", returnAt: at + outMs, loot: rep.stolen, ransom: rep.ransom, outcome: rep.success ? "won" : "lost" };
-  const attackerAfter = replace(fight.value.attacker, armySize(survivors) > 0 || back.loot + back.ransom > 0 ? back : null);
+  const minus = (a: Army, lost: Army) => cleanArmy(Object.fromEntries((Object.entries(a) as [string, number][]).map(([id, n]) => [id, n - ((lost as Record<string, number>)[id] ?? 0)])) as Army);
+  // R3 : chaque allié perd sa part ; ses survivants rentrent avec l'armée, son butin et ses blessés vont chez lui.
+  const allyLost = rep.allyLost ?? {};
+  const ownLost = m.allies ? minus(rep.attackerLost, withAllies({}, allyLost)) : rep.attackerLost;
+  const survivors = minus(m.troops, ownLost);
+  const alliesBack = Object.fromEntries(Object.entries(m.allies ?? {}).map(([o, g]) => [o, minus(g, allyLost[o] ?? {})]).filter(([, g]) => armySize(g as Army) > 0)) as Record<string, Army>;
+  const allyTotal = Object.values(rep.allyShares ?? {}).reduce((a, b) => a + b, 0);
+  const back: March = { ...m, troops: survivors, status: "back", returnAt: at + outMs, loot: Math.max(0, rep.stolen - allyTotal), ransom: rep.ransom, outcome: rep.success ? "won" : "lost", ...(Object.keys(alliesBack).length > 0 ? { allies: alliesBack } : { allies: undefined }) };
+  const attackerAfter = replace(fight.value.attacker, armySize(survivors) > 0 || Object.keys(alliesBack).length > 0 || back.loot + back.ransom > 0 ? back : null);
+  const allyStates = Object.keys(m.allies ?? {}).flatMap((o) => {
+    const ally = entities.get(o);
+    if (!ally || ally.isLord) return [];
+    const s0 = advanceEntity(ally, at, world, flat);
+    const share = rep.allyShares?.[o] ?? 0;
+    const healed = addWounded(s0, rep.allyWounded?.[o] ?? {}, at);
+    return [{ e: ally, state: { ...healed, stone: healed.stone + share, totalPlundered: healed.totalPlundered + share } }];
+  });
   const { data, error: rpcError } = await admin.rpc("apply_raid_group", {
     p_season: seasonId,
     p_attacker: toJson(owner, attackerAfter),
     p_victim: toJson(victim, fight.value.victim),
-    p_allies: [],
+    p_allies: allyStates.map((x) => toJson(x.e, x.state)),
     p_attacker_touch: false,
     p_chronicle: chronicleDetails(rep, chance),
   });
@@ -3964,9 +4015,9 @@ async function sendSpy(
   // R5 : la reconnaissance d'un seigneur est gratuite.
   const cost = target?.isLord ? 0 : spyCost(current, world, now);
   if (current.stone < cost) return { error: `Il faut ${Math.ceil(cost).toLocaleString("fr-FR")} pierres pour payer un espion.` };
-  const ban = await spyBanUntil(admin, seasonId, me.id, key, now);
+  // R9 : interdiction et positions se lisent en même temps.
+  const [ban, positions] = await Promise.all([spyBanUntil(admin, seasonId, me.id, key, now), loadPositions(admin, seasonId, entities)]);
   if (ban > now) return { error: `Trop de tes espions ont été surpris là-bas : on les y attend jusqu'à ${new Date(ban).toLocaleTimeString("fr-FR", { hour: "2-digit", minute: "2-digit", timeZone: "Europe/Paris" })}.` };
-  const positions = await loadPositions(admin, seasonId, entities);
   const from = positions.get(me.id);
   const to = key === FORTRESS_INTEL ? FORTRESS_POS : hall ? hall.pos : positions.get(key);
   const distance = from && to ? mapDistance(from, to) : MAP_SPAWN_RADIUS;
@@ -4000,9 +4051,8 @@ async function placeMole(
   if (gap < MOLE_MIN_GAP) return { error: "Il faut un niveau d'espionnage au moins un cran au-dessus du sien pour poser une taupe." };
   const cost = moleCost(baseRate(current, world, now));
   if (current.stone < cost) return { error: `Il faut ${Math.ceil(cost).toLocaleString("fr-FR")} pierres pour poser une taupe.` };
-  const ban = await spyBanUntil(admin, seasonId, me.id, key, now);
+  const [ban, positions] = await Promise.all([spyBanUntil(admin, seasonId, me.id, key, now), loadPositions(admin, seasonId, entities)]);
   if (ban > now) return { error: "Trop de tes espions ont été surpris là-bas : on les y attend encore." };
-  const positions = await loadPositions(admin, seasonId, entities);
   const from = positions.get(me.id);
   const to = positions.get(key);
   const distance = from && to ? mapDistance(from, to) : MAP_SPAWN_RADIUS;

@@ -455,3 +455,20 @@ describe("espionnage, deuxième livraison", () => {
     expect(cut).toBeGreaterThan(full);
   });
 });
+
+describe("R3 : renforts emmenés en raid", () => {
+  it("partagent le butin et les pertes au prorata de leur valeur", () => {
+    const own = { milicien: 100 };
+    const allies = { b: { milicien: 100 } };
+    const victim = player({ troops: { milicien: 30 }, stone: 10 * SECURED_SECONDS + 400_000 });
+    const r = resolveRaid(player({ troops: {} }), victim, ctx({ marching: true, attackerArmy: own, allyArmies: allies }));
+    if (!r.ok) throw new Error(r.error);
+    const rep = r.value.report;
+    expect(rep.success).toBe(true);
+    expect(rep.attackerStart).toEqual({ milicien: 200 });
+    expect(rep.allyShares.b).toBe(Math.floor(rep.stolen / 2));
+    const lost = rep.attackerLost.milicien ?? 0;
+    const allyLost = rep.allyLost?.b?.milicien ?? 0;
+    expect(Math.abs(allyLost - lost / 2)).toBeLessThanOrEqual(1);
+  });
+});

@@ -397,4 +397,13 @@ export const CHANGELOG: ChangeEntry[] = [
       "📜 Rapport de combat détaillé dans la chronique (raids, forteresse, halle) : armées au départ, ce qu'il reste de chaque camp après chaque round, puis le bilan. Seuls les deux camps le voient, et tes 20 derniers combats y restent.",
     ],
   },
+  {
+    id: 47,
+    date: "12 novembre",
+    items: [
+      "🤝 Les renforts de tes alliés repartent en raid avec toi, comme promis. Dans la composition de l'armée, une case « Renforts de mes alliés », cochée par défaut, les emmène. Butin et pertes se partagent au prorata de la valeur engagée, et les blessés de chacun vont à sa propre infirmerie.",
+      "🏳️ Rappeler des renforts partis en raid avec ton allié : le rappel attend leur retour, puis ils rentrent chez toi.",
+      "🕵️ L'envoi d'un espion ou d'une taupe répond plus vite.",
+    ],
+  },
 ];

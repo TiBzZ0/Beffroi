@@ -385,6 +385,10 @@ export interface March {
   ransom: number;
   /** Ce qui s'est passé à l'arrivée, pour l'affichage. */
   outcome?: "won" | "lost" | "turned" | "recalled";
+  /** R3 : renforts d'alliés emmenés en raid, par propriétaire ; ils rentrent chez l'hôte au retour. */
+  allies?: Record<string, Army>;
+  /** R3 : alliés qui ont demandé le rappel pendant le trajet ; il s'applique au retour. */
+  recallAllies?: string[];
 }
 
 /** T2 : durée de l'aller, en millisecondes, au pas de l'unité la plus lente. */
@@ -443,8 +447,16 @@ export function landMarch(state: PlayerState, id: string): PlayerState {
   const troops = { ...state.troops } as Record<string, number>;
   for (const [u, n] of Object.entries(m.troops) as [string, number][]) if (n > 0) troops[u] = (troops[u] ?? 0) + n;
   const gain = m.loot + m.ransom;
+  // R3 : les renforts emmenés reprennent leur place chez l'hôte.
+  const stationed: PlayerState["stationed"] = { ...state.stationed };
+  for (const [owner, group] of Object.entries(m.allies ?? {})) {
+    const g = { ...(stationed[owner] ?? {}) } as Record<string, number>;
+    for (const [u, n] of Object.entries(group) as [string, number][]) if (n > 0) g[u] = (g[u] ?? 0) + n;
+    if (Object.keys(g).length > 0) stationed[owner] = g as PlayerState["stationed"][string];
+  }
   return {
     ...state,
+    stationed,
     troops: troops as PlayerState["troops"],
     stone: state.stone + gain,
     totalPlundered: state.totalPlundered + m.loot,
@@ -1224,6 +1236,8 @@ export interface RaidContext {
   stagesDone?: number;
   /** T3 : armée envoyée sur la route ; pas de repos, pertes et butin réglés sur l'armée elle-même. */
   marching?: boolean;
+  /** R3 : renforts d'alliés partis avec l'armée, par propriétaire. */
+  allyArmies?: Record<string, Army>;
   /** Tirages aléatoires entre 0 et 1 (fournis pour des tests reproductibles). */
   rng: () => number;
 }
@@ -1248,18 +1262,28 @@ export interface RaidReport {
   revenge: boolean;
   /** B7 : déroulé round par round. */
   log?: RoundLog[];
+  /** R3 : pertes et blessés des renforts emmenés, par allié. */
+  allyLost?: Record<string, Army>;
+  allyWounded?: Record<string, Army>;
   /** R10 : armées au départ. */
   attackerStart?: Army;
   defenderStart?: Army;
 }
 
-export function raidArmies(attacker: PlayerState, victim: PlayerState, ctx: Pick<RaidContext, "attackerArmy" | "defenderArmy" | "victimId" | "now" | "stagesDone">) {
+/** R3 : l'armée envoyée plus les renforts d'alliés qui l'accompagnent. */
+export function withAllies(own: Army, allies?: Record<string, Army>): Army {
+  const out = { ...own } as Record<string, number>;
+  for (const g of Object.values(allies ?? {})) for (const [id, n] of Object.entries(g) as [string, number][]) if (n > 0) out[id] = (out[id] ?? 0) + n;
+  return cleanArmy(out as Army);
+}
+
+export function raidArmies(attacker: PlayerState, victim: PlayerState, ctx: Pick<RaidContext, "attackerArmy" | "defenderArmy" | "victimId" | "now" | "stagesDone" | "allyArmies">) {
   // Le coup de pouce de la victime rend ses défenseurs plus durs à abattre.
   const sturdy = (masterActive(victim, "defense", ctx.now) ? 1 + MASTER_BONUSES.defense.value : 1) * (ctx.defenderArmy ? 1 : 1 + stagePerk(ctx.stagesDone ?? 0, "defenseHp")) * (ctx.defenderArmy ? 1 : reinforcementStrength(victim));
   const attackBonus = (hasRevenge(attacker, ctx.victimId, ctx.now) ? REVENGE_ATTACK_BONUS : 1) / (1 + (victim.catchUp ?? 0)) / sturdy;
   const opts: BattleOptions = { attackBonus, attackerLevels: attacker.levels, defenderLevels: victim.levels };
   return {
-    attack: ctx.attackerArmy ?? attackArmy(attacker),
+    attack: ctx.attackerArmy ? withAllies(ctx.attackerArmy, ctx.allyArmies) : attackArmy(attacker),
     defense: ctx.defenderArmy ?? defenseArmy(victim),
     attackBonus,
     opts,
@@ -1340,9 +1364,17 @@ export function resolveRaid(
   }
   const attackerSplit = ctx.attackerArmy ? null : splitTroopLosses(attacker, fight.attackerLost);
   const victimSplit = ctx.defenderArmy ? null : splitTroopLosses(victim, defenderLost);
+  // R3 : pertes d'une armée en route partagées entre l'hôte et les renforts emmenés, au prorata des effectifs.
+  const allyEntries = Object.entries(ctx.allyArmies ?? {}).filter(([, g]) => armySize(g) > 0);
+  const marchSplit = ctx.marching && ctx.attackerArmy && allyEntries.length > 0
+    ? splitTroopLosses({ troops: { ...ctx.attackerArmy }, stationed: Object.fromEntries(allyEntries.map(([o, g]) => [o, { ...g }])) } as unknown as PlayerState, fight.attackerLost)
+    : null;
+  const woundShare = fight.success ? WOUNDED_WINNER : WOUNDED_ATTACKER_BEATEN;
   // Infirmerie : une part de ses propres troupes tombées revient dans 30 minutes.
-  const ownLost = attackerSplit ? (attackerSplit.byOwner[""] ?? {}) : ctx.marching ? fight.attackerLost : {};
-  const attackerWounded = woundedOf(ownLost, fight.success ? WOUNDED_WINNER : WOUNDED_ATTACKER_BEATEN);
+  const ownLost = attackerSplit ? (attackerSplit.byOwner[""] ?? {}) : marchSplit ? (marchSplit.byOwner[""] ?? {}) : ctx.marching ? fight.attackerLost : {};
+  const attackerWounded = woundedOf(ownLost, woundShare);
+  const allyLost: Record<string, Army> = marchSplit ? Object.fromEntries(Object.entries(marchSplit.byOwner).filter(([o]) => o !== "")) : {};
+  const allyWounded: Record<string, Army> = Object.fromEntries(Object.entries(allyLost).map(([o, l]) => [o, woundedOf(l, woundShare)]));
   const defenderWounded = victimSplit ? woundedOf(victimSplit.byOwner[""] ?? {}, fight.success ? WOUNDED_DEFENDER_BEATEN : WOUNDED_WINNER) : {};
 
   const attackerAfter: PlayerState = {
@@ -1368,6 +1400,7 @@ export function resolveRaid(
     defenderLost: ctx.defenderArmy ? fight.defenderLost : repelledLord ? {} : defenderLost,
     attackerWounded,
     defenderWounded: repelledLord ? {} : defenderWounded,
+    ...(marchSplit ? { allyLost, allyWounded } : {}),
     ransom: 0,
     fairness: 1,
     revenge,
@@ -1391,7 +1424,11 @@ export function resolveRaid(
   });
   // Rançon : pierre créée par le jeu (pas prise à la victime), sur les défenseurs abattus avant soins et réparations.
   const ransom = playerVsPlayer ? ransomOf(fight.defenderLost, factor) : 0;
-  const allyShares = ctx.attackerArmy ? {} : lootShares(attacker, stolen);
+  const allyShares = !ctx.attackerArmy
+    ? lootShares(attacker, stolen)
+    : allyEntries.length > 0
+      ? lootShares({ troops: { ...ctx.attackerArmy }, stationed: Object.fromEntries(allyEntries.map(([o, g]) => [o, { ...g }])) } as unknown as PlayerState, stolen)
+      : {};
   const allyTotal = Object.values(allyShares).reduce((a, b) => a + b, 0);
 
   // Destruction : 5 % des bâtiments (arrondi à l'inférieur), au plus un par type,

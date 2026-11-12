@@ -319,7 +319,7 @@ export type GameAction =
   | { type: "buy"; generator: string; qty: number }
   | { type: "upgrade"; upgrade: string }
   | { type: "contribute"; amount: number }
-  | { type: "raid"; target: string; troops?: Record<string, number> }
+  | { type: "raid"; target: string; troops?: Record<string, number>; allies?: boolean }
   | { type: "rebuild"; generator: string }
   | { type: "army"; kind: "unit" | "defense"; id: string; qty: number }
   | { type: "spy"; target: string }
