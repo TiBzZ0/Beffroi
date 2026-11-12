@@ -406,4 +406,12 @@ export const CHANGELOG: ChangeEntry[] = [
       "🕵️ L'envoi d'un espion ou d'une taupe répond plus vite.",
     ],
   },
+  {
+    id: 48,
+    date: "12 novembre",
+    items: [
+      "📜 Rapports de combat aussi pour les événements : caravane, Colosse, camps de bandits, trésor, convoi et siège du beffroi. Armées au départ, round par round, puis le bilan.",
+      "🔎 Chronique : un bouton « Ce qui me concerne » ne garde que tes combats, ceux de ton alliance, les espions et sabotages chez toi, et les événements où tu étais.",
+    ],
+  },
 ];

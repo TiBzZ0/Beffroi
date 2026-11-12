@@ -1380,7 +1380,7 @@ function Raids({ snap, live, now, run }: { snap: GameSnapshot; live: PlayerState
           {players.map(row)}
         </div>
       )}
-      {view === "chronique" && <Chronicle entries={snap.chronicle ?? []} me={snap.userId} now={now} rivals={snap.rivals} alliances={snap.alliances} />}
+      {view === "chronique" && <Chronicle entries={snap.chronicle ?? []} me={snap.userId} now={now} rivals={snap.rivals} alliances={snap.alliances} myAlliance={snap.alliance?.id ?? null} />}
     </>
   );
 }
@@ -2850,13 +2850,42 @@ function EventCard({ e, now, busy, onAttack, history, me }: { e: EventView; now:
   );
 }
 
-function Chronicle({ entries, me, now, rivals, alliances = [] }: { entries: ChronicleEntry[]; me: string; now: number; rivals: RivalView[]; alliances?: AllianceSummary[] }) {
+/** Une ligne de chronique me concerne-t-elle (moi, mon alliance, un combat où j'étais) ? */
+function concernsMe(e: ChronicleEntry, me: string, myAlliance: number | null): boolean {
+  const d = e.details;
+  if (e.actorId === me || e.targetId === me) return true;
+  if (d.members?.includes(me) || (d.shares && me in d.shares) || (d.allyShares && me in d.allyShares)) return true;
+  if (myAlliance === null) return false;
+  return d.alliance === myAlliance || d.target === myAlliance || d.a === myAlliance || d.b === myAlliance || d.winner === myAlliance;
+}
+
+function Chronicle({ entries: all, me, now, rivals, alliances = [], myAlliance = null }: { entries: ChronicleEntry[]; me: string; now: number; rivals: RivalView[]; alliances?: AllianceSummary[]; myAlliance?: number | null }) {
+  const [mineOnly, setMineOnly] = useState(false);
   const allianceName = (id: number | null | undefined) => alliances.find((a) => a.id === id)?.name ?? "une alliance disparue";
   const nameOf = (id: string) => (id === me ? "toi" : (rivals.find((r) => r.id === id)?.name ?? "un allié"));
-  if (entries.length === 0) return <p className="empty">Le royaume est calme. Pour l&apos;instant…</p>;
+  const entries = mineOnly ? all.filter((e) => concernsMe(e, me, myAlliance)) : all;
+  const toggle = (
+    <div className="subtabs" role="group" aria-label="Filtre de la chronique">
+      <button className="btn" aria-pressed={!mineOnly} onClick={() => setMineOnly(false)}>
+        Tout le royaume
+      </button>
+      <button className="btn" aria-pressed={mineOnly} onClick={() => setMineOnly(true)}>
+        Ce qui me concerne
+      </button>
+    </div>
+  );
+  if (entries.length === 0)
+    return (
+      <>
+        {toggle}
+        <p className="empty">{mineOnly ? "Rien qui te concerne pour l'instant." : "Le royaume est calme. Pour l'instant…"}</p>
+      </>
+    );
   const ago = (t: number) => agoText(t, now);
   const who = (id: string | null, name: string, cap = false) => (id === me ? (cap ? "Tu" : "toi") : name);
   return (
+    <>
+    {toggle}
     <ul className="chronicle">
       {entries.map((e) => {
         let text: string;
@@ -2876,7 +2905,24 @@ function Chronicle({ entries, me, now, rivals, alliances = [] }: { entries: Chro
             .map(([id]) => nameOf(id))
             .slice(0, 4)
             .join(", ");
+          const you = e.actorId === me;
           if (d.phase === "attack") text = eventAttackText(e, me);
+          else if (d.phase === "camp")
+            text = d.success
+              ? `🏕️ ${who(e.actorId, e.actorName, true)} ${you ? "as vidé" : "a vidé"} un camp de bandits : ${formatNumber(d.stolen ?? 0)} pierres.`
+              : `🏕️ Les bandits ont repoussé ${you ? "ton armée" : `l'armée de ${e.actorName}`}.`;
+          else if (d.phase === "treasure")
+            text = d.success
+              ? `💰 ${who(e.actorId, e.actorName, true)} ${you ? "as chassé" : "a chassé"} ${e.targetId === me ? "ton armée" : `l'armée de ${e.targetName}`} du trésor.`
+              : `💰 ${e.targetId === me ? "Ton armée a" : `L'armée de ${e.targetName} a`} tenu le trésor face à ${you ? "toi" : e.actorName}.`;
+          else if (d.phase === "group")
+            text = d.event === "convoi"
+              ? d.success
+                ? `👑 L'escorte du convoi a repoussé l'embuscade (${(d.members ?? []).map(nameOf).slice(0, 4).join(", ")}).`
+                : `👑 L'embuscade a eu raison de l'escorte du convoi.`
+              : d.success
+                ? `🏰 Les défenseurs du beffroi ont tenu le siège (${(d.members ?? []).map(nameOf).slice(0, 4).join(", ")}).`
+                : "🏰 Les défenseurs du beffroi ont cédé au siège.";
           else if (d.event === "caravane")
             text = (d.stolen ?? 0) > 0 ? `🐪 La caravane marchande est repartie, allégée de ${formatNumber(d.stolen ?? 0)} pierres (${shares}).` : "🐪 La caravane marchande est repartie intacte.";
           else text = d.success ? `🗿 Le Colosse est tombé ! ${formatNumber(d.bounty ?? 0)} pierres versées à ceux qui l'ont touché (${shares}).` : "🗿 Le Colosse s'en va invaincu.";
@@ -2940,13 +2986,14 @@ function Chronicle({ entries, me, now, rivals, alliances = [] }: { entries: Chro
           <li key={e.id} className={e.targetId === me ? "hit" : undefined}>
             <span>
               {text}
-              {e.details.log && e.details.log.length > 0 && (e.kind === "raid" || e.kind === "fortress" || e.kind === "hall_siege") && <RoundsReport log={e.details.log} details={e.details} />}
+              {e.details.log && e.details.log.length > 0 && (e.kind === "raid" || e.kind === "fortress" || e.kind === "hall_siege" || e.kind === "event") && <RoundsReport log={e.details.log} details={e.details} />}
             </span>
             <span className="when">{ago(e.at)}</span>
           </li>
         );
       })}
     </ul>
+    </>
   );
 }
 

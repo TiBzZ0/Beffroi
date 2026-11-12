@@ -1023,7 +1023,7 @@ async function loadChronicle(admin: SupabaseClient, seasonId: number, entities: 
           .from("chronicle")
           .select("id, kind, actor_id, target_id, details, created_at")
           .eq("season_id", seasonId)
-          .in("kind", ["raid", "fortress", "hall_siege"])
+          .in("kind", ["raid", "fortress", "hall_siege", "event"])
           .or(`actor_id.eq.${viewer},target_id.eq.${viewer}`)
           .order("created_at", { ascending: false })
           .limit(20)
@@ -1034,7 +1034,11 @@ async function loadChronicle(admin: SupabaseClient, seasonId: number, entities: 
   const myAlliance = entities.get(viewer)?.allianceId ?? null;
   // R10 : le détail du combat (armées et rounds) n'est montré qu'aux deux camps.
   const party = (r: { actor_id: unknown; target_id: unknown; details: unknown }) =>
-    !!viewer && (r.actor_id === viewer || r.target_id === viewer || (myAlliance !== null && (r.details as { target?: unknown } | null)?.target === myAlliance));
+    !!viewer &&
+    (r.actor_id === viewer ||
+      r.target_id === viewer ||
+      (myAlliance !== null && (r.details as { target?: unknown } | null)?.target === myAlliance) ||
+      ((r.details as { members?: unknown } | null)?.members as unknown[] | undefined)?.includes(viewer) === true);
   const name = (id: string | null) => (id ? (entities.get(id)?.name ?? "Un inconnu") : "");
   // E5 : un espion surpris sans être reconnu reste anonyme, sauf pour son maître.
   const hidden = (r: { kind: unknown; actor_id: unknown; details: unknown }) => (r.kind === "spy" || r.kind === "sabotage") && (r.details as { named?: boolean } | null)?.named === false && r.actor_id !== viewer;
@@ -1614,6 +1618,9 @@ async function runEventAttack(admin: SupabaseClient, seasonId: number, me: Entit
       dealt: e.kind === "colosse" ? armyValue(fight.defenderLost) : 0,
       attackerLost: fight.attackerLost,
       defenderLost: fight.defenderLost,
+      log: fight.log,
+      attackerStart: fight.attackerStart,
+      defenderStart: fight.defenderStart,
     },
   });
   const finished = e.kind === "colosse" && armySize(army) === 0;
@@ -2828,6 +2835,8 @@ async function settleMarches(
       const healed = addWounded(aState, woundedOf(fight.attackerLost, fight.success ? WOUNDED_WINNER : WOUNDED_ATTACKER_BEATEN), at);
       const next = camps.map((x) => (x.id === c.id ? { ...x, army: fight.success ? {} : fight.defenderLeft, winner: fight.success ? owner.id : null } : x));
       const r = await write([{ e: owner, state: replace(healed, armySize(survivors) > 0 || prize > 0 ? back : null) }], { ...ev.data, camps: next });
+      // Rapport de combat de l'événement, comme pour un raid.
+      if (r === "changed") await addChronicle(admin, seasonId, { kind: "event", actor_id: owner.id, details: { phase: "camp", event: "bandits", eventId: ev.id, success: fight.success, stolen: prize, attackerLost: fight.attackerLost, defenderLost: fight.defenderLost, log: fight.log, attackerStart: fight.attackerStart, defenderStart: fight.defenderStart } });
       if (r === "changed" && !owner.isLord) {
         notify(admin, [owner.id], fight.success
           ? { title: "🏕️ Camp de bandits vidé !", body: `Ton armée rapporte ${prize.toLocaleString("fr-FR")} pierres au retour.`, tag: "event" }
@@ -2859,6 +2868,7 @@ async function settleMarches(
       ];
       const newHolder = fight.success && keepMe ? { owner: owner.id, march: m.id } : !fight.success && keepThem ? holder : null;
       const r = await write(states, { ...ev.data, holder: newHolder });
+      if (r === "changed") await addChronicle(admin, seasonId, { kind: "event", actor_id: owner.id, target_id: holderEntity.id, details: { phase: "treasure", event: "tresor", eventId: ev.id, success: fight.success, attackerLost: fight.attackerLost, defenderLost: fight.defenderLost, log: fight.log, attackerStart: fight.attackerStart, defenderStart: fight.defenderStart } });
       if (r === "changed") {
         notify(admin, [holderEntity.id], fight.success ? { title: "💰 Le trésor t'échappe !", body: `${owner.name} a chassé ton armée.`, tag: "event" } : { title: "💰 Tu tiens le trésor", body: `Ton armée a repoussé ${owner.name}.`, tag: "event" });
       }
@@ -3129,6 +3139,9 @@ async function resolveGroupEvent(
   if (r !== "changed") return r;
   if (ev.kind === "siege" && outcome === "lost") await admin.rpc("siege_damage", { p_season: seasonId, p_share: SIEGE_STAGE_LOSS, p_stages: STAGES.length });
   const ids = [...byEntity.keys()];
+  if (fight && ids.length > 0) {
+    await addChronicle(admin, seasonId, { kind: "event", actor_id: ids[0], details: { phase: "group", event: ev.kind, eventId: ev.id, success: won, members: ids, attackerLost: fight.attackerLost, defenderLost: fight.defenderLost, log: fight.log, attackerStart: fight.attackerStart, defenderStart: fight.defenderStart } });
+  }
   if (ev.kind === "convoi") {
     if (ids.length) notify(admin, ids, won ? { title: "👑 Le convoi est passé !", body: "Ton escorte rentre avec 45 minutes de ta production.", tag: "event" } : { title: "👑 Le convoi est tombé", body: "L'embuscade a eu raison de l'escorte. Tes blessés passent par l'infirmerie.", tag: "event" });
   } else if (outcome !== "left") {

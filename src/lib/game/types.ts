@@ -160,7 +160,9 @@ export interface ChronicleEntry {
     amount?: number;
     /** Espion surpris à la forteresse. */
     fortress?: boolean;
-    phase?: "start" | "end" | "attack";
+    phase?: "start" | "end" | "attack" | "camp" | "treasure" | "group";
+    /** Participants d'un combat d'événement commun (convoi, siège). */
+    members?: string[];
     a?: number;
     b?: number;
     scoreA?: number;
@@ -168,8 +170,9 @@ export interface ChronicleEntry {
     winner?: number | null;
     bounty?: number;
     alliance?: number;
+    target?: number;
     /** Événement : type et parts de chacun (pierre prise ou dégâts). */
-    event?: "caravane" | "colosse";
+    event?: "caravane" | "colosse" | "bandits" | "tresor" | "convoi" | "siege";
     eventId?: number;
     /** Colosse : pertes infligées, en valeur de pierre. */
     dealt?: number;
