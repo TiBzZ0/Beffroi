@@ -56,6 +56,23 @@ export function useGame() {
   const toastTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const watching = useRef(false);
   const [liveRivals, setLiveRivals] = useState(false);
+  // Onglet visible et joueur présent : sinon on coupe aussi le flux Realtime des rivaux (quota Supabase).
+  const [present, setPresent] = useState(true);
+  useEffect(() => {
+    const check = () => setPresent(awake());
+    const onVisibility = () => {
+      if (document.visibilityState === "visible") lastInputAt = Date.now(); // revenir sur l'onglet compte comme une action
+      check();
+    };
+    const id = setInterval(check, 30_000);
+    document.addEventListener("visibilitychange", onVisibility);
+    wakeListeners.add(check);
+    return () => {
+      clearInterval(id);
+      document.removeEventListener("visibilitychange", onVisibility);
+      wakeListeners.delete(check);
+    };
+  }, []);
   const lastLiveSync = useRef(0);
   const liveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const signatures = useRef(new Map<string, string>());
@@ -260,7 +277,7 @@ export function useGame() {
   // Rivaux en direct (seulement onglet Raids ouvert, pour ménager le quota Realtime) :
   // la pierre est mise à jour aussitôt, le reste par une synchronisation.
   useEffect(() => {
-    if (seasonId === undefined || !liveRivals) return;
+    if (seasonId === undefined || !liveRivals || !present) return;
     const supabase = getBrowserClient();
     const channel = supabase
       .channel(`players-${seasonId}`)
@@ -302,7 +319,7 @@ export function useGame() {
     return () => {
       void supabase.removeChannel(channel);
     };
-  }, [seasonId, liveRivals, scheduleLiveSync]);
+  }, [seasonId, liveRivals, present, scheduleLiveSync]);
 
   useEffect(
     () => () => {
