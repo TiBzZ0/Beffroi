@@ -17,7 +17,7 @@ Les raids, le prestige, les écus de gloire, les seigneurs voisins et les équip
 
 | Brique | Rôle |
 | --- | --- |
-| Next.js 16 (App Router) sur Vercel | Interface React, API (Route Handlers), connexion (Server Actions) |
+| Next.js 16 (App Router) sur Railway | Interface React, API (Route Handlers), connexion (Server Actions) |
 | Supabase Postgres | État des joueurs, saisons, chantier commun, journal des actions |
 | Supabase Auth | Comptes e-mail + mot de passe, pseudo dans `profiles` |
 | Supabase Realtime | Diffusion en direct de la barre du chantier |
@@ -49,30 +49,36 @@ src/
 supabase/migrations/                       schéma SQL, RLS et fonctions
 ```
 
-## Mise en ligne (tout en offres gratuites)
+## Mise en ligne
 
 ### 1. Supabase (base de données et comptes)
 
 1. Crée un compte sur [supabase.com](https://supabase.com) puis un projet (plan Free, région Europe de préférence). Garde le mot de passe de la base dans un coin.
 2. Dans **SQL Editor**, colle tout le contenu de `supabase/migrations/20261109000000_init.sql` et clique sur **Run**.
 3. Dans **Project Settings → API Keys**, récupère la **Publishable key** et la **Secret key**, et dans **Project Settings → Data API** l'**URL du projet**.
-4. Dans **Authentication → URL Configuration** (à faire après l'étape Vercel, quand tu connais l'adresse du site) :
-   - **Site URL** : `https://<ton-projet>.vercel.app`
-   - **Redirect URLs** : ajoute `https://<ton-projet>.vercel.app/auth/callback` et `http://localhost:3000/auth/callback`.
+4. Dans **Authentication → URL Configuration** (à faire après l'étape Railway, quand tu connais l'adresse du site) :
+   - **Site URL** : `https://<ton-projet>.up.railway.app`
+   - **Redirect URLs** : ajoute `https://<ton-projet>.up.railway.app/auth/callback` et `http://localhost:3000/auth/callback`.
 5. Désactive la confirmation d'e-mail : **Authentication → Sign In / Providers → Email**, décoche **Confirm email** et enregistre. On entre ainsi dans le jeu dès l'inscription. L'e-mail ne sert plus qu'au lien « Mot de passe oublié », envoyé par le service intégré de Supabase (quelques messages par heure, largement assez pour un groupe d'amis).
 
-### 2. Vercel (hébergement)
+### 2. Railway (hébergement, offre Hobby à 5 $/mois)
 
-1. Sur [vercel.com](https://vercel.com), connecte-toi avec GitHub, puis **Add New → Project** et importe le dépôt `Beffroi`.
-2. Avant de déployer, ajoute les variables d'environnement :
+Le site tourne comme un serveur Node classique (`next start`), sans quota de calcul par requête. La configuration est dans `railway.json` (construction, démarrage, sonde `/api/health`).
+
+1. Sur [railway.com](https://railway.com), connecte-toi avec GitHub et prends l'offre **Hobby**.
+2. **New Project → Deploy from GitHub repo**, choisis `Beffroi` et la branche de production.
+3. Dans le service, onglet **Variables**, ajoute :
    - `NEXT_PUBLIC_SUPABASE_URL`
    - `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY`
    - `SUPABASE_SECRET_KEY`
-3. Clique sur **Deploy**, puis reviens à l'étape 1.4 avec l'adresse obtenue.
+   - `NEXT_PUBLIC_SITE_URL` : l'adresse publique du site (voir 4)
+   - `UPSTASH_REDIS_REST_URL` et `UPSTASH_REDIS_REST_TOKEN` (voir 3, facultatif)
+4. Onglet **Settings → Networking → Generate Domain** pour obtenir `https://<ton-projet>.up.railway.app` (ou branche ton propre domaine). Dans **Settings → Region**, choisis l'Europe (au plus près de Supabase).
+5. Les variables `NEXT_PUBLIC_*` sont figées à la construction : après les avoir changées, redéploie. Reviens ensuite à l'étape 1.4 avec l'adresse obtenue.
 
 ### 3. Upstash Redis (classement et anti-spam)
 
-Le plus simple : dans le projet Vercel, onglet **Storage → Create Database → Upstash for Redis** (plan Free), et relie-le au projet. Vercel ajoute tout seul `KV_REST_API_URL` et `KV_REST_API_TOKEN`, que le code reconnaît. Redéploie ensuite.
+Crée une base **Redis** gratuite sur [upstash.com](https://upstash.com) (région Europe), puis copie son **REST URL** et son **REST Token** dans `UPSTASH_REDIS_REST_URL` et `UPSTASH_REDIS_REST_TOKEN`. Les noms `KV_REST_API_URL` / `KV_REST_API_TOKEN` (posés par l'ancienne intégration Vercel) sont aussi acceptés.
 
 Sans Redis, le jeu fonctionne quand même : le classement est lu dans Postgres et la limitation de débit est désactivée.
 
