@@ -4,7 +4,7 @@ import { SUPABASE_PUBLIC_KEY, SUPABASE_URL, supabaseConfigured } from "@/lib/env
 
 // Rafraîchit la session Supabase à chaque navigation et protège la page de jeu.
 // Les routes /api n'y passent pas : elles vérifient déjà la session elles-mêmes, et
-// un passage par le proxy doublerait chaque appel facturé par Vercel.
+// un passage par le proxy doublerait chaque appel.
 export async function proxy(request: NextRequest) {
   let response = NextResponse.next({ request });
   if (!supabaseConfigured()) return response;

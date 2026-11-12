@@ -28,7 +28,7 @@ if (typeof window !== "undefined") {
   for (const ev of ["pointerdown", "keydown", "touchstart", "wheel"]) window.addEventListener(ev, onInput, { passive: true, capture: true });
 }
 
-/** Onglet visible et joueur présent : seuls cas où l'on interroge le serveur en fond (quota Vercel). */
+/** Onglet visible et joueur présent : seuls cas où l'on interroge le serveur en fond (charge du serveur et de Supabase). */
 function awake(): boolean {
   return document.visibilityState === "visible" && Date.now() - lastInputAt < IDLE_MS;
 }
@@ -56,7 +56,7 @@ export function useGame() {
   const toastTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const watching = useRef(false);
   const [liveRivals, setLiveRivals] = useState(false);
-  // Onglet visible et joueur présent : sinon on coupe aussi le flux Realtime des rivaux (quota Supabase).
+  // Onglet visible et joueur présent : sinon on coupe aussi le flux Realtime des rivaux (charge Supabase).
   const [present, setPresent] = useState(true);
   useEffect(() => {
     const check = () => setPresent(awake());
