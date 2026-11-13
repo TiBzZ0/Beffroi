@@ -342,6 +342,7 @@ export type GameAction =
   | { type: "sync" }
   | { type: "lineage_buy"; node: string }
   | { type: "lineage_respec" }
+  | { type: "company"; op: "create" | "dissolve" | "retype" | "recruit" | "train" | "barracks" | "fort"; id?: string; unit?: string; qty?: number }
   | { type: "click"; count: number }
   | { type: "buy"; generator: string; qty: number }
   | { type: "upgrade"; upgrade: string }

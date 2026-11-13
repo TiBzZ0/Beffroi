@@ -168,6 +168,7 @@ import {
   type EventKind,
 } from "./config";
 import { armySize, armyValue, battle, cleanArmy, type Army, type BattleOptions, type Levels, type RoundLog } from "./battle";
+import { combatLevels, lockedMen, settleArmy, type ArmyWorks, type Company, type RecruitOrder } from "./companies";
 import { lin, LIN_ATTACK, LIN_ATTACK_LOSSES, LIN_CAVE_SECONDS, LIN_DONOR_TIERS, LIN_ELAN, LIN_FORT_DAMAGE, LIN_FORTUNE, LIN_GENERATOR_DISCOUNT, LIN_PRODUCTION, LIN_PROTECTED, LIN_PVP_CAP, LIN_REBUILD, LIN_RESEARCH_SPEED, LIN_REVENGE_MS, LIN_RUIN_OUTPUT, LIN_SABOTAGE, LIN_SPEED, LIN_SPY_SPEED, LIN_TROOP_DISCOUNT, LIN_WOUNDED, type LineageState } from "./lineage";
 
 export interface PlayerState {
@@ -281,6 +282,16 @@ export interface PlayerState {
   hallTithe?: number;
   /** L2 : nœuds de la Lignée achetés en renom (repart à zéro à chaque saison). */
   lineage?: LineageState;
+  /** C1 à C4 (saison 1 et suivantes) : compagnies, caserne, chantiers, fortifications en niveaux, files de recrutement. */
+  companies?: Company[];
+  barracks?: number;
+  works?: ArmyWorks;
+  fortLevels?: Partial<Record<DefenseId, number>>;
+  recruits?: RecruitOrder[];
+  /** Mes troupes postées ailleurs. Fixé par le serveur, jamais enregistré. */
+  abroad?: Army;
+  /** Modèle des compagnies en vigueur. Fixé par le serveur selon la saison, jamais enregistré. */
+  companyModel?: boolean;
 }
 
 /** Une recherche de la Forge : un type de troupe ou de fortification, ou l'espionnage. */
@@ -430,8 +441,8 @@ export function sendTroops(state: PlayerState, wanted: Army): Result<{ state: Pl
     const n = Math.floor(Number(raw));
     if (!Number.isFinite(n) || n <= 0) continue;
     if (!(UNIT_IDS as string[]).includes(id)) return { ok: false, error: "Seules les troupes partent : fortifications et gardes restent au domaine." };
-    const have = (state.troops as Record<string, number>)[id] ?? 0;
-    if (n > have) return { ok: false, error: "Tu n'as pas autant de troupes." };
+    const have = ((state.troops as Record<string, number>)[id] ?? 0) - ((lockedMen(state, state.lastUpdate) as Record<string, number>)[id] ?? 0);
+    if (n > have) return { ok: false, error: have < ((state.troops as Record<string, number>)[id] ?? 0) ? "Une compagnie à l'entraînement ne peut pas sortir." : "Tu n'as pas autant de troupes." };
     sent[id] = n;
   }
   if (armySize(sent) === 0) return { ok: false, error: "Choisis au moins une troupe à envoyer." };
@@ -739,7 +750,7 @@ export function rateAt(state: PlayerState, world: WorldState, t: number, opts: A
  * événement survenu pendant l'absence (étape du chantier terminée, fin d'incendie).
  */
 export function advance(state: PlayerState, now: number, world: WorldState, opts: AdvanceOptions = {}): PlayerState {
-  state = settleWounded(settleCurfew(settleResearch(state, now), now), now);
+  state = settleArmy(settleWounded(settleCurfew(settleResearch(state, now), now), now), now);
   if (now <= state.lastUpdate) return state;
   const start = Math.max(state.lastUpdate, now - OFFLINE_CAP_MS);
   const events = [...world.stageCompletedAt, state.burnedUntil, state.elanUntil ?? 0, state.frenzyUntil ?? 0, ...(state.masterBonuses ?? []).flatMap((m) => [m.from, m.until]), state.boostProdUntil ?? 0, state.dailyBoostUntil ?? 0, legacyStartUntil(state), ...(state.eventMods ?? []).flatMap((e) => [e.from, e.until])];
@@ -1222,6 +1233,7 @@ export function armyPrice(state: PlayerState, kind: "unit" | "defense", cost: nu
 }
 
 export function buyArmy(state: PlayerState, kind: "unit" | "defense", id: string, qty: number): Result<PlayerState> {
+  if (state.companyModel) return { ok: false, error: kind === "unit" ? "Les troupes se recrutent dans tes compagnies." : "Les fortifications se bâtissent par niveaux." };
   const def = kind === "unit" ? UNITS.find((u) => u.id === id) : DEFENSES.find((d) => d.id === id);
   if (!def) return { ok: false, error: kind === "unit" ? "Troupe inconnue." : "Fortification inconnue." };
   if (!Number.isSafeInteger(qty) || qty < 1) return { ok: false, error: "Quantité invalide." };
@@ -1381,7 +1393,7 @@ export function raidArmies(attacker: PlayerState, victim: PlayerState, ctx: Pick
   // Le coup de pouce de la victime rend ses défenseurs plus durs à abattre.
   const sturdy = (masterActive(victim, "defense", ctx.now) ? 1 + MASTER_BONUSES.defense.value : 1) * (ctx.defenderArmy ? 1 : 1 + stagePerk(ctx.stagesDone ?? 0, "defenseHp")) * (ctx.defenderArmy ? 1 : reinforcementStrength(victim) * rampartStrength(victim));
   const attackBonus = ((hasRevenge(attacker, ctx.victimId, ctx.now) ? REVENGE_ATTACK_BONUS : 1) + (ctx.attackerIsLord ? 0 : warAttack(attacker))) / (1 + (victim.catchUp ?? 0)) / sturdy;
-  const opts: BattleOptions = { ...(ctx.attackerIsLord ? {} : warOpts(attacker)), attackBonus, attackerLevels: attacker.levels, defenderLevels: victim.levels, fortune: ctx.attackerIsLord ? false : warFortune(attacker) };
+  const opts: BattleOptions = { ...(ctx.attackerIsLord ? {} : warOpts(attacker)), attackBonus, attackerLevels: combatLevels(attacker), defenderLevels: combatLevels(victim), fortune: ctx.attackerIsLord ? false : warFortune(attacker) };
   return {
     attack: ctx.attackerArmy ? withAllies(ctx.attackerArmy, ctx.allyArmies) : attackArmy(attacker),
     defense: ctx.defenderArmy ?? defenseArmy(victim),
@@ -1410,7 +1422,7 @@ export function warOpts(state: PlayerState): Pick<BattleOptions, "fortBonus" | "
 
 /** L2 : options complètes d'une attaque de joueur hors raid (forteresse, halles, événements, simulateur). */
 export function playerAttackOpts(state: PlayerState, opts: BattleOptions = {}): BattleOptions {
-  return { ...opts, ...warOpts(state), attackBonus: (opts.attackBonus ?? 1) + warAttack(state), attackerLevels: opts.attackerLevels ?? state.levels, fortune: warFortune(state) };
+  return { ...opts, ...warOpts(state), attackBonus: (opts.attackBonus ?? 1) + warAttack(state), attackerLevels: opts.attackerLevels ?? combatLevels(state), fortune: warFortune(state) };
 }
 
 /** Halle : la salle d'armes rend les renforts postés plus durs, au prorata de leur part dans la défense. */

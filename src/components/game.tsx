@@ -104,6 +104,7 @@ import { armySize, armyValue, battle, cleanArmy, estimateChance, seededRng, type
 import { worldFrom, type AwaySummary, type LotView, type AllianceSummary, type ChronicleEntry, type EventView, type GameSnapshot, type RivalView } from "@/lib/game/types";
 import { useChat, useGame, useLeaderboard, usePush, useTick } from "./use-game";
 import { BRANCHES, lineageMark, NODE_BY_ID, NODES, nodeBlocker, RANK_COST, RANK_REQUIRED, RENOWN, RENOWN_CAPPED, RESPEC_FEE, respecBlocker, spentIn, type BranchId } from "@/lib/game/lineage";
+import { allocation, BARRACKS_MAX, BARRACKS_MS, barracksBlocker, barracksCost, barracksLevel, COMPANY_CAP, fortBlocker, fortCost, fortCount, fortMs, FORT_MAX, maxCompanies, RECRUIT_MS, recruitPrice, recruitSlots, trainBlocker, trainCost, trainMs, TRAIN_MAX } from "@/lib/game/companies";
 import { MapBoard, type BoardMarch, type BoardPlace } from "./kingdom-map";
 import { CHAT_MAX_LENGTH, CHAT_REACTIONS, type ChatChannel } from "@/lib/game/chat-config";
 import { CHANGELOG } from "@/lib/game/changelog";
@@ -1605,7 +1606,7 @@ function Army({ snap, live, now, run }: { snap: GameSnapshot; live: PlayerState;
             riposte en face. Une partie des troupes perdues revient de l&apos;infirmerie au bout de 30 minutes.
           </Info>
           <TributeGauge live={live} now={now} />
-          <Garrison live={live} run={run} />
+          {live.companyModel ? <Companies live={live} now={now} base={baseRate(live, worldFrom(snap.worksite), now)} run={run} /> : <Garrison live={live} run={run} />}
           <CurfewCard live={live} now={now} run={run} />
         </>
       )}
@@ -4191,6 +4192,171 @@ function RoundsReport({ log, open = false, details }: { log: NonNullable<Chronic
         </p>
       )}
     </details>
+  );
+}
+
+/** C1 à C4 : caserne, compagnies, recrutement, entraînement et fortifications en niveaux (saison 1 et suivantes). */
+export function Companies({ live, now, base, run }: { live: PlayerState; now: number; base: number; run: ReturnType<typeof useGame>["run"] }) {
+  const [busy, setBusy] = useState(false);
+  const [open, setOpen] = useState<string | null>(null);
+  const [newUnit, setNewUnit] = useState<string>("piquier");
+  const act = async (a: Extract<Parameters<typeof run>[0], { type: "company" }>) => {
+    setBusy(true);
+    await run(a);
+    setBusy(false);
+  };
+  const alloc = allocation(live);
+  const list = live.companies ?? [];
+  const lv = barracksLevel(live);
+  const works = live.works ?? {};
+  const unitOf = (id: string) => UNITS.find((u) => u.id === id)!;
+  return (
+    <>
+      <div className="block-head">
+        <h3 className="section-title">🏯 Caserne niv. {lv}</h3>
+        <Info>
+          Ton armée se compose de compagnies : une compagnie, un seul type de troupe, un effectif maximal et un entraînement de 0 à 10 (+8 % d&apos;attaque et
+          de points de vie par niveau, en plus de la Forge). Les hommes se paient tout de suite mais arrivent un par un dans la file de la caserne. Une
+          compagnie à l&apos;entraînement ne peut pas sortir. La caserne ajoute une compagnie par niveau (8 au plus), une deuxième file au niveau 3 et une
+          troisième au niveau 6. Les fortifications se bâtissent par niveaux et se relèvent toujours après une bataille.
+        </Info>
+      </div>
+      <div className="row">
+        <div className="row-icon" aria-hidden>
+          🏯
+        </div>
+        <div>
+          <div className="row-title">
+            {list.length}/{maxCompanies(live)} compagnies · {recruitSlots(live)} file{recruitSlots(live) > 1 ? "s" : ""}
+          </div>
+          <div className="row-desc num">
+            {works.barracks ? `🔨 niveau ${works.barracks.level} dans ${countdown(works.barracks.until - now)}` : lv >= BARRACKS_MAX ? "Niveau maximal" : `Niveau ${lv + 1} : ${countdown(BARRACKS_MS[lv + 1])} de travaux`}
+          </div>
+        </div>
+        {lv < BARRACKS_MAX && !works.barracks && (
+          <Btn className="btn btn-primary" busy={busy} reason={barracksBlocker(live, base)} onClick={() => void act({ type: "company", op: "barracks" })}>
+            🔨 Niv. {lv + 1}
+            <span className="cost num">{formatNumber(barracksCost(live, base))} 🪨</span>
+          </Btn>
+        )}
+      </div>
+      <div className="list">
+        {list.map((c, i) => {
+          const u = unitOf(c.unit);
+          const a = alloc.get(c.id) ?? { men: 0, home: 0, queued: 0 };
+          const cap = COMPANY_CAP[c.unit];
+          const room = Math.max(0, cap - a.men - a.queued);
+          const training = c.trainUntil > now;
+          const isOpen = open === c.id;
+          return (
+            <div key={c.id} className="row company">
+              <div className="row-icon" aria-hidden>
+                {u.icon}
+              </div>
+              <div>
+                <div className="row-title row-title-one">
+                  <span className="row-name">
+                    {i + 1}. {u.plural}
+                  </span>
+                  <span className="badge">⭐ {c.train}</span>
+                </div>
+                <div className="bar bar-thin" aria-hidden>
+                  <span style={{ width: `${Math.min(100, (a.men / cap) * 100)}%` }} />
+                </div>
+                <div className="row-desc num one-line">
+                  {formatNumber(a.men)}/{formatNumber(cap)}
+                  {a.home < a.men ? ` · 🚶 ${formatNumber(a.men - a.home)} dehors` : ""}
+                  {a.queued > 0 ? ` · ⏳ +${formatNumber(a.queued)}` : ""}
+                  {training ? ` · 🎯 ${countdown(c.trainUntil - now)}` : ""}
+                </div>
+                {isOpen && (
+                  <div className="company-more">
+                    <Btn className="btn btn-small" busy={busy} reason={c.trainUntil > 0 ? "Elle est à l'entraînement." : null} onClick={() => void act({ type: "company", op: "dissolve", id: c.id })}>
+                      ✖ Dissoudre
+                    </Btn>
+                    <select className="input" aria-label="Changer de type" value="" disabled={busy} onChange={(e) => e.target.value && void act({ type: "company", op: "retype", id: c.id, unit: e.target.value })}>
+                      <option value="">Changer de type…</option>
+                      {UNITS.filter((x) => x.id !== c.unit).map((x) => (
+                        <option key={x.id} value={x.id}>
+                          {x.icon} {x.plural}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                )}
+              </div>
+              <div className="row-actions">
+                {room > 0 && (
+                  <Btn className="btn btn-primary btn-small" busy={busy} reason={recruitPrice(c.unit, room) > live.stone ? "Pas assez de pierre." : null} onClick={() => void act({ type: "company", op: "recruit", id: c.id, qty: room })}>
+                    +{formatNumber(room)}
+                    <span className="cost num">{countdown(room * RECRUIT_MS[c.unit])}</span>
+                  </Btn>
+                )}
+                {c.train < TRAIN_MAX && !training && (
+                  <Btn className="btn btn-small" busy={busy} reason={trainBlocker(live, c.id, base, now)} onClick={() => void act({ type: "company", op: "train", id: c.id })}>
+                    🎯 ⭐{c.train + 1}
+                    <span className="cost num">
+                      {formatNumber(trainCost(c, base))} · {countdown(trainMs(c))}
+                    </span>
+                  </Btn>
+                )}
+                <button className="btn btn-ghost btn-small company-more-btn" aria-expanded={isOpen} aria-label="Plus" onClick={() => setOpen(isOpen ? null : c.id)}>
+                  ⋯
+                </button>
+              </div>
+            </div>
+          );
+        })}
+      </div>
+      {list.length < maxCompanies(live) && (
+        <div className="reinforce">
+          <select className="input" value={newUnit} onChange={(e) => setNewUnit(e.target.value)} aria-label="Type de la nouvelle compagnie">
+            {UNITS.map((u) => (
+              <option key={u.id} value={u.id}>
+                {u.icon} {u.plural} ({formatNumber(COMPANY_CAP[u.id])})
+              </option>
+            ))}
+          </select>
+          <button className="btn btn-primary" disabled={busy} onClick={() => void act({ type: "company", op: "create", unit: newUnit })}>
+            ➕ Compagnie
+          </button>
+        </div>
+      )}
+      <div className="block-head">
+        <h3 className="section-title">🧱 Fortifications</h3>
+      </div>
+      <div className="list">
+        {DEFENSES.map((d) => {
+          const level = live.fortLevels?.[d.id] ?? 0;
+          const building = works.fort?.id === d.id;
+          return (
+            <div key={d.id} className="row">
+              <div className="row-icon" aria-hidden>
+                {d.icon}
+              </div>
+              <div>
+                <div className="row-title row-title-one">
+                  <span className="row-name">{d.name}</span>
+                  <span className="badge">niv. {level}</span>
+                </div>
+                <div className="row-desc num one-line">
+                  {formatNumber(fortCount(d.id, level))} · ⚔️ {d.attack} · ❤️ {d.hp}
+                  {building ? ` · 🔨 niv. ${works.fort!.level} dans ${countdown(works.fort!.until - now)}` : ""}
+                </div>
+              </div>
+              {level < FORT_MAX && !building && (
+                <Btn className="btn btn-primary btn-small" busy={busy} reason={fortBlocker(live, d.id, base)} onClick={() => void act({ type: "company", op: "fort", unit: d.id })}>
+                  🔨 Niv. {level + 1}
+                  <span className="cost num">
+                    {formatNumber(fortCost(level, base))} · {countdown(fortMs(level))}
+                  </span>
+                </Btn>
+              )}
+            </div>
+          );
+        })}
+      </div>
+    </>
   );
 }
 

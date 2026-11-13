@@ -2419,3 +2419,26 @@ use.g-enemy {
 .lin-gauges { justify-content: flex-start; }
 .lin-head .btn { white-space: nowrap; }
 .lin-head .btn .cost { display: inline; margin-left: 4px; }
+
+/* Compagnies (saison 1) */
+.company .row-actions {
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+.company-more {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 6px;
+}
+.company-more select {
+  flex: 1 1 140px;
+  min-width: 0;
+}
+.company .badge {
+  white-space: nowrap;
+}
+.row .btn.company-more-btn {
+  min-width: 0;
+  padding-block: 2px;
+}
