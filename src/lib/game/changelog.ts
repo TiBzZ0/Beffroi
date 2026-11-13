@@ -459,4 +459,12 @@ export const CHANGELOG: ChangeEntry[] = [
       "🎲 Fortune de la bataille : chaque bataille tire une fois une chance entre −20 % et +20 % sur les dégâts de l'attaquant, en plus du hasard de chaque round. Une armée un peu plus forte que la défense n'est plus sûre de gagner, une armée un peu plus faible peut tenter sa chance. Les chances affichées et le simulateur en tiennent compte. Pas de fortune pour les raids des seigneurs ni pour le tournoi.",
     ],
   },
+  {
+    id: 54,
+    date: "13 novembre",
+    items: [
+      "🧭 Nouveau tableau des mouvements sous la barre du haut, visible depuis tous les onglets : tes armées, tes espions, tes taupes et les attaques qui approchent, avec le compte à rebours à la seconde, l'heure d'arrivée, l'heure de retour, le butin rapporté et le bouton Rappeler. Il se replie sur une ligne.",
+      "⏱️ En composant une armée, tu vois la durée exacte de l'aller, l'heure d'arrivée, l'heure de retour et ce qui fixe la vitesse.",
+    ],
+  },
 ];
