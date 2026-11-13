@@ -2283,3 +2283,64 @@ use.g-enemy {
 .row { padding: 8px 10px; }
 .report.unread { border-left-color: var(--accent); }
 .section-title { border-left: 4px solid var(--dom); padding-left: 8px; }
+
+/* U2/U1 : version serrée, une ligne quand ça tient */
+.moves-short { display: none; }
+.inbox-cats { flex-wrap: nowrap; overflow-x: auto; align-items: center; scrollbar-width: none; }
+.inbox-cats .btn { flex: 0 0 auto; }
+.inbox-all { margin-left: auto; }
+.report-line {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 2px 8px;
+  padding: 5px 8px;
+}
+.report-icon { flex: 0 0 22px; }
+.report-title { flex: 1 1 40%; min-width: 0; }
+.report-chips { margin-left: auto; flex-wrap: wrap; }
+.report-time { flex: 0 0 auto; }
+@media (max-width: 720px) {
+  .moves-long { display: none; }
+  .moves-short { display: inline; }
+  .moves-head { padding: 6px 10px; }
+  .inbox-word { display: none; }
+  .report-line { display: flex; grid-template-areas: none; padding: 4px 6px; font-size: 0.92em; }
+  .report-icon, .report-title, .report-time, .report-chips { grid-area: auto; }
+  .report-chips { justify-content: flex-end; }
+  .move {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 2px 8px;
+    padding: 4px 6px;
+  }
+  .move-icon { flex: 0 0 22px; grid-area: auto; }
+  .move-route { flex: 0 1 auto; min-width: 0; grid-area: auto; }
+  .move-troops { flex: 1 1 auto; min-width: 0; grid-area: auto; font-size: 0.82em; }
+  .move-time { flex: 0 0 auto; grid-area: auto; flex-direction: row; gap: 6px; align-items: baseline; }
+  .move-action { grid-area: auto; }
+  .move-action:empty { display: none; }
+}
+.report-title { flex-basis: 30%; }
+@media (max-width: 720px) {
+  .move {
+    display: grid;
+    grid-template-columns: 22px minmax(0, 1fr) auto;
+    grid-template-areas: "icon route count" "icon troops clock" "icon troops action";
+    gap: 0 8px;
+  }
+  .move-icon { grid-area: icon; }
+  .move-route { grid-area: route; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .move-time { display: contents; }
+  .move-time strong { grid-area: count; text-align: right; }
+  .move-time small { grid-area: clock; text-align: right; color: var(--ink-soft); font-size: 0.75em; }
+  .move-troops { grid-area: troops; align-self: start; }
+  .move-action { grid-area: action; justify-self: end; }
+}
+.report-title { flex: 0 1 auto; max-width: 100%; }
+.report-meta { margin-left: auto; display: flex; align-items: center; gap: 6px; flex-wrap: nowrap; }
+.report-meta .report-chips { flex-wrap: nowrap; margin-left: 0; }
+@media (max-width: 720px) {
+  .report-line { padding: 4px 6px; }
+}

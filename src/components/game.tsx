@@ -2055,9 +2055,13 @@ export function Movements({ snap, live, now, run }: { snap: GameSnapshot; live: 
   return (
     <section className={`moves${attacks > 0 ? " moves-alert" : ""}`} aria-label="Mouvements">
       <button className="moves-head" aria-expanded={open} onClick={toggle}>
-        <span>
+        <span className="moves-long">
           🧭 {rows.length} mouvement{rows.length > 1 ? "s" : ""} · prochain <span className="num">{countdown(next - now)}</span>
           {attacks > 0 ? <strong className="moves-warn"> · ⚠️ {attacks} attaque{attacks > 1 ? "s" : ""}</strong> : null}
+        </span>
+        <span className="moves-short num">
+          🧭 {rows.length} · {countdown(next - now)}
+          {attacks > 0 ? <strong className="moves-warn"> · ⚠️ {attacks}</strong> : null}
         </span>
         <span aria-hidden>{open ? "▴" : "▾"}</span>
       </button>
@@ -3269,7 +3273,7 @@ function reportOf(e: ChronicleEntry, me: string, myAlliance: number | null, riva
   const attacker = e.actorId === me;
   const lossChip = (lost?: Record<string, number>) => {
     const v = worth(lost);
-    if (v > 0) chips.push({ t: `−${short(v)} pertes`, tone: "loss" });
+    if (v > 0) chips.push({ t: `💀 −${short(v)}`, tone: "loss" });
   };
   if (e.kind === "raid") {
     icon = "⚔️";
@@ -3406,10 +3410,10 @@ export function Inbox({ snap, live, now, run, userId }: { snap: GameSnapshot; li
   return (
     <>
       <div className="subtabs" role="group" aria-label="Messages">
-        <button className="btn" aria-pressed={part === "rapports"} onClick={() => setPart("rapports")}>
+        <button className="btn btn-small" aria-pressed={part === "rapports"} onClick={() => setPart("rapports")}>
           📜 Rapports
         </button>
-        <button className="btn" aria-pressed={part === "discussion"} onClick={() => setPart("discussion")}>
+        <button className="btn btn-small" aria-pressed={part === "discussion"} onClick={() => setPart("discussion")}>
           💬 Discussion
         </button>
       </div>
@@ -3421,16 +3425,15 @@ export function Inbox({ snap, live, now, run, userId }: { snap: GameSnapshot; li
             {INBOX_CATEGORIES.map((c) => {
               const n = unread(c);
               return (
-                <button key={c} className="btn btn-small" aria-pressed={cat === c} onClick={() => setCat(c)}>
-                  {INBOX_LABELS[c]}
+                <button key={c} className="btn btn-small" aria-pressed={cat === c} onClick={() => setCat(c)} title={INBOX_LABELS[c].slice(INBOX_LABELS[c].indexOf(" ") + 1)}>
+                  <span aria-hidden>{INBOX_LABELS[c].split(" ")[0]}</span>
+                  <span className="inbox-word"> {INBOX_LABELS[c].slice(INBOX_LABELS[c].indexOf(" ") + 1)}</span>
                   {n > 0 && <span className="inbox-count num">{n}</span>}
                 </button>
               );
             })}
-          </div>
-          <div className="inbox-tools">
-            <button className="btn btn-ghost btn-small" disabled={unread(cat) === 0} onClick={() => void run({ type: "inbox_read", category: cat })}>
-              Tout marquer lu
+            <button className="btn btn-ghost btn-small inbox-all" disabled={unread(cat) === 0} onClick={() => void run({ type: "inbox_read", category: cat })}>
+              Tout lu
             </button>
           </div>
           {list.length === 0 ? (
@@ -3447,14 +3450,16 @@ export function Inbox({ snap, live, now, run, userId }: { snap: GameSnapshot; li
                         {r.icon}
                       </span>
                       <span className="report-title">{r.title}</span>
-                      <span className="report-chips">
-                        {r.chips.map((c, i) => (
-                          <span key={i} className={`chip num${c.tone ? ` chip-${c.tone}` : ""}`}>
-                            {c.t}
-                          </span>
-                        ))}
+                      <span className="report-meta">
+                        <span className="report-chips">
+                          {r.chips.map((c, i) => (
+                            <span key={i} className={`chip num${c.tone ? ` chip-${c.tone}` : ""}`}>
+                              {c.t}
+                            </span>
+                          ))}
+                        </span>
+                        <span className="report-time num">{clockShort(r.at, now)}</span>
                       </span>
-                      <span className="report-time num">{clockShort(r.at, now)}</span>
                     </button>
                     {open === r.key && (
                       <div className="report-body">
