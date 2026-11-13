@@ -500,4 +500,13 @@ export const CHANGELOG: ChangeEntry[] = [
       "⚔️ Dans le détail d'un rapport : Carte (la cible sur la carte), Revanche, Renvoyer (la même armée, prête à partir) et Espionner. Les pertes s'affichent en valeur.",
     ],
   },
+  {
+    id: 59,
+    date: "13 novembre",
+    items: [
+      "🧭 Toucher un nom dans le tableau des mouvements ouvre sa fiche sur la carte ; toucher une armée sur la carte ouvre sa ligne dans le tableau.",
+      "✂️ Onglets Armée et Carte allégés : boutons courts, butin et rançon en pastilles, Espionnage dans son propre sous-onglet. Un bouton grisé dit pourquoi quand tu le touches.",
+      "🏁 Les écus de clôture de saison arrivent aussi en rapport, catégorie Chantier.",
+    ],
+  },
 ];

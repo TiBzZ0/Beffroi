@@ -1435,7 +1435,7 @@ function Status({ state, now }: { state: PlayerState; now: number }) {
 }
 
 type RaidView = "seigneurs" | "joueurs";
-type ArmyView = "garnison" | "forge";
+type ArmyView = "garnison" | "forge" | "espionnage";
 
 /** B8 : onglet Armée, avec la garnison et la Forge, sorties de l'onglet Raids. */
 function Army({ snap, live, now, run }: { snap: GameSnapshot; live: PlayerState; now: number; run: ReturnType<typeof useGame>["run"] }) {
@@ -1443,12 +1443,13 @@ function Army({ snap, live, now, run }: { snap: GameSnapshot; live: PlayerState;
   const views: [ArmyView, string][] = [
     ["garnison", "Garnison"],
     ["forge", live.research.some((r) => r.endsAt > now) ? `Forge ⏳${live.research.length}` : "Forge"],
+    ["espionnage", "Espionnage"],
   ];
   return (
     <>
       <div className="subtabs" role="group" aria-label="Sections de l'armée">
         {views.map(([id, label]) => (
-          <button key={id} className="btn" aria-pressed={view === id} onClick={() => setView(id)}>
+          <button key={id} className="btn btn-small" aria-pressed={view === id} onClick={() => setView(id)}>
             {label}
           </button>
         ))}
@@ -1461,11 +1462,11 @@ function Army({ snap, live, now, run }: { snap: GameSnapshot; live: PlayerState;
             riposte en face. Une partie des troupes perdues revient de l&apos;infirmerie au bout de 30 minutes.
           </Info>
           <TributeGauge live={live} now={now} />
-          <Spies snap={snap} live={live} now={now} run={run} />
           <Garrison live={live} run={run} />
           <CurfewCard live={live} now={now} run={run} />
         </>
       )}
+      {view === "espionnage" && <Spies snap={snap} live={live} now={now} run={run} />}
       {view === "forge" && <Forge live={live} now={now} run={run} stagesDone={stagesDoneAt(worldFrom(snap.worksite), now)} base={baseRate(live, worldFrom(snap.worksite), now)} />}
     </>
   );
@@ -1630,9 +1631,9 @@ function CurfewCard({ live, now, run }: { live: PlayerState; now: number; run: R
         Pendant 8 heures par jour, tu ne peux ni attaquer ni être attaqué, ni saboter ni être saboté, seigneurs et guerre compris. Ta production et ta dîme continuent. Un changement prend effet 24 heures plus tard.
       </Info>
       <label className="note" htmlFor="curfew">
-        Début de la plage (heure locale) :{" "}
+        Plage :{" "}
         <select id="curfew" className="input" disabled={busy} value={localHour} onChange={(e) => pick(e.target.value)}>
-          <option value="">aucun couvre-feu</option>
+          <option value="">aucune</option>
           {Array.from({ length: 24 }, (_, h) => (
             <option key={h} value={h}>
               {h} h à {(h + CURFEW_MINUTES / 60) % 24} h
@@ -1641,8 +1642,8 @@ function CurfewCard({ live, now, run }: { live: PlayerState; now: number; run: R
         </select>
       </label>
       <p className="note">
-        {current === null ? "Aucun couvre-feu en vigueur." : `En vigueur : ${span(current)}.`}
-        {next ? ` À partir du ${new Date(next.from).toLocaleString("fr-FR", { weekday: "long", hour: "2-digit", minute: "2-digit" })} : ${next.start === null ? "aucun couvre-feu" : span(next.start)}.` : ""}
+        {current === null ? "Aucun en vigueur" : `En vigueur ${span(current)}`}
+        {next ? ` · dès ${new Date(next.from).toLocaleString("fr-FR", { weekday: "short", hour: "2-digit", minute: "2-digit" })} : ${next.start === null ? "aucun" : span(next.start)}` : ""}
       </p>
     </div>
   );
@@ -1692,7 +1693,6 @@ function RivalRow({
   // Mêmes règles que le serveur : plafond PvP, coefficient d'équité, stock à l'abri des étapes.
   const loot = lootOf(stone, r.rate, r.revenge, { lord: r.isLord, cap: r.lootCap, factor: r.fairness, stagesDone, extraSecured: r.lootSafe, securedFactor: r.granaryCut ? 0.5 : 1 });
   const shielded = r.shieldUntil > now;
-  const blocked = r.blocker !== null;
   const pct = Math.round(r.chance * 100);
   return (
     <div className="row" ref={rowRef}>
@@ -1728,22 +1728,31 @@ function RivalRow({
               ? `🕵️ ${armyIcons(r.army)} (rapport encore ${duration(r.intelUntil - now)})`
               : armyIcons(r.army)}
         </div>
-        {r.rumorUnmasked && <div className="row-desc">🗣️ Rumeur démasquée : ton espion a vu son armée réelle, pas celle qu&apos;il fait courir.</div>}
-        {r.granaryCut && <div className="row-desc">🧨 Grenier saboté : la moitié seulement de son stock est à l&apos;abri.</div>}
-        {(r.moleUntil ?? 0) > now && <div className="row-desc num">🐀 Ta taupe est chez lui encore {duration((r.moleUntil ?? 0) - now)}.</div>}
+        {(r.rumorUnmasked || r.granaryCut || (r.moleUntil ?? 0) > now) && (
+          <div className="row-desc num">
+            {[r.rumorUnmasked ? "🗣️ rumeur démasquée" : null, r.granaryCut ? "🧨 grenier saboté" : null, (r.moleUntil ?? 0) > now ? `🐀 ${duration((r.moleUntil ?? 0) - now)}` : null].filter(Boolean).join(" · ")}
+          </div>
+        )}
         {intel && <SpyReport r={r} now={now} />}
-        <div className="row-desc">
-          {r.blocker ??
-            [
-              r.stoneKnown === false ? "Butin inconnu (il faut un espion plus fort que sa garde)" : loot > 0 ? `Butin estimé : ${formatNumber(loot)} pierres` : "Rien à piller pour l'instant",
-              (r.ransom ?? 0) > 0 ? `rançon ≈ ${formatNumber(r.ransom ?? 0)}` : null,
-              (r.fairness ?? 1) < 1
-                ? `équité ×${(r.fairness ?? 1).toLocaleString("fr-FR", { maximumFractionDigits: 2 })} (${r.isLord ? ((r.fairness ?? 1) < 0.5 ? "trop petit pour toi" : "seigneur plus petit que toi") : "cible plus petite"})`
-                : null,
-              r.isLord && r.lootCap !== undefined && r.stoneKnown !== false && loot >= Math.floor(r.lootCap) ? "plafonné par ton tribut des seigneurs" : null,
-            ]
-              .filter(Boolean)
-              .join(" · ")}
+        <div className="report-chips rival-chips">
+          <span className="chip num chip-gain" title={r.stoneKnown === false ? "Il faut un espion plus fort que sa garde" : "Butin estimé"}>
+            💰 {r.stoneKnown === false ? "?" : formatNumber(loot)}
+          </span>
+          {(r.ransom ?? 0) > 0 && (
+            <span className="chip num" title="Rançon estimée">
+              rançon {formatNumber(r.ransom ?? 0)}
+            </span>
+          )}
+          {(r.fairness ?? 1) < 1 && (
+            <span className="chip num" title={r.isLord ? "Seigneur plus petit que toi : butin réduit" : "Cible plus petite : butin réduit"}>
+              ⚖️ ×{(r.fairness ?? 1).toLocaleString("fr-FR", { maximumFractionDigits: 2 })}
+            </span>
+          )}
+          {r.isLord && r.lootCap !== undefined && r.stoneKnown !== false && loot >= Math.floor(r.lootCap) && (
+            <span className="chip" title="Plafonné par ton tribut des seigneurs">
+              🏰 tribut
+            </span>
+          )}
         </div>
         {composing && me && (
           <SendArmy
@@ -1765,63 +1774,62 @@ function RivalRow({
         {sim !== null && me && <Simulator me={me} army={(chosen ?? me.troops) as Army} r={r} intel={intel} seed={sim} onReplay={() => setSim(sim + 1)} onClose={() => setSim(null)} />}
       </div>
       <div className="row-actions">
-        <button className="btn btn-primary" disabled={blocked || busy !== null} onClick={() => (me ? setComposing(!composing) : onRaid(r.id))}>
-          Raider
-          <span className="cost num">{r.chance >= 0 ? `${pct} % de succès` : r.chanceWord ? `chance ${r.chanceWord}` : "chance cachée 🌫️"}</span>
-        </button>
+        <Btn className="btn btn-primary" reason={r.blocker} busy={busy !== null} onClick={() => (me ? setComposing(!composing) : onRaid(r.id))}>
+          ⚔️ Raid
+          <span className="cost num">{r.chance >= 0 ? `${pct} %` : r.chanceWord ? r.chanceWord : "🌫️"}</span>
+        </Btn>
         {me && sim === null && r.chance >= 0 && (
           <button className="btn" onClick={() => setSim(1)} title="Joue une bataille pour de faux avec ton armée contre celle que tu vois en face.">
             🎲 Simuler
           </button>
         )}
         {!r.allied && !(r.isLord && r.difficulty === 1) && (
-          <button
-            className="btn"
-            disabled={busy !== null || (!r.isLord && myStone < spyPrice)}
+          <Btn
+            busy={busy !== null}
+            reason={!r.isLord && myStone < spyPrice ? "Pas assez de pierre." : null}
             onClick={() => onSpy(r.id)}
             title="L'espion part sur la route ; son rapport dure 1 h et profite à ton alliance. Ce qu'il voit dépend de l'écart entre ton niveau d'espionnage et celui de la cible."
           >
-            🕵️ Espionner
+            🕵️ Espion
             <span className="cost num">
               {r.isLord ? "gratuit" : `${formatNumber(spyPrice)} 🪨`} · {countdown(spyTravelMs(distance ?? MAP_SPAWN_RADIUS))}
-              {r.spyGap !== null && r.spyGap !== undefined ? ` · repéré ${Math.round(spyRisk(r.spyGap, distance ?? MAP_SPAWN_RADIUS) * 100)} %` : ""}
+              {r.spyGap !== null && r.spyGap !== undefined ? ` · 👁️ ${Math.round(spyRisk(r.spyGap, distance ?? MAP_SPAWN_RADIUS) * 100)} %` : ""}
             </span>
-          </button>
+          </Btn>
         )}
         {onMole && r.moleUntil !== undefined && r.moleUntil <= now && (
-          <button
-            className="btn"
-            disabled={busy !== null || myStone < (r.molePrice ?? 0)}
+          <Btn
+            busy={busy !== null}
+            reason={myStone < (r.molePrice ?? 0) ? "Pas assez de pierre." : null}
             onClick={() => onMole(r.id)}
             title="La taupe s'installe tout de suite pour 2 h : elle te prévient quand il fait partir une armée, perd son bouclier, entre ou sort de couvre-feu. Il faut un niveau d'espionnage au moins un cran au-dessus du sien. Elle peut être démasquée, à demi-risque, à chaque alerte."
           >
             🐀 Taupe
             <span className="cost num">{formatNumber(r.molePrice ?? 0)} 🪨</span>
-          </button>
+          </Btn>
         )}
         {r.sabotageBlocker !== undefined && (
-          <button className="btn" aria-expanded={aiming} disabled={busy !== null || myStone < sabotagePrice} onClick={() => setAiming(!aiming)} title="Choisis ce que vise ton saboteur. La réussite dépend de l'écart de niveau d'espionnage ; raté, il est toujours repéré.">
-            🧨 Saboter
+          <Btn busy={busy !== null} reason={myStone < sabotagePrice ? "Pas assez de pierre." : null} onClick={() => setAiming(!aiming)} title="Choisis ce que vise ton saboteur. La réussite dépend de l'écart de niveau d'espionnage ; raté, il est toujours repéré.">
+            🧨 Sabotage
             <span className="cost num">{formatNumber(sabotagePrice)} 🪨</span>
-          </button>
+          </Btn>
         )}
       </div>
       {aiming && r.sabotageBlockers && (
         <div className="row-actions">
           {SABOTAGE_AIMS.map(([aim, label, desc]) => (
-            <button
+            <Btn
               key={aim}
-              className="btn"
-              disabled={busy !== null || r.sabotageBlockers![aim] !== null || myStone < sabotagePrice}
-              title={r.sabotageBlockers![aim] ?? desc}
+              busy={busy !== null}
+              reason={r.sabotageBlockers![aim] ?? (myStone < sabotagePrice ? "Pas assez de pierre." : null)}
+              title={desc}
               onClick={() => {
                 setAiming(false);
                 onSabotage(r.id, aim);
               }}
             >
               {label}
-              <span className="cost num">{desc}</span>
-            </button>
+            </Btn>
           ))}
         </div>
       )}
@@ -1983,6 +1991,38 @@ function sumGroups(groups: Record<string, number>[]): Record<string, number> {
   const out: Record<string, number> = {};
   for (const g of groups) for (const [id, n] of Object.entries(g)) if (n > 0) out[id] = (out[id] ?? 0) + n;
   return out;
+}
+
+/** U5 : bouton court ; grisé, il dit pourquoi au toucher au lieu de l'écrire en permanence. */
+function Btn({ reason, className = "btn", onClick, children, title, busy = false }: { reason?: string | null; className?: string; onClick: () => void; children: React.ReactNode; title?: string; busy?: boolean }) {
+  const [why, setWhy] = useState(false);
+  if (reason) {
+    return (
+      <span className="btn-wrap">
+        <button
+          className={`${className} is-blocked`}
+          aria-disabled="true"
+          title={reason}
+          onClick={() => {
+            setWhy(true);
+            setTimeout(() => setWhy(false), 3500);
+          }}
+        >
+          {children}
+        </button>
+        {why && (
+          <span className="why" role="status">
+            {reason}
+          </span>
+        )}
+      </span>
+    );
+  }
+  return (
+    <button className={className} disabled={busy} onClick={onClick} title={title}>
+      {children}
+    </button>
+  );
 }
 
 /** U3 : explication repliée derrière un ⓘ. */
@@ -2180,43 +2220,43 @@ function Spies({ snap, live, now, run }: { snap: GameSnapshot; live: PlayerState
     <div className="spies">
       <h3 className="section-title">🕵️ Espionnage · niveau {live.spyLevel ?? 0}</h3>
       {moles.length === 0 ? (
-        <p className="note">Aucune taupe en place. Les espions en route sont dans le tableau des mouvements ; le niveau se monte à la Forge.</p>
+        <p className="note">🐀 Aucune taupe.</p>
       ) : (
         <ul className="num">
           {moles.map((m) => (
             <li key={m.id}>
-              🐀 taupe chez {nameOf(m.target)} : encore {duration(m.until - now)}
+              🐀 {nameOf(m.target)} · {duration(m.until - now)}
             </li>
           ))}
         </ul>
       )}
       <div className="row-actions">
-        <button
-          className="btn"
-          disabled={busy || live.stone < counterCost(base)}
+        <Btn
+          busy={busy}
+          reason={live.stone < counterCost(base) ? "Pas assez de pierre." : null}
           onClick={() => act({ type: "counter" })}
           title="Pendant 6 h, quiconque espionne, sabote ou pose une taupe chez toi a deux crans de moins. Un espion repéré chez toi rapporte des chiffres faussés. Racheter prolonge."
         >
-          🛡️ Contre-espionnage
-          <span className="cost num">{counter ? `actif ${duration((live.counterUntil ?? 0) - now)} · ` : ""}{formatNumber(counterCost(base))} 🪨</span>
-        </button>
+          🛡️ Contre
+          <span className="cost num">{counter ? `${duration((live.counterUntil ?? 0) - now)} · ` : ""}{formatNumber(counterCost(base))} 🪨</span>
+        </Btn>
         {(["fort", "faible"] as const).map((mode) => (
-          <button
+          <Btn
             key={mode}
-            className="btn"
-            disabled={busy || live.stone < rumorCost(base)}
+            busy={busy}
+            reason={live.stone < rumorCost(base) ? "Pas assez de pierre." : null}
             onClick={() => act({ type: "rumor", mode })}
             title={`Pendant 2 h, tout le monde voit ton armée ${mode === "fort" ? "deux fois plus grosse" : "deux fois plus petite"}, rapports d'espion compris, sauf ceux d'un espion au moins deux crans au-dessus de toi.`}
           >
-            🗣️ {mode === "fort" ? "Rumeur : je suis fort" : "Rumeur : je suis faible"}
-            <span className="cost num">{rumor?.mode === mode ? `active ${duration(rumor.until - now)} · ` : ""}{formatNumber(rumorCost(base))} 🪨</span>
-          </button>
+            🗣️ {mode === "fort" ? "Fort" : "Faible"}
+            <span className="cost num">{rumor?.mode === mode ? `${duration(rumor.until - now)} · ` : ""}{formatNumber(rumorCost(base))} 🪨</span>
+          </Btn>
         ))}
       </div>
       {((live.granaryCutUntil ?? 0) > now || (live.blindUntil ?? 0) > now) && (
         <p className="note num">
-          {(live.granaryCutUntil ?? 0) > now ? `🧨 Ton grenier est saboté : moitié du stock à l'abri encore ${duration((live.granaryCutUntil ?? 0) - now)}. ` : ""}
-          {(live.blindUntil ?? 0) > now ? `🧨 Ton guet est aveugle encore ${duration((live.blindUntil ?? 0) - now)}.` : ""}
+          {(live.granaryCutUntil ?? 0) > now ? `🧨 Grenier saboté · ${duration((live.granaryCutUntil ?? 0) - now)} ` : ""}
+          {(live.blindUntil ?? 0) > now ? `🧨 Guet aveugle · ${duration((live.blindUntil ?? 0) - now)}` : ""}
         </p>
       )}
     </div>
@@ -2306,10 +2346,10 @@ function Forge({ live, now, run, stagesDone, base }: { live: PlayerState; now: n
               ⚔️ et ❤️ +{Math.round(lv * LEVEL_BONUS * 100)} % · niveau {next} en {duration(researchTime(live, id, stagesDone))}
             </div>
           </div>
-          <button className="btn btn-primary" disabled={full || cost > live.stone} onClick={() => void run({ type: "research", id: d.id })}>
-            {queue.length > 0 ? "En file" : "Améliorer"}
+          <Btn className="btn btn-primary" reason={full ? "La file de recherche est pleine." : cost > live.stone ? "Pas assez de pierre." : null} onClick={() => void run({ type: "research", id: d.id })}>
+            {queue.length > 0 ? "En file" : "Niveau +1"}
             <span className="cost num">{formatNumber(cost)} 🪨</span>
-          </button>
+          </Btn>
         </div>
       );
     });
@@ -2329,14 +2369,14 @@ function Forge({ live, now, run, stagesDone, base }: { live: PlayerState; now: n
             Académie militaire <span className="badge">niv. {live.academy ?? 0}</span>
           </div>
           <div className="row-desc">
-            Recherches {Math.round((live.academy ?? 0) * ACADEMY_SPEED * 100)} % plus rapides (+{Math.round(ACADEMY_SPEED * 100)} % par niveau, recherche en cours et file comprises).
-            {live.sabotageImmuneUntil > now ? ` Garde renforcée contre les saboteurs encore ${duration(live.sabotageImmuneUntil - now)}.` : ""}
+            ⏩ +{Math.round((live.academy ?? 0) * ACADEMY_SPEED * 100)} % (+{Math.round(ACADEMY_SPEED * 100)} % par niveau)
+            {live.sabotageImmuneUntil > now ? ` · 🛡️ ${duration(live.sabotageImmuneUntil - now)}` : ""}
           </div>
         </div>
-        <button className="btn btn-primary" disabled={academyPrice > live.stone} onClick={() => void run({ type: "academy" })}>
+        <Btn className="btn btn-primary" reason={academyPrice > live.stone ? "Pas assez de pierre." : null} onClick={() => void run({ type: "academy" })}>
           Agrandir
           <span className="cost num">{formatNumber(academyPrice)} 🪨</span>
-        </button>
+        </Btn>
       </div>
       <SpyResearchRow live={live} base={base} stagesDone={stagesDone} full={full} queued={queue.length > 0} run={run} />
       <h3 className="section-title">
@@ -2351,9 +2391,9 @@ function Forge({ live, now, run, stagesDone, base }: { live: PlayerState; now: n
             const level = (r.id === "espionnage" ? (live.spyLevel ?? 0) : levelOf(live, r.id)) + queue.slice(0, i + 1).filter((q) => q.id === r.id).length;
             return (
               <li key={`${r.id}-${r.endsAt}`}>
-                {i === 0 ? "⏳" : "⌛"} {def?.icon} {def?.name} niveau {level} : {i === 0 ? `encore ${duration(r.endsAt - now)}` : `fini dans ${duration(r.endsAt - now)}`}{" "}
+                {i === 0 ? "⏳" : "⌛"} {def?.icon} {def?.name} {level} · {duration(r.endsAt - now)}{" "}
                 <button className="btn btn-small" onClick={() => void run({ type: "research_cancel", endsAt: r.endsAt })} title="Annule cette recherche : la moitié de son prix te revient, et les suivantes avancent d'autant.">
-                  ↩️ Annuler{r.cost ? ` (rend ${formatNumber(Math.floor(r.cost * RESEARCH_REFUND))} 🪨)` : ""}
+                  ↩️ Annuler{r.cost ? ` +${formatNumber(Math.floor(r.cost * RESEARCH_REFUND))} 🪨` : ""}
                 </button>
               </li>
             );
@@ -3772,7 +3812,7 @@ function KingdomMap({ snap, live, now, run, focus }: { snap: GameSnapshot; live:
           🏷️ Noms
         </button>
         <button className="btn" aria-pressed={zoomed} onClick={() => setZoomed((z) => !z)}>
-          {zoomed ? "🗺️ Vue d'ensemble" : "🔍 Agrandir"}
+          {zoomed ? "🗺️ Ensemble" : "🔍 Zoom"}
         </button>
       </div>
       <div className={`kingdom-map${zoomed ? " zoomed" : ""}`}>
@@ -3837,12 +3877,11 @@ function KingdomMap({ snap, live, now, run, focus }: { snap: GameSnapshot; live:
       </div>
       {rival ? (
         <>
-          <p className="raid-state">
-            📍 {rival.name} est à {(pickedDistance ?? 0).toLocaleString("fr-FR", { maximumFractionDigits: 1 })} cases de chez toi
-            {travel ? `, ${travel.label.replace("≈", "environ")} de marche` : ""}.
+          <p className="raid-state num">
+            📍 {rival.name} · {(pickedDistance ?? 0).toLocaleString("fr-FR", { maximumFractionDigits: 1 })} cases{travel ? ` · ${travel.label}` : ""}
           </p>
           {rival.allied ? (
-            <p className="note">C&apos;est un allié : tu peux lui envoyer des renforts depuis l&apos;onglet Alliance.</p>
+            <p className="note">🤝 Allié : renforts depuis l&apos;onglet Alliance.</p>
           ) : (
             <div className="list">
               <RivalRow
@@ -3863,7 +3902,7 @@ function KingdomMap({ snap, live, now, run, focus }: { snap: GameSnapshot; live:
           )}
         </>
       ) : (
-        <p className="empty">Touche un domaine ou un seigneur sur la carte pour ouvrir sa fiche.</p>
+        <p className="empty">Touche un lieu pour ouvrir sa fiche.</p>
       )}
     </>
   );
@@ -4018,10 +4057,10 @@ function Garrison({ live, run }: { live: PlayerState; run: ReturnType<typeof use
             </div>
             {d.bonus && <div className="row-desc strong-vs">{strengths(d.bonus)}</div>}
           </div>
-          <button className="btn btn-primary" disabled={d.cost * qty > live.stone} onClick={() => buy(kind, d.id)}>
+          <Btn className="btn btn-primary" reason={d.cost * qty > live.stone ? "Pas assez de pierre." : null} onClick={() => buy(kind, d.id)}>
             +{qty}
             <span className="cost num">{formatNumber(d.cost * qty)} 🪨</span>
-          </button>
+          </Btn>
         </div>
       );
     });
@@ -4035,8 +4074,7 @@ function Garrison({ live, run }: { live: PlayerState; run: ReturnType<typeof use
       </div>
       {live.healAt > 0 && Object.keys(live.wounded ?? {}).length > 0 && (
         <p className="note num">
-          🩹 Infirmerie : {formatNumber(Object.values(live.wounded ?? {}).reduce((a, b) => a + (b ?? 0), 0))} blessés reviennent{" "}
-          {new Date(live.healAt).toLocaleTimeString("fr-FR", { hour: "2-digit", minute: "2-digit" })}. Ils ne se battent pas d&apos;ici là.
+          🩹 {formatNumber(Object.values(live.wounded ?? {}).reduce((a, b) => a + (b ?? 0), 0))} blessés · retour {new Date(live.healAt).toLocaleTimeString("fr-FR", { hour: "2-digit", minute: "2-digit" })}
         </p>
       )}
       <div className="qty" role="group" aria-label="Quantité">
