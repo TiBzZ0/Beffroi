@@ -105,12 +105,26 @@ import { CHAT_MAX_LENGTH, CHAT_REACTIONS, type ChatChannel } from "@/lib/game/ch
 import { CHANGELOG } from "@/lib/game/changelog";
 
 type Tab = "ateliers" | "ameliorations" | "chantier" | "armee" | "carte" | "raids" | "alliance" | "messages" | "classement" | "heritage";
+/** U3 : sept onglets, certains avec des sous-onglets. */
+type Group = "domaine" | "chantier" | "armee" | "carte" | "alliance" | "messages" | "rangs";
+const GROUPS: Record<Group, Tab[]> = {
+  domaine: ["ateliers", "ameliorations"],
+  chantier: ["chantier"],
+  armee: ["armee"],
+  carte: ["carte", "raids"],
+  alliance: ["alliance"],
+  messages: ["messages"],
+  rangs: ["classement", "heritage"],
+};
+const SUBTAB_LABELS: Partial<Record<Tab, string>> = { ateliers: "Ateliers", ameliorations: "Savoirs", carte: "Carte", raids: "Cibles", classement: "Classements", heritage: "Héritage" };
+const groupOf = (t: Tab): Group => (Object.keys(GROUPS) as Group[]).find((g) => GROUPS[g].includes(t)) ?? "domaine";
 type Qty = 1 | 10 | "max";
 const DAY_MS = 86_400_000;
 
 export function Game({ userId }: { userId: string }) {
   const game = useGame();
   const [tab, setTab] = useState<Tab>("ateliers");
+  const [lastSub, setLastSub] = useState<Partial<Record<Group, Tab>>>({});
   useTick(250);
 
   const snap = game.snap;
@@ -143,7 +157,10 @@ export function Game({ userId }: { userId: string }) {
       } catch {}
     }
     setTab(t);
+    setLastSub((prev) => ({ ...prev, [groupOf(t)]: t }));
   };
+  const group = groupOf(tab);
+  const selectGroup = (g: Group) => selectTab(g === group ? tab : (lastSub[g] ?? GROUPS[g][0]));
 
   if (!snap) return <div className="loading">On allume les torches…</div>;
 
@@ -168,19 +185,26 @@ export function Game({ userId }: { userId: string }) {
       <PushPrompt raided={(snap.chronicle ?? []).some((c) => c.kind === "raid" && c.targetId === snap.userId) || (game.away?.raidsLost.length ?? 0) > 0} />
       <div className="layout">
         <Hero snap={snap} rate={rate} clickGain={clickValue(live, world, stagesDone)} game={game} />
-        <section className="panel">
+        <section className={`panel dom-${group}`}>
           <div className="tabs" role="tablist">
-            <TabButton id="ateliers" tab={tab} setTab={selectTab} label="Ateliers" />
-            <TabButton id="ameliorations" tab={tab} setTab={selectTab} label="Savoirs" dot={affordableUpgrades > 0} />
-            <TabButton id="chantier" tab={tab} setTab={selectTab} label="Chantier" />
-            <TabButton id="armee" tab={tab} setTab={selectTab} label="Armée" dot={researchDone} />
-            <TabButton id="carte" tab={tab} setTab={selectTab} label="Carte" />
-            <TabButton id="raids" tab={tab} setTab={selectTab} label={eventLive ? "Raids ⚡" : "Raids"} dot={eventLive || snap.rivals.some((r) => r.revenge && !r.blocker)} />
-            <TabButton id="alliance" tab={tab} setTab={selectTab} label="Alliance" dot={snap.invites.length > 0} />
-            <TabButton id="messages" tab={tab} setTab={selectTab} label="Messages" dot={tab !== "messages" && unreadCount(snap, live, now) > 0} />
-            <TabButton id="classement" tab={tab} setTab={selectTab} label="Rangs" />
-            <TabButton id="heritage" tab={tab} setTab={selectTab} label="Héritage" />
+            <TabButton id="domaine" tab={group} setTab={selectGroup} label="🏭 Domaine" dot={affordableUpgrades > 0} />
+            <TabButton id="chantier" tab={group} setTab={selectGroup} label="⛪ Chantier" />
+            <TabButton id="armee" tab={group} setTab={selectGroup} label="⚔️ Armée" dot={researchDone} />
+            <TabButton id="carte" tab={group} setTab={selectGroup} label={eventLive ? "🗺️ Carte ⚡" : "🗺️ Carte"} dot={eventLive || snap.rivals.some((r) => r.revenge && !r.blocker)} />
+            <TabButton id="alliance" tab={group} setTab={selectGroup} label="🤝 Alliance" dot={snap.invites.length > 0} />
+            <TabButton id="messages" tab={group} setTab={selectGroup} label="✉️ Messages" dot={tab !== "messages" && unreadCount(snap, live, now) > 0} />
+            <TabButton id="rangs" tab={group} setTab={selectGroup} label="🏆 Rangs" />
           </div>
+          {GROUPS[group].length > 1 && (
+            <div className="subtabs group-subtabs" role="group" aria-label="Sections">
+              {GROUPS[group].map((t) => (
+                <button key={t} className="btn btn-small" aria-pressed={tab === t} onClick={() => selectTab(t)}>
+                  {SUBTAB_LABELS[t]}
+                  {t === "ameliorations" && affordableUpgrades > 0 ? " •" : ""}
+                </button>
+              ))}
+            </div>
+          )}
           <div className="tab-body" role="tabpanel">
             {tab === "ateliers" && <Generators live={live} stagesDone={stagesDone} snap={snap} run={game.run} />}
             {tab === "ameliorations" && <Upgrades live={live} run={game.run} />}
@@ -608,10 +632,10 @@ function Heritage({ snap, run }: { snap: GameSnapshot; run: ReturnType<typeof us
   };
   return (
     <>
-      <p className="note raid-intro">
+      <Info>
         Les écus se gagnent pendant la saison (paliers de don, lots, quêtes, panthéon) et à sa clôture. Ici, ils achètent des bonus permanents, gardés
         d&apos;une saison à l&apos;autre quand tout le reste repart de zéro. Le niveau n coûte n fois le prix de base, et l&apos;effet est immédiat.
-      </p>
+      </Info>
       <div className="garrison-head">
         <h3 className="section-title">🏛️ Héritage</h3>
         <span className="num">🪙 {ecus} écus</span>
@@ -644,7 +668,7 @@ function Heritage({ snap, run }: { snap: GameSnapshot; run: ReturnType<typeof us
   );
 }
 
-function TabButton({ id, tab, setTab, label, dot }: { id: Tab; tab: Tab; setTab: (t: Tab) => void; label: string; dot?: boolean }) {
+function TabButton<T extends string>({ id, tab, setTab, label, dot }: { id: T; tab: T; setTab: (t: T) => void; label: string; dot?: boolean }) {
   return (
     <button className="tab" role="tab" aria-selected={tab === id} onClick={() => setTab(id)}>
       {label}
@@ -1102,10 +1126,10 @@ function Lots({ lots, now, run }: { lots: LotView[]; now: number; run: ReturnTyp
   return (
     <div className="lots">
       <div className="row-title">Lots de l&apos;étape</div>
-      <p className="note">
+      <Info>
         Chaque alliance (ou joueur seul) a son lot : 4 heures de la production de ses membres. Lot fini : ceux qui ont versé au moins 25 % de leur part
         gagnent +10 % de production jusqu&apos;à la fin de l&apos;étape suivante et {LOT_ECUS} écus. Le premier lot fini désigne le maître d&apos;œuvre.
-      </p>
+      </Info>
       {mine && (
         <div className="notice notice-info">
           <strong>👑 Maître d&apos;œuvre !</strong> Choisis le bonus de 24 heures de ton lot (sinon ce sera la production) :
@@ -1176,10 +1200,10 @@ function ShareLine({ snap, detailed = false }: { snap: GameSnapshot; detailed?: 
         </div>
       )}
       {detailed && (
-        <p className="note">
+        <Info>
           Ta part de chantier vaut autant d&apos;heures de ta production que l&apos;étape (4 h, 12 h ou 24 h), mesurée au début de l&apos;étape. À {tiers.map((t) => `${t * 100} %`).join(", ").replace(/, ([^,]*)$/, " et $1")} versés, tu gagnes +{DONOR_TIER_BONUS * 100} % de production jusqu&apos;à la fin de la saison et {DONOR_TIER_ECUS.join(", ")} écus.
           {bonus > 0 ? ` Tes paliers te rapportent déjà +${bonus} %.` : ""} Tes écus achètent des bonus permanents dans l&apos;onglet Héritage.
-        </p>
+        </Info>
       )}
     </div>
   );
@@ -1205,9 +1229,9 @@ function TitheSlider({ state, run }: { state: PlayerState; run: ReturnType<typeo
         Dîme automatique : <span className="num">{value} %</span>
       </label>
       <input id="tithe" type="range" min={0} max={MAX_TITHE * 100} step={1} value={value} onChange={(e) => change(Number(e.target.value))} />
-      <p className="note">
+      <Info>
         Cette part de ta production, même hors ligne, part d&apos;office au chantier au lieu de ton stock. Elle compte comme un don. On conseille {ADVISED_TITHE * 100} %.
-      </p>
+      </Info>
     </div>
   );
 }
@@ -1251,10 +1275,10 @@ function Ranking({ boards, userId }: { boards: ReturnType<typeof useLeaderboard>
       </div>
       {view === "saison" && (
         <>
-          <p className="note">
+          <Info>
             À la fin de la saison, le podium de chaque catégorie entre au Panthéon, et chaque premier porte son titre à côté de son nom pendant toute la
             saison suivante. Les seigneurs voisins n&apos;y figurent pas.
-          </p>
+          </Info>
           {HALL.map((h) => {
             const rows = standings.find((st) => st.category === h.id)?.rows ?? [];
             return (
@@ -1327,10 +1351,9 @@ function Board({ rows, userId, empty, unit = "stone" }: { rows: { userId: string
   );
 }
 
+/** U3 : partout le même format, mm:ss sous une heure, « 1 h 12 » au-dessus. */
 function duration(msLeft: number): string {
-  const m = Math.max(0, Math.ceil(msLeft / 60_000));
-  if (m < 60) return `${m} min`;
-  return `${Math.floor(m / 60)} h ${String(m % 60).padStart(2, "0")}`;
+  return countdown(msLeft);
 }
 
 /** Jauge d'élan : tant qu'elle n'est pas vide, la production est augmentée. */
@@ -1425,11 +1448,11 @@ function Army({ snap, live, now, run }: { snap: GameSnapshot; live: PlayerState;
       </div>
       {view === "garnison" && (
         <>
-          <p className="note raid-intro">
+          <Info>
             Un raid est une bataille de 4 rounds au plus : toutes tes troupes (et les renforts de tes alliés) contre les troupes, fortifications et 3 gardes
             de la cible. Chaque unité a ses forces et ses faiblesses, compose ton armée selon ce que tu vois en face. Tu gagnes si plus personne ne
             riposte en face. Une partie des troupes perdues revient de l&apos;infirmerie au bout de 30 minutes.
-          </p>
+          </Info>
           <TributeGauge live={live} now={now} />
           <Spies snap={snap} live={live} now={now} run={run} />
           <Garrison live={live} run={run} />
@@ -1487,14 +1510,14 @@ function Raids({ snap, live, now, run }: { snap: GameSnapshot; live: PlayerState
         />}
       {inCurfew(live, now) && <p className="raid-state">🌙 Tu es en couvre-feu : ni attaque ni sabotage, dans un sens comme dans l&apos;autre.</p>}
       {view === "seigneurs" && (
-        <p className="note raid-intro">
+        <Info>
           Un raid réussi vole 25 % (40 % en revanche) de la pierre non sécurisée (les 2 dernières heures de production sont à l&apos;abri, mais jamais plus
           de la moitié du stock), incendie les ateliers 30 min et ruine quelques bâtiments ; la victime reçoit 4 h de bouclier (10 min pour un seigneur) et un
           droit de revanche (+50 % de dégâts). Les seigneurs difficiles ne frappent que ceux qui les ont attaqués. De loin, tu ne vois qu&apos;un ordre de grandeur
           des armées et ta chance en un mot. Un espion part sur la route et rapporte ce qu&apos;il a vu pendant 1 h, à toute ton alliance : plus ton niveau
           d&apos;espionnage dépasse celui de la cible, plus il en voit (armée, mouvements, stock, Forge) et moins il risque d&apos;être repéré. Ta garnison,
           tes espions et la Forge sont dans l&apos;onglet Armée.
-        </p>
+        </Info>
       )}
       {view === "seigneurs" && (
         <>
@@ -1595,9 +1618,9 @@ function CurfewCard({ live, now, run }: { live: PlayerState; now: number; run: R
   return (
     <div className="curfew">
       <div className="row-title">🌙 Couvre-feu</div>
-      <p className="note">
+      <Info>
         Pendant 8 heures par jour, tu ne peux ni attaquer ni être attaqué, ni saboter ni être saboté, seigneurs et guerre compris. Ta production et ta dîme continuent. Un changement prend effet 24 heures plus tard.
-      </p>
+      </Info>
       <label className="note" htmlFor="curfew">
         Début de la plage (heure locale) :{" "}
         <select id="curfew" className="input" disabled={busy} value={localHour} onChange={(e) => pick(e.target.value)}>
@@ -1904,6 +1927,16 @@ function sumGroups(groups: Record<string, number>[]): Record<string, number> {
   return out;
 }
 
+/** U3 : explication repliée derrière un ⓘ. */
+function Info({ children }: { children: React.ReactNode }) {
+  return (
+    <details className="info">
+      <summary aria-label="Explications">ⓘ Comment ça marche</summary>
+      <div className="note">{children}</div>
+    </details>
+  );
+}
+
 /** U1 : compte à rebours, mm:ss sous une heure, « 1 h 12 » au-dessus. */
 function countdown(ms: number): string {
   const s = Math.max(0, Math.ceil(ms / 1000));
@@ -1948,7 +1981,7 @@ interface MoveRow {
 const MARCH_ICON: Record<string, string> = { raid: "⚔️", reinforce: "🛡️", station: "🛡️", hall_station: "🛡️", fortress: "🏰", hall_siege: "🏛️", event: "🎪" };
 
 /** U1 : tableau des mouvements, visible depuis tous les onglets. */
-function Movements({ snap, live, now, run }: { snap: GameSnapshot; live: PlayerState; now: number; run: ReturnType<typeof useGame>["run"] }) {
+export function Movements({ snap, live, now, run }: { snap: GameSnapshot; live: PlayerState; now: number; run: ReturnType<typeof useGame>["run"] }) {
   const [open, setOpen] = useState(() => {
     try {
       const v = localStorage.getItem("beffroi.movesOpen");
@@ -2194,11 +2227,11 @@ function Forge({ live, now, run, stagesDone, base }: { live: PlayerState; now: n
     });
   return (
     <>
-      <p className="note raid-intro">
+      <Info>
         Chaque niveau donne +{Math.round(LEVEL_BONUS * 100)} % d&apos;attaque et de points de vie au type amélioré, en attaque comme en défense. Jusqu&apos;à 3
         recherches en file, et chaque niveau prend plus de temps que le précédent. L&apos;académie accélère les recherches, mais les rivaux peuvent la
         saboter : un bon niveau d&apos;espionnage les en dissuade.
-      </p>
+      </Info>
       <div className="row">
         <div className="row-icon" aria-hidden>
           🎓
@@ -2262,7 +2295,7 @@ function GuildHall({ snap, live, now, run }: { snap: GameSnapshot; live: PlayerS
   const sieges = g.targets.length > 0 && (
     <>
       <h4 className="hall-sub">⚔️ Halles ennemies</h4>
-      <p className="note">En guerre, une halle peut être prise d&apos;assaut : l&apos;aile visée est hors service 24 h, rien n&apos;est détruit ni volé. La halle est ensuite à l&apos;abri 24 h.</p>
+      <Info>En guerre, une halle peut être prise d&apos;assaut : l&apos;aile visée est hors service 24 h, rien n&apos;est détruit ni volé. La halle est ensuite à l&apos;abri 24 h.</Info>
       <div className="list">
         {g.targets.map((t) => {
           const wings = WINGS.filter((w) => (t.wings[w.id] ?? 0) > 0);
@@ -2383,10 +2416,10 @@ function GuildHall({ snap, live, now, run }: { snap: GameSnapshot; live: PlayerS
           ))}
         </select>
       </label>
-      <p className="note">
+      <Info>
         Le reste de ta dîme ({Math.round((live.tithe ?? 0) * 100)} % de ta production) continue d&apos;aller au beffroi. Ce qui est versé ici ne compte ni pour le beffroi, ni
         pour les lots, ni pour les paliers de don, et ne peut être ni repris ni pillé.
-      </p>
+      </Info>
       {founding && <p className="note">Chantier de fondation : versez ensemble la somme affichée. Une fois fondée, chaque étape donnera un niveau d&apos;aile.</p>}
       <h4 className="hall-sub">
         Ailes · {h.placed}/{h.available} niveaux placés{h.masterLevels > 0 ? ` (dont ${h.masterLevels} offert${h.masterLevels > 1 ? "s" : ""} par le beffroi)` : ""}
@@ -2458,7 +2491,7 @@ function GuildHall({ snap, live, now, run }: { snap: GameSnapshot; live: PlayerS
               Rappeler mes troupes de la halle
             </button>
           )}
-          <p className="note">Seule une alliance en guerre avec la vôtre peut assiéger la halle. Un assaut réussi met une aile hors service 24 h, sans rien détruire.</p>
+          <Info>Seule une alliance en guerre avec la vôtre peut assiéger la halle. Un assaut réussi met une aile hors service 24 h, sans rien détruire.</Info>
         </>
       )}
       {sieges}
@@ -2483,10 +2516,10 @@ function Alliance({ snap, run }: { snap: GameSnapshot; run: ReturnType<typeof us
           <p className="row-desc">
             🤝 <strong>{a.name}</strong> · {a.members.map((m) => (m.id === snap.userId ? "toi" : m.name)).join(", ")} ({a.members.length}/{MAX_ALLIANCE_SIZE})
           </p>
-          <p className="note">
+          <Info>
             Entre alliés, pas de pillage. Les troupes envoyées chez un allié défendent son domaine et partent en raid avec lui (butin et pertes sont
             partagés au prorata de la valeur des troupes engagées par chacun).
-          </p>
+          </Info>
         </>
       ) : (
         <>
@@ -3320,7 +3353,7 @@ function unreadCount(snap: GameSnapshot, live: PlayerState, now: number): number
 }
 
 /** U2 : l'onglet Messages, boîte de réception (Rapports) et Discussion. */
-function Inbox({ snap, live, now, run, userId }: { snap: GameSnapshot; live: PlayerState; now: number; run: ReturnType<typeof useGame>["run"]; userId: string }) {
+export function Inbox({ snap, live, now, run, userId }: { snap: GameSnapshot; live: PlayerState; now: number; run: ReturnType<typeof useGame>["run"]; userId: string }) {
   const [part, setPart] = useState<"rapports" | "discussion">("rapports");
   const [cat, setCat] = useState<InboxCategory>("combats");
   const [open, setOpen] = useState<string | null>(null);

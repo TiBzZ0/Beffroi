@@ -2194,3 +2194,92 @@ use.g-enemy {
   .report-chips { grid-area: chips; justify-content: flex-start; }
   .report-body { padding-left: 12px; }
 }
+
+/* U3 : sept onglets ; sur téléphone, la barre passe en bas de l'écran */
+.tabs { grid-template-columns: repeat(7, 1fr); }
+.group-subtabs { padding: 8px 12px 0; margin-bottom: 0; }
+@media (max-width: 720px) {
+  .tabs {
+    position: fixed;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    z-index: 50;
+    grid-template-columns: repeat(7, 1fr);
+    background: var(--panel);
+    border-bottom: 0;
+    border-top: 1px solid var(--line);
+    padding-bottom: env(safe-area-inset-bottom);
+    box-shadow: 0 -4px 14px -10px rgba(0, 0, 0, 0.5);
+  }
+  .tab {
+    font-size: 0.64rem;
+    padding: 8px 1px 7px;
+    border-bottom: 0;
+    border-top: 3px solid transparent;
+    white-space: normal;
+    line-height: 1.2;
+  }
+  .tab[aria-selected="true"] { border-top-color: var(--accent); }
+  .tab .dot { top: 5px; }
+  .game { padding-bottom: calc(64px + env(safe-area-inset-bottom)); }
+}
+@media (max-width: 720px) {
+  .toast { bottom: calc(76px + env(safe-area-inset-bottom)); }
+}
+
+/* U3 : explications derrière un ⓘ */
+.info { margin: 6px 0; }
+.info > summary {
+  cursor: pointer;
+  color: var(--ink-soft);
+  font-size: 0.85em;
+  list-style: none;
+  display: inline-block;
+}
+.info > summary::-webkit-details-marker { display: none; }
+.info[open] > summary { color: var(--ink); }
+
+/* U4 : une couleur par domaine, un seul modèle de carte et de ligne */
+:root {
+  --dom-prod: #a8701f;
+  --dom-army: var(--accent);
+  --dom-ally: #2f6aa3;
+  --dom-spy: #7a4fa3;
+  --dom-event: var(--gold);
+  --dom-neutral: var(--ink-soft);
+  --dom: var(--dom-neutral);
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --dom-prod: #d6a352;
+    --dom-ally: #6fa4d8;
+    --dom-spy: #b28ad6;
+  }
+}
+.dom-domaine, .dom-chantier { --dom: var(--dom-prod); }
+.dom-armee, .dom-carte { --dom: var(--dom-army); }
+.dom-alliance { --dom: var(--dom-ally); }
+.dom-messages { --dom: var(--dom-spy); }
+.dom-rangs { --dom: var(--dom-event); }
+.spies { --dom: var(--dom-spy); }
+.event-banner, .daily, .quest { --dom: var(--dom-event); }
+.tab[aria-selected="true"] { border-bottom-color: var(--dom); }
+.subtabs .btn[aria-pressed="true"] { border-color: var(--dom); }
+@media (max-width: 720px) {
+  .tab[aria-selected="true"] { border-top-color: var(--dom); }
+}
+.row,
+.report,
+.event-banner,
+.daily,
+.quest,
+.simulator {
+  border: 1px solid var(--line);
+  border-left: 4px solid var(--dom);
+  border-radius: 8px;
+  background: var(--panel-2);
+}
+.row { padding: 8px 10px; }
+.report.unread { border-left-color: var(--accent); }
+.section-title { border-left: 4px solid var(--dom); padding-left: 8px; }

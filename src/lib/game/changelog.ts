@@ -475,4 +475,13 @@ export const CHANGELOG: ChangeEntry[] = [
       "📜 La chronique disparaît : ce qui ne te concerne pas est dans la catégorie Royaume. Les rapports se gardent 7 jours.",
     ],
   },
+  {
+    id: 56,
+    date: "13 novembre",
+    items: [
+      "🧭 Sept onglets au lieu de dix : Domaine (ateliers et savoirs), Chantier, Armée, Carte (carte et cibles), Alliance, Messages, Rangs (classements et héritage). Sur téléphone, la barre d'onglets passe en bas de l'écran.",
+      "ⓘ Les longues explications sont repliées derrière « Comment ça marche ». Les durées s'affichent partout de la même façon : mm:ss sous une heure, « 1 h 12 » au-dessus.",
+      "🎨 Une couleur par domaine : ocre pour la production, rouge pour l'armée, bleu pour l'alliance, violet pour l'espionnage, or pour les événements.",
+    ],
+  },
 ];
