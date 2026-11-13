@@ -1,4 +1,4 @@
-const SUFFIXES = ["", " k", " M", " Md", " Bn", " Bd", " Tn", " Td", " Qn"];
+const SUFFIXES = ["", " k", " M", " Md", " Bn", " Bd", " Tn", " Td", " Qn", " Qd"];
 
 /** Formate un grand nombre à la française : 1 234, 12,3 k, 4,56 M, 7,89 Md… */
 export function formatNumber(n: number, decimalsUnder1000 = 0): string {

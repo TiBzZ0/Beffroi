@@ -3,7 +3,7 @@
 // (les arbalétriers s'abritent derrière les chevaliers, les murs encaissent), avec un
 // multiplicateur contre certaines catégories (les piques contre les chevaux, etc.).
 
-import { BATTLE_ROUNDS, BATTLE_SWING, CHANCE_SIMULATIONS, COMBATANTS, LEVEL_BONUS, type CombatantDef, type CombatantId } from "./config";
+import { BATTLE_FORTUNE, BATTLE_ROUNDS, BATTLE_SWING, CHANCE_SIMULATIONS, COMBATANTS, LEVEL_BONUS, type CombatantDef, type CombatantId } from "./config";
 
 export type Army = Partial<Record<CombatantId, number>>;
 /** Niveau d'amélioration de chaque type (+10 % d'attaque et de PV par niveau). */
@@ -41,6 +41,8 @@ export interface BattleOptions {
   /** Niveaux d'amélioration de chaque camp. */
   attackerLevels?: Levels;
   defenderLevels?: Levels;
+  /** Q2 : fortune de la bataille, un tirage unique entre 0,8 et 1,2 sur les dégâts de l'attaquant. */
+  fortune?: boolean;
 }
 
 function defOf(id: string): CombatantDef | undefined {
@@ -180,7 +182,8 @@ export function battle(attacker: Army, defender: Army, rng: () => number, opts: 
   let defenderLost: Army = {};
   let rounds = 0;
   const log: RoundLog[] = [];
-  const mult = opts.attackBonus ?? 1;
+  const fortune = opts.fortune ? 1 - BATTLE_FORTUNE + rng() * 2 * BATTLE_FORTUNE : 1;
+  const mult = (opts.attackBonus ?? 1) * fortune;
   while (rounds < BATTLE_ROUNDS && armySize(att) > 0 && canFight(def)) {
     rounds++;
     const aLv = opts.attackerLevels;
@@ -216,7 +219,7 @@ export function estimateChance(attacker: Army, defender: Army, opts: BattleOptio
   if (armySize(cleanArmy(attacker)) === 0) return 0;
   // Les tirages sont fixes : mêmes armées, même résultat. On garde les derniers calculs (le serveur
   // recalcule sinon la chance contre chaque rival à chaque synchronisation).
-  const key = JSON.stringify([attacker, defender, opts.attackerLevels ?? null, opts.defenderLevels ?? null, opts.attackBonus ?? null]);
+  const key = JSON.stringify([attacker, defender, opts.attackerLevels ?? null, opts.defenderLevels ?? null, opts.attackBonus ?? null, opts.fortune ?? false]);
   const known = chanceCache.get(key);
   if (known !== undefined) return known;
   const rng = seededRng(0xbeff);

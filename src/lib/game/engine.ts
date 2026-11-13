@@ -142,7 +142,7 @@ import {
   VEIN_FRENZY_FACTOR,
   VEIN_RAIN_SECONDS,
   SHARE_HOURS,
-  DONOR_TIERS,
+  donorTiersFor,
   DONOR_TIER_ECUS,
   DONOR_TIER_BONUS,
   FAIR_GENERATOR_FACTOR,
@@ -999,11 +999,13 @@ export function shareSize(state: PlayerState, world: WorldState, now: number, st
 /** Compte un don dans la part de chantier ; renvoie les paliers franchis et les écus gagnés. */
 export function recordGift(state: PlayerState, amount: number): { state: PlayerState; tiers: number; ecus: number } {
   const share = state.share;
-  if (!share || !(amount > 0)) return { state, tiers: 0, ecus: 0 };
+  // Q4 : un don nul rattrape aussi les paliers franchis quand les seuils baissent.
+  if (!share || !(amount >= 0)) return { state, tiers: 0, ecus: 0 };
   const given = share.given + amount;
+  const thresholds = donorTiersFor(share.stage);
   let tiers = share.tiers;
   let ecus = 0;
-  while (tiers < DONOR_TIERS.length && given >= share.size * DONOR_TIERS[tiers]) {
+  while (tiers < thresholds.length && given >= share.size * thresholds[tiers]) {
     ecus += DONOR_TIER_ECUS[tiers];
     tiers++;
   }
@@ -1330,11 +1332,11 @@ export function withAllies(own: Army, allies?: Record<string, Army>): Army {
   return cleanArmy(out as Army);
 }
 
-export function raidArmies(attacker: PlayerState, victim: PlayerState, ctx: Pick<RaidContext, "attackerArmy" | "defenderArmy" | "victimId" | "now" | "stagesDone" | "allyArmies">) {
+export function raidArmies(attacker: PlayerState, victim: PlayerState, ctx: Pick<RaidContext, "attackerArmy" | "defenderArmy" | "victimId" | "now" | "stagesDone" | "allyArmies" | "attackerIsLord">) {
   // Le coup de pouce de la victime rend ses défenseurs plus durs à abattre.
   const sturdy = (masterActive(victim, "defense", ctx.now) ? 1 + MASTER_BONUSES.defense.value : 1) * (ctx.defenderArmy ? 1 : 1 + stagePerk(ctx.stagesDone ?? 0, "defenseHp")) * (ctx.defenderArmy ? 1 : reinforcementStrength(victim) * rampartStrength(victim));
   const attackBonus = (hasRevenge(attacker, ctx.victimId, ctx.now) ? REVENGE_ATTACK_BONUS : 1) / (1 + (victim.catchUp ?? 0)) / sturdy;
-  const opts: BattleOptions = { attackBonus, attackerLevels: attacker.levels, defenderLevels: victim.levels };
+  const opts: BattleOptions = { attackBonus, attackerLevels: attacker.levels, defenderLevels: victim.levels, fortune: !ctx.attackerIsLord };
   return {
     attack: ctx.attackerArmy ? withAllies(ctx.attackerArmy, ctx.allyArmies) : attackArmy(attacker),
     defense: ctx.defenderArmy ?? defenseArmy(victim),

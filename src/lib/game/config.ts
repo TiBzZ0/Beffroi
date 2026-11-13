@@ -35,7 +35,13 @@ export type GeneratorId =
   | "cite"
   | "architectes"
   | "atelier_royal"
-  | "merveille";
+  | "merveille"
+  | "cathedrale"
+  | "citadelle"
+  | "observatoire"
+  | "cite_celeste"
+  | "pilier"
+  | "atelier_etoiles";
 
 export interface GeneratorDef {
   id: GeneratorId;
@@ -62,6 +68,13 @@ export const GENERATORS: readonly GeneratorDef[] = [
   { id: "architectes", name: "Ordre des architectes", plural: "Ordres des architectes", icon: "📐", description: "Leurs plans font pousser les tours.", baseCost: 1_000_000_000_000, baseRate: 10_000_000 },
   { id: "atelier_royal", name: "Atelier royal", plural: "Ateliers royaux", icon: "👑", description: "Le roi lui-même finance tes chantiers.", baseCost: 14_000_000_000_000, baseRate: 65_000_000 },
   { id: "merveille", name: "Merveille du royaume", plural: "Merveilles du royaume", icon: "✨", description: "On en parlera dans mille ans.", baseCost: 170_000_000_000_000, baseRate: 430_000_000 },
+  // Q1 : six paliers après la Merveille, chacun 12 fois plus cher et 7,5 fois plus productif que le précédent.
+  { id: "cathedrale", name: "Cathédrale", plural: "Cathédrales", icon: "⛪", description: "Des siècles de travail, des fidèles qui portent les pierres.", baseCost: 2e15, baseRate: 3.2e9 },
+  { id: "citadelle", name: "Citadelle des bâtisseurs", plural: "Citadelles des bâtisseurs", icon: "🏯", description: "Une forteresse entière vouée à tailler la pierre.", baseCost: 2.4e16, baseRate: 2.4e10 },
+  { id: "observatoire", name: "Observatoire royal", plural: "Observatoires royaux", icon: "🔭", description: "Les savants lisent dans les astres où creuser.", baseCost: 2.9e17, baseRate: 1.8e11 },
+  { id: "cite_celeste", name: "Cité céleste", plural: "Cités célestes", icon: "☁️", description: "Une ville bâtie au-dessus des nuages.", baseCost: 3.5e18, baseRate: 1.35e12 },
+  { id: "pilier", name: "Pilier du monde", plural: "Piliers du monde", icon: "🏛️", description: "Il soutient le ciel, et la pierre en coule.", baseCost: 4.2e19, baseRate: 1e13 },
+  { id: "atelier_etoiles", name: "Atelier des étoiles", plural: "Ateliers des étoiles", icon: "🌟", description: "On y taille la pierre des étoiles.", baseCost: 5e20, baseRate: 7.6e13 },
 ];
 
 export const GENERATOR_IDS = GENERATORS.map((g) => g.id);
@@ -79,6 +92,12 @@ export const COMPANIONS: Partial<Record<GeneratorId, GeneratorId>> = {
   carriere: "cite",
   four: "marbre",
   grue: "port",
+  guilde: "cathedrale",
+  port: "citadelle",
+  marbre: "observatoire",
+  cite: "cite_celeste",
+  architectes: "pilier",
+  atelier_royal: "atelier_etoiles",
 };
 
 export type UpgradeEffect =
@@ -112,6 +131,12 @@ const GENERATOR_UPGRADE_NAMES: Record<GeneratorId, [string, string]> = {
   architectes: ["Compas d'or", "Traités d'architecture"],
   atelier_royal: ["Sceau du roi", "Trésor de la couronne"],
   merveille: ["Pèlerins émerveillés", "Légende éternelle"],
+  cathedrale: ["Vitraux du chœur", "Reliques des saints"],
+  citadelle: ["Forges de la citadelle", "Serment des bâtisseurs"],
+  observatoire: ["Lunettes de cristal", "Cartes du ciel"],
+  cite_celeste: ["Escaliers de nuées", "Vents porteurs"],
+  pilier: ["Racines de granit", "Voûte du monde"],
+  atelier_etoiles: ["Ciseaux d'étoile", "Poussière d'astre"],
 };
 
 /** Paliers avancés (50, 100, 150, 200 bâtiments), communs à tous les types. */
@@ -229,6 +254,11 @@ export const ADVISED_TITHE = 0.1;
 /** B2 : paliers de don par étape, en part de la part de chantier du joueur (4 h de sa production). */
 export const SHARE_HOURS = 4;
 export const DONOR_TIERS = [0.25, 0.5, 1] as const;
+/** Q4 : sur les étapes de 12 h et plus, les paliers tombent à 10, 25 et 50 % de la part. */
+export const DONOR_TIERS_LONG = [0.1, 0.25, 0.5] as const;
+export function donorTiersFor(stage: number): readonly number[] {
+  return stageHours(stage) >= 12 ? DONOR_TIERS_LONG : DONOR_TIERS;
+}
 export const DONOR_TIER_ECUS = [5, 10, 15] as const;
 /** Chaque palier atteint donne +2 % de production jusqu'à la fin de la saison. */
 export const DONOR_TIER_BONUS = 0.02;
@@ -432,7 +462,7 @@ export interface CombatantDef<Id extends string = CombatantId> {
 }
 
 export const UNITS: readonly CombatantDef<UnitId>[] = [
-  { id: "milicien", name: "Milicien", plural: "Miliciens", icon: "🗡️", description: "Pas cher, pas bien solide, mais il met le feu aux engins de siège.", cost: 200, attack: 2, hp: 10, category: "infanterie", bonus: { siege: 4 } },
+  { id: "milicien", name: "Milicien", plural: "Miliciens", icon: "🗡️", description: "Pas cher, pas bien solide, mais il met le feu aux engins de siège.", cost: 200, attack: 3, hp: 12, category: "infanterie", bonus: { siege: 4 } },
   { id: "piquier", name: "Piquier", plural: "Piquiers", icon: "🔱", description: "Sa pique arrête net les chevaux.", cost: 400, attack: 3, hp: 25, category: "infanterie", bonus: { cavalerie: 4 } },
   { id: "arbaletrier", name: "Arbalétrier", plural: "Arbalétriers", icon: "🏹", description: "Fauche l'infanterie, fragile au contact.", cost: 500, attack: 8, hp: 15, category: "tir", bonus: { infanterie: 2.5 } },
   { id: "chevalier", name: "Chevalier", plural: "Chevaliers", icon: "🐎", description: "Charge les tireurs, redoute les piques.", cost: 2_000, attack: 25, hp: 80, category: "cavalerie", bonus: { tir: 3 } },
@@ -645,6 +675,8 @@ export const RANSOM_SHARE = 0.3;
 export const FAIRNESS_SLOPE = 2;
 /** A11 : les dégâts de chaque camp sont multipliés à chaque round par un tirage entre 0,85 et 1,15. */
 export const BATTLE_SWING = 0.15;
+/** Q2 : fortune de la bataille, ±20 % sur les dégâts de l'attaquant, tirée une fois (pas pour les seigneurs ni le tournoi). */
+export const BATTLE_FORTUNE = 0.2;
 /** A10 : un seigneur attaquant vise une chance de victoire d'un tiers. */
 export const LORD_RAID_CHANCE = 1 / 3;
 export const INFIRMARY_MS = 30 * 60_000;

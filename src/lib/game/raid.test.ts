@@ -506,3 +506,14 @@ describe("G5 : tribut des seigneurs", () => {
     expect(tributeLeft(drained, now + 9 * 3_600_000)).toBe(7200);
   });
 });
+
+describe("Q2 : fortune de la bataille", () => {
+  it("élargit la zone incertaine autour d'une armée de même valeur", () => {
+    const shape = { piquier: 0.4, arbaletrier: 0.3, chevalier: 0.3 };
+    const def = armyFromBudget(1_000_000, shape);
+    const even = armyFromBudget(1_000_000, shape);
+    const bigger = armyFromBudget(1_200_000, shape);
+    expect(estimateChance(even, def, { fortune: true })).toBeGreaterThan(estimateChance(even, def));
+    expect(estimateChance(bigger, def, { fortune: true })).toBeLessThan(estimateChance(bigger, def));
+  });
+});

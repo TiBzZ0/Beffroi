@@ -1004,7 +1004,7 @@ async function tickLords(admin: SupabaseClient, season: SeasonView, entities: Ma
       const pick = pool.length > 0 ? pool[Math.random() < 0.6 ? 0 : Math.floor(Math.random() * pool.length)] : null;
       if (pick) {
         // A10 : l'armée du seigneur est taillée sur la défense de sa cible, pour une chance d'environ un tiers.
-        const shaped = raidArmies(state, pick.s, { now, victimId: pick.e.id, attackerArmy: army.attack, stagesDone: stagesDoneAt(world, now) });
+        const shaped = raidArmies(state, pick.s, { now, victimId: pick.e.id, attackerArmy: army.attack, stagesDone: stagesDoneAt(world, now), attackerIsLord: true });
         const sized = armyForChance(army.attack, shaped.defense, LORD_RAID_CHANCE, shaped.opts);
         const ctx = { now, attackerId: lord.id, victimId: pick.e.id, victimRate: pick.rate, attackerIsLord: true, allowRepeat: lord.retaliateOnly, attackerArmy: armySize(sized) > 0 ? sized : army.attack, stagesDone: stagesDoneAt(world, now) };
         // T6 : l'armée du seigneur part de sa case, à vitesse 1 ; le combat se jouera à l'arrivée.
@@ -1333,7 +1333,7 @@ function fortressView(me: Entity, state: PlayerState, f: FortressRow, entities: 
     army: seen as Record<string, number>,
     exact: known,
     intelUntil: !mine && known ? intelUntil : null,
-    chance: vagueChance(estimateChance(attackArmy(state), defense, { attackerLevels: state.levels, defenderLevels: fortressLevels(f, entities) }), known),
+    chance: vagueChance(estimateChance(attackArmy(state), defense, { attackerLevels: state.levels, defenderLevels: fortressLevels(f, entities), fortune: true }), known),
     blocker: fortressBlocker(me, state, f, now),
     garrison: mine ? Object.entries(garrison).map(([id, troops]) => ({ id, name: entities.get(id)?.name ?? "Inconnu", troops: troops as Record<string, number> })) : [],
     myGarrison: (garrison[me.id] ?? {}) as Record<string, number>,
@@ -1599,7 +1599,7 @@ async function runEventAttack(admin: SupabaseClient, seasonId: number, me: Entit
   const fighter: PlayerState = march ? { ...current, troops: march.troops as PlayerState["troops"], stationed: {} } : current;
   const blocked = march ? (e.kind === "caravane" && me.id in e.attackers ? "Tu as déjà attaqué cette caravane." : null) : eventBlocker(current, e, me.id, now);
   if (blocked) return { error: blocked };
-  const fight = battle(attackArmy(fighter), eventDefense(e, fighter), Math.random, { attackerLevels: current.levels, defenderLevels: ev.levels });
+  const fight = battle(attackArmy(fighter), eventDefense(e, fighter), Math.random, { attackerLevels: current.levels, defenderLevels: ev.levels, fortune: true });
   const mine = splitTroopLosses(fighter, fight.attackerLost);
   let after: PlayerState = march ? current : { ...current, troops: mine.troops, stationed: mine.stationed, lastRaidAt: now };
   const attackers = { ...e.attackers };
@@ -1743,7 +1743,7 @@ function eventViewInner(meId: string, state: PlayerState, ev: EventState, now: n
   const totalDealt = Object.values(e.attackers).reduce((a, b) => a + b, 0);
   let take: number;
   if (e.kind === "caravane") take = Math.floor(rate * CARAVAN_PRIZE_SECONDS);
-  else take = armyValue(battle(attackArmy(state), defense, seededRng(0xc0105), { attackerLevels: state.levels, defenderLevels: ev.levels }).defenderLost);
+  else take = armyValue(battle(attackArmy(state), defense, seededRng(0xc0105), { attackerLevels: state.levels, defenderLevels: ev.levels, fortune: true }).defenderLost);
   return {
     id: e.id,
     kind: e.kind,
@@ -1757,7 +1757,7 @@ function eventViewInner(meId: string, state: PlayerState, ev: EventState, now: n
     prize: e.prize,
     mine: e.kind === "caravane" ? (e.attackers[meId] ?? 0) : totalDealt > 0 ? (e.attackers[meId] ?? 0) / totalDealt : 0,
     attackers: Object.keys(e.attackers).length,
-    chance: estimateChance(attackArmy(state), defense, { attackerLevels: state.levels, defenderLevels: ev.levels }),
+    chance: estimateChance(attackArmy(state), defense, { attackerLevels: state.levels, defenderLevels: ev.levels, fortune: true }),
     take,
     blocker: eventBlocker(state, e, meId, now),
   };
@@ -2893,7 +2893,7 @@ async function settleMarches(
       const camps = ev.data.camps ?? [];
       const c = camps.find((x) => x.id === campId);
       if (!c || c.winner) return turned();
-      const fight = battle(m.troops, c.army, Math.random, { attackerLevels: aState.levels, defenderLevels: events.levels });
+      const fight = battle(m.troops, c.army, Math.random, { attackerLevels: aState.levels, defenderLevels: events.levels, fortune: true });
       const near = entities.get(c.owner);
       const prize = fight.success && near ? Math.floor(currentRate(near, advanceEntity(near, at, world, flat), at, world, flat) * BANDIT_PRIZE_SECONDS) : 0;
       const survivors = survivorsOf(m.troops, fight.attackerLost);
@@ -2920,7 +2920,7 @@ async function settleMarches(
         return write([{ e: owner, state: replace(owner.state, { ...m, status: "camp", returnAt: endsAt }) }], { ...ev.data, holder: { owner: owner.id, march: m.id } });
       }
       const hState = advanceEntity(holderEntity, at, world, flat);
-      const fight = battle(m.troops, holderMarch.troops, Math.random, { attackerLevels: aState.levels, defenderLevels: hState.levels });
+      const fight = battle(m.troops, holderMarch.troops, Math.random, { attackerLevels: aState.levels, defenderLevels: hState.levels, fortune: true });
       const mine = survivorsOf(m.troops, fight.attackerLost);
       const theirs = survivorsOf(holderMarch.troops, fight.defenderLost);
       const hOut = holderMarch.arriveAt - holderMarch.departAt;
@@ -2978,7 +2978,7 @@ async function settleMarches(
     const blocked = fortressBlocker(owner, aState, fortress, at, m.troops);
     if (blocked) return commit(owner, replace(owner.state, { ...m, status: "back", returnAt: m.arriveAt + outMs, outcome: "turned" }));
     const defense = fortressDefense(fortress, entities, at);
-    const levels = { attackerLevels: aState.levels, defenderLevels: fortressLevels(fortress, entities) };
+    const levels = { attackerLevels: aState.levels, defenderLevels: fortressLevels(fortress, entities), fortune: true };
     const chance = estimateChance(m.troops, defense, levels);
     const fight = battle(m.troops, defense, Math.random, levels);
     const theirs = splitTroopLosses(garrisonHost(fortress, at), fight.defenderLost);
@@ -3669,7 +3669,7 @@ async function settleHallMarch(
   const aState = advanceEntity(owner, at, world, flat);
   if (hallSiegeBlocker(owner, aState, g, wars, at, m.troops)) return turned();
   const defense = hallDefense(g);
-  const levels = { attackerLevels: aState.levels, defenderLevels: hallLevels(g, entities) };
+  const levels = { attackerLevels: aState.levels, defenderLevels: hallLevels(g, entities), fortune: true };
   const chance = estimateChance(m.troops, defense, levels);
   const fight = battle(m.troops, defense, Math.random, levels);
   // Garnison : pertes au prorata ; les blessés des défenseurs se relèvent sur place.
@@ -3953,7 +3953,7 @@ function guildView(me: Entity, state: PlayerState, entities: Map<string, Entity>
             id: x.id,
             name: names.get(x.allianceId!) ?? "Alliance",
             wings: activeWings(x, now),
-            chance: vagueChance(estimateChance(attackArmy(state), hallDefense(x), { attackerLevels: state.levels, defenderLevels: hallLevels(x, entities) }), (intel.get(`hall:${x.id}`)?.until ?? 0) > now),
+            chance: vagueChance(estimateChance(attackArmy(state), hallDefense(x), { attackerLevels: state.levels, defenderLevels: hallLevels(x, entities), fortune: true }), (intel.get(`hall:${x.id}`)?.until ?? 0) > now),
             intelUntil: intel.get(`hall:${x.id}`)?.until ?? 0,
             blocker: hallSiegeBlocker(me, state, x, wars, now),
             immuneUntil: x.immuneUntil,

@@ -264,6 +264,16 @@ describe("paliers de don", () => {
     expect(recordGift(b.state, size).tiers).toBe(0);
     expect(productionPerSecond(b.state, noWorld, 0)).toBeCloseTo(10 * 1.06);
   });
+
+  it("Q4 : 10, 25 et 50 % sur les étapes de 12 h et plus, rattrapés sans nouveau don", () => {
+    const s = openShare(withGenerators({ tailleur: 10 }), 8, noWorld, T0);
+    const size = s.share!.size;
+    expect(recordGift(s, size * 0.12)).toMatchObject({ tiers: 1, ecus: 5 });
+    const old = { ...s, share: { ...s.share!, given: size * 0.3, tiers: 1 } };
+    expect(recordGift(old, 0)).toMatchObject({ tiers: 1, ecus: 10 });
+    const short = openShare(withGenerators({ tailleur: 10 }), 0, noWorld, T0);
+    expect(recordGift(short, short.share!.size * 0.12).tiers).toBe(0);
+  });
 });
 
 describe("couvre-feu", () => {
@@ -421,7 +431,8 @@ describe("corps de métier et compagnonnage", () => {
     const t = nextTiers(base({ manoeuvre: 25 }), "manoeuvre");
     expect(t.mastery.missing).toBe(25);
     expect(t.companion).toEqual({ missing: 5, bonus: 0.01, target: "merveille" });
-    expect(nextTiers(base({}), "guilde").companion).toBeNull();
+    expect(nextTiers(base({}), "merveille").companion).toBeNull();
+    expect(nextTiers(base({}), "guilde").companion?.target).toBe("cathedrale");
   });
 });
 

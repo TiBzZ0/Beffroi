@@ -16,7 +16,7 @@ import {
   ELAN_PER_CLICK_MS,
   MAX_TITHE,
   ADVISED_TITHE,
-  DONOR_TIERS,
+  donorTiersFor,
   DONOR_TIER_ECUS,
   DONOR_TIER_BONUS,
   CURFEW_MINUTES,
@@ -1152,7 +1152,8 @@ function ShareLine({ snap, detailed = false }: { snap: GameSnapshot; detailed?: 
   const ecus = snap.ecus ?? 0;
   const bonus = Math.round((snap.state.donorTiers ?? 0) * DONOR_TIER_BONUS * 100);
   if (!share || share.stage !== snap.worksite.stage) return null;
-  const next = share.tiers < DONOR_TIERS.length ? DONOR_TIERS[share.tiers] : null;
+  const tiers = donorTiersFor(share.stage);
+  const next = share.tiers < tiers.length ? tiers[share.tiers] : null;
   const goal = next !== null ? share.size * next : share.size;
   const pct = Math.min(100, (share.given / Math.max(1, goal)) * 100);
   return (
@@ -1160,7 +1161,7 @@ function ShareLine({ snap, detailed = false }: { snap: GameSnapshot; detailed?: 
       <div className="bar-caption num">
         <span>
           {next !== null
-            ? `Ta part : palier ${share.tiers + 1}/${DONOR_TIERS.length} à ${next * 100} %, ${formatNumber(share.given)} / ${formatNumber(goal)}`
+            ? `Ta part : palier ${share.tiers + 1}/${tiers.length} à ${next * 100} %, ${formatNumber(share.given)} / ${formatNumber(goal)}`
             : `Ta part est versée en entier : les 3 paliers de l'étape sont atteints`}
         </span>
         <span>🪙 {ecus}</span>
@@ -1172,7 +1173,7 @@ function ShareLine({ snap, detailed = false }: { snap: GameSnapshot; detailed?: 
       )}
       {detailed && (
         <p className="note">
-          Ta part de chantier vaut 4 heures de ta production, mesurée au début de l&apos;étape. À 25 %, 50 % et 100 % versés, tu gagnes +{DONOR_TIER_BONUS * 100} % de production jusqu&apos;à la fin de la saison et {DONOR_TIER_ECUS.join(", ")} écus.
+          Ta part de chantier vaut autant d&apos;heures de ta production que l&apos;étape (4 h, 12 h ou 24 h), mesurée au début de l&apos;étape. À {tiers.map((t) => `${t * 100} %`).join(", ").replace(/, ([^,]*)$/, " et $1")} versés, tu gagnes +{DONOR_TIER_BONUS * 100} % de production jusqu&apos;à la fin de la saison et {DONOR_TIER_ECUS.join(", ")} écus.
           {bonus > 0 ? ` Tes paliers te rapportent déjà +${bonus} %.` : ""} Tes écus achètent des bonus permanents dans l&apos;onglet Héritage.
         </p>
       )}
@@ -1827,7 +1828,7 @@ function SendArmy({
   const army = Object.fromEntries(UNITS.map((u) => [u.id, Math.min(have[u.id] ?? 0, Math.max(0, Math.floor(chosen[u.id] ?? 0)))]).filter(([, n]) => (n as number) > 0)) as Record<string, number>;
   const all = withAllies && hasGuests ? sumGroups([army, guests]) : army;
   const out = travelMs(all as Army, distance, armySpeedBonus(me));
-  const chance = estimateChance(all as Army, r.army as Army, { attackBonus: r.revenge ? REVENGE_ATTACK_BONUS : 1, attackerLevels: me.levels });
+  const chance = estimateChance(all as Army, r.army as Army, { attackBonus: r.revenge ? REVENGE_ATTACK_BONUS : 1, attackerLevels: me.levels, fortune: true });
   const away = (me.marches ?? []).length;
   return (
     <div className="simulator send-army">
@@ -2066,7 +2067,7 @@ function SpyReport({ r, now }: { r: RivalView; now: number }) {
 /** B7 : simulateur avant l'attaque, une bataille pour de faux contre l'armée vue en face (rien n'est perdu). */
 function Simulator({ me, army, r, intel, seed, onReplay, onClose }: { me: PlayerState; army: Army; r: RivalView; intel: boolean; seed: number; onReplay: () => void; onClose: () => void }) {
   const attack = army;
-  const opts = { attackBonus: r.revenge ? REVENGE_ATTACK_BONUS : 1, attackerLevels: me.levels };
+  const opts = { attackBonus: r.revenge ? REVENGE_ATTACK_BONUS : 1, attackerLevels: me.levels, fortune: true };
   const fight = battle(attack, r.army as Army, seededRng(seed * 7919), opts);
   return (
     <div className="simulator">

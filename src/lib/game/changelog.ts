@@ -449,4 +449,14 @@ export const CHANGELOG: ChangeEntry[] = [
       "🧱 Héritage : Garde renforcée est remplacée par Rempart, +3 % de points de vie des fortifications par niveau (5 niveaux, 15 écus × niveau). Personne ne l'avait encore achetée.",
     ],
   },
+  {
+    id: 53,
+    date: "13 novembre",
+    items: [
+      "⛪ Six nouveaux ateliers après la Merveille : Cathédrale, Citadelle des bâtisseurs, Observatoire royal, Cité céleste, Pilier du monde et Atelier des étoiles. Chacun a ses six savoirs et compte pour les corps de métier. Compagnonnage : les guildes aident les cathédrales, les ports les citadelles, les mines de marbre les observatoires, les cités des maçons les cités célestes, les ordres d'architectes les piliers et les ateliers royaux les ateliers des étoiles.",
+      "🎖️ Sur les étapes de 12 heures et plus (horloge, beffroi légendaire, embellissements), les paliers de don tombent à 10 %, 25 % et 50 % de ta part. Si tu as déjà versé assez sur l'étape en cours, le palier t'est donné à ta prochaine connexion.",
+      "🗡️ Milicien : attaque 3 au lieu de 2, 12 points de vie au lieu de 10, même prix.",
+      "🎲 Fortune de la bataille : chaque bataille tire une fois une chance entre −20 % et +20 % sur les dégâts de l'attaquant, en plus du hasard de chaque round. Une armée un peu plus forte que la défense n'est plus sûre de gagner, une armée un peu plus faible peut tenter sa chance. Les chances affichées et le simulateur en tiennent compte. Pas de fortune pour les raids des seigneurs ni pour le tournoi.",
+    ],
+  },
 ];
