@@ -214,6 +214,8 @@ import {
   type WorldState,
   armySpeedBonus,
   baseRate,
+  lordLootCapOf,
+  spendTribute,
 } from "./engine";
 import {
   worksiteFromRow,
@@ -263,7 +265,7 @@ interface PlayerRow {
   upgrades: string[];
   total_produced: number;
   total_contributed: number;
-  military?: { levels?: Record<string, number>; research?: { id: string; endsAt: number; cost?: number }[] | { id: string; endsAt: number } | null; academy?: number; sabotageImmuneUntil?: number; ruinImmuneUntil?: number; elanUntil?: number; tithe?: number; titheOwed?: number; titheSet?: boolean; share?: StageShare | null; donorTiers?: number; curfew?: Curfew | null; seen?: PlayerState["seen"] | null; veinAt?: number; frenzyUntil?: number; quest?: number | null; questFlags?: string[]; wounded?: Record<string, number>; healAt?: number; marches?: unknown; boostProdUntil?: number; boostSafeUntil?: number; merchantEvent?: number; daily?: unknown; dailyBoostUntil?: number; dailyBoost?: number; hallTithe?: number; spyLevel?: number; spies?: unknown; moles?: unknown; counterUntil?: number; rumor?: { mode?: string; until?: number } | null; granaryCutUntil?: number; blindUntil?: number; spyLog?: unknown } | null;
+  military?: { levels?: Record<string, number>; research?: { id: string; endsAt: number; cost?: number }[] | { id: string; endsAt: number } | null; academy?: number; sabotageImmuneUntil?: number; ruinImmuneUntil?: number; elanUntil?: number; tithe?: number; titheOwed?: number; titheSet?: boolean; share?: StageShare | null; donorTiers?: number; curfew?: Curfew | null; seen?: PlayerState["seen"] | null; veinAt?: number; frenzyUntil?: number; quest?: number | null; questFlags?: string[]; wounded?: Record<string, number>; healAt?: number; marches?: unknown; boostProdUntil?: number; boostSafeUntil?: number; merchantEvent?: number; daily?: unknown; dailyBoostUntil?: number; dailyBoost?: number; hallTithe?: number; spyLevel?: number; spies?: unknown; moles?: unknown; counterUntil?: number; rumor?: { mode?: string; until?: number } | null; granaryCutUntil?: number; blindUntil?: number; spyLog?: unknown; tribute?: { seconds?: number; at?: number } | null } | null;
   total_clicks: number;
   last_update: string;
   last_click_at: string;
@@ -394,6 +396,7 @@ function toEntity(row: PlayerRow): Entity {
       counterUntil: Number(row.military?.counterUntil ?? 0) || 0,
       rumor: row.military?.rumor && (row.military.rumor.mode === "fort" || row.military.rumor.mode === "faible") ? { mode: row.military.rumor.mode, until: Number(row.military.rumor.until) || 0 } : null,
       granaryCutUntil: Number(row.military?.granaryCutUntil ?? 0) || 0,
+      tribute: row.military?.tribute && Number.isFinite(Number(row.military.tribute.seconds)) && Number.isFinite(Number(row.military.tribute.at)) ? { seconds: Number(row.military.tribute.seconds), at: Number(row.military.tribute.at) } : undefined,
       blindUntil: Number(row.military?.blindUntil ?? 0) || 0,
       spyLog: Array.isArray(row.military?.spyLog) ? (row.military.spyLog as { at?: unknown; text?: unknown }[]).filter((x) => x && typeof x.text === "string").slice(-SPY_LOG_MAX).map((x) => ({ at: Number(x.at) || 0, text: String(x.text) })) : [],
       academy: Number(row.military?.academy ?? 0),
@@ -451,7 +454,7 @@ function toJson(e: Entity, state: PlayerState, extra: Record<string, unknown> = 
     troops: state.troops,
     defenses: state.defenses,
     stationed: state.stationed,
-    military: { levels: state.levels, research: state.research, academy: state.academy, sabotageImmuneUntil: state.sabotageImmuneUntil, ruinImmuneUntil: state.ruinImmuneUntil, elanUntil: state.elanUntil, tithe: state.tithe, titheOwed: state.titheOwed, titheSet: state.titheSet, share: state.share, donorTiers: state.donorTiers, curfew: state.curfew, seen: state.seen ?? null, veinAt: state.veinAt, frenzyUntil: state.frenzyUntil, quest: state.quest, questFlags: state.questFlags, wounded: state.wounded, healAt: state.healAt, marches: state.marches ?? [], boostProdUntil: state.boostProdUntil, boostSafeUntil: state.boostSafeUntil, merchantEvent: state.merchantEvent, daily: state.daily ?? null, dailyBoostUntil: state.dailyBoostUntil, dailyBoost: state.dailyBoost, hallTithe: state.hallTithe, spyLevel: state.spyLevel ?? 0, spies: state.spies ?? [], moles: state.moles ?? [], counterUntil: state.counterUntil ?? 0, rumor: state.rumor ?? null, granaryCutUntil: state.granaryCutUntil ?? 0, blindUntil: state.blindUntil ?? 0, spyLog: (state.spyLog ?? []).slice(-SPY_LOG_MAX) },
+    military: { levels: state.levels, research: state.research, academy: state.academy, sabotageImmuneUntil: state.sabotageImmuneUntil, ruinImmuneUntil: state.ruinImmuneUntil, elanUntil: state.elanUntil, tithe: state.tithe, titheOwed: state.titheOwed, titheSet: state.titheSet, share: state.share, donorTiers: state.donorTiers, curfew: state.curfew, seen: state.seen ?? null, veinAt: state.veinAt, frenzyUntil: state.frenzyUntil, quest: state.quest, questFlags: state.questFlags, wounded: state.wounded, healAt: state.healAt, marches: state.marches ?? [], boostProdUntil: state.boostProdUntil, boostSafeUntil: state.boostSafeUntil, merchantEvent: state.merchantEvent, daily: state.daily ?? null, dailyBoostUntil: state.dailyBoostUntil, dailyBoost: state.dailyBoost, hallTithe: state.hallTithe, spyLevel: state.spyLevel ?? 0, spies: state.spies ?? [], moles: state.moles ?? [], counterUntil: state.counterUntil ?? 0, rumor: state.rumor ?? null, granaryCutUntil: state.granaryCutUntil ?? 0, blindUntil: state.blindUntil ?? 0, spyLog: (state.spyLog ?? []).slice(-SPY_LOG_MAX), tribute: state.tribute ?? null },
     click_strikes: state.clickStrikes,
     click_paused_until: iso(state.clickPausedUntil),
     ...extra,
@@ -1965,6 +1968,8 @@ function rivalsFor(
 ): RivalView[] {
   const armies = lordArmies(entities, world, now, flat);
   const myRate = currentRate(me, myState, now, world, flat);
+  // G5 : butin attendu sur un seigneur, borné par 1 h de production de base et le tribut restant.
+  const lordCap = lordLootCapOf(myState, baseRate(myState, world, now), now);
   const mySize = attackerSizeOf(me.id, myState, entities, myRate);
   return [...entities.values()]
     .filter((e) => e.id !== me.id)
@@ -2005,7 +2010,7 @@ function rivalsFor(
       const seen = seesArmy ? shown : {};
       const stone = jitter(s.stone, "stone");
       const fair = e.isLord ? lordFairness(e.id, myRate) : fairness(ctx.relativeSize, revenge);
-      const loot = lootOf(stone, rate, revenge, { lord: e.isLord, cap: e.isLord ? undefined : myRate * PVP_LOOT_CAP_SECONDS, factor: fair, stagesDone: stagesDoneAt(world, now), extraSecured: extraSecured(s, now), securedFactor: (s.granaryCutUntil ?? 0) > now ? 0.5 : 1 });
+      const loot = lootOf(stone, rate, revenge, { lord: e.isLord, cap: e.isLord ? lordCap : myRate * PVP_LOOT_CAP_SECONDS, factor: fair, stagesDone: stagesDoneAt(world, now), extraSecured: extraSecured(s, now), securedFactor: (s.granaryCutUntil ?? 0) > now ? 0.5 : 1 });
       // Rançon attendue en cas de victoire : la défense, abattue.
       const ransom = e.isLord || !seesStock ? 0 : ransomOf(fight.defense as Army, fair);
       const exact = estimateChance(fight.attack, shown, fight.opts);
@@ -2028,7 +2033,7 @@ function rivalsFor(
         ...(seesInner
           ? { levels: s.levels as Record<string, number>, spyLevel: s.spyLevel ?? 0, researchQueue: s.research.map((r) => ({ id: r.id, endsAt: r.endsAt })), wounded: (s.wounded ?? {}) as Record<string, number>, healAt: s.healAt, curfewStart: s.curfew?.start ?? null }
           : {}),
-        lootCap: e.isLord ? undefined : myRate * PVP_LOOT_CAP_SECONDS,
+        lootCap: e.isLord ? lordCap : myRate * PVP_LOOT_CAP_SECONDS,
         lootSafe: extraSecured(s, now) || undefined,
         id: e.id,
         name: e.name,
@@ -3028,6 +3033,7 @@ async function settleMarches(
   const aState = advanceEntity(owner, at, world, flat);
   const vState = advanceEntity(victim, at, world, flat);
   const aRate = currentRate(owner, aState, at, world, flat);
+  const aBase = baseRate(aState, world, at);
   const vRate = currentRate(victim, vState, at, world, flat);
   const ctx = {
     now: at,
@@ -3043,6 +3049,7 @@ async function settleMarches(
     attackerArmy: m.troops,
     allyArmies: m.allies,
     lordFairness: victim.isLord && !owner.isLord ? lordFairness(victim.id, aRate) : undefined,
+    lordLootCap: victim.isLord && !owner.isLord ? lordLootCapOf(aState, aBase, at) : undefined,
     attackerIsLord: owner.isLord,
     marching: true,
     allowRepeat: true,
@@ -3063,6 +3070,8 @@ async function settleMarches(
   const alliesBack = Object.fromEntries(Object.entries(m.allies ?? {}).map(([o, g]) => [o, minus(g, allyLost[o] ?? {})]).filter(([, g]) => armySize(g as Army) > 0)) as Record<string, Army>;
   const allyTotal = Object.values(rep.allyShares ?? {}).reduce((a, b) => a + b, 0);
   const back: March = { ...m, troops: survivors, status: "back", returnAt: at + outMs, loot: Math.max(0, rep.stolen - allyTotal), ransom: rep.ransom, outcome: rep.success ? "won" : "lost", ...(Object.keys(alliesBack).length > 0 ? { allies: alliesBack } : { allies: undefined }) };
+  // G5 : le butin pris à un seigneur vide d'autant le « Tribut des seigneurs ».
+  if (victim.isLord && !owner.isLord && rep.stolen > 0) fight.value.attacker = { ...fight.value.attacker, tribute: spendTribute(aState, rep.stolen, aBase, at) };
   const attackerAfter = replace(fight.value.attacker, armySize(survivors) > 0 || Object.keys(alliesBack).length > 0 || back.loot + back.ransom > 0 ? back : null);
   const allyStates = Object.keys(m.allies ?? {}).flatMap((o) => {
     const ally = entities.get(o);

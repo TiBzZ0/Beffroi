@@ -628,6 +628,11 @@ export const SABOTAGE_IMMUNITY_MS = 60 * 60 * 1000;
 /** Butin d'un seigneur sur un joueur : au plus 30 minutes de la production de la victime, revanche comprise. */
 export const LORD_LOOT_CAP_SECONDS = 30 * 60;
 export const PVP_LOOT_CAP_SECONDS = 2 * 60 * 60;
+/** G5 : un joueur prend au plus 1 h de sa production de base à un seigneur. */
+export const LORD_LOOT_PLAYER_CAP_SECONDS = 60 * 60;
+/** G5 : « Tribut des seigneurs », réserve de 2 h de production, +20 min par heure (pleine en 6 h). */
+export const TRIBUTE_MAX_SECONDS = 2 * 60 * 60;
+export const TRIBUTE_RECHARGE = 1 / 3;
 /** A6 : on ne peut pas attaquer une cible dont la taille relative est sous 0,1 (sauf guerre et revanche). */
 export const MIN_TARGET_SIZE = 0.1;
 /**
@@ -876,13 +881,15 @@ export const BLIND_MS = 3_600_000;
 /** H2 : héritage, bonus permanents achetés en écus et gardés d'une saison à l'autre. Le niveau n coûte base × n écus. */
 export const LEGACY = [
   { id: "carrier", icon: "⛏️", name: "Carrier", effect: "+2 % de production par niveau", max: 10, base: 20 },
-  { id: "depart", icon: "🚀", name: "Départ lancé", effect: "+50 % de production par niveau pendant les 24 premières heures de la saison", max: 3, base: 40 },
+  { id: "depart", icon: "🚀", name: "Départ lancé", effect: "+10 % de production par niveau pendant les 24 premières heures de la saison", max: 3, base: 40 },
   { id: "cave", icon: "🍷", name: "Cave", effect: "+15 minutes de stock à l'abri par niveau", max: 4, base: 25 },
-  { id: "garde", icon: "🛡️", name: "Garde renforcée", effect: "+1 garde du château par niveau", max: 5, base: 15 },
+  { id: "rempart", icon: "🧱", name: "Rempart", effect: "+3 % de points de vie des fortifications par niveau", max: 5, base: 15 },
 ] as const;
 export type LegacyId = (typeof LEGACY)[number]["id"];
 export const LEGACY_CARRIER = 0.02;
-export const LEGACY_START = 0.5;
+export const LEGACY_START = 0.1;
+/** G6 : Rempart, +3 % de points de vie des fortifications par niveau. */
+export const LEGACY_RAMPART = 0.03;
 export const LEGACY_START_MS = 24 * 3_600_000;
 export const LEGACY_CAVE_SECONDS = 15 * 60;
 /** H1 : écus de clôture : 10 par étape du beffroi achevée (donateurs), podium 30/20/10 partout, 5 pour 3 jours de connexion. */

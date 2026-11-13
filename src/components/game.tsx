@@ -11,6 +11,8 @@ import {
   COMBATANTS,
   LEVEL_BONUS,
   ELAN_MAX_MS,
+  TRIBUTE_MAX_SECONDS,
+  TRIBUTE_RECHARGE,
   ELAN_PER_CLICK_MS,
   MAX_TITHE,
   ADVISED_TITHE,
@@ -60,6 +62,7 @@ import {
   generatorCost,
   generatorRate,
   baseRate,
+  tributeLeft,
   spyRisk,
   spyTravelMs,
   armySpeedBonus,
@@ -1340,6 +1343,23 @@ function ElanGauge({ left, bonus }: { left: number; bonus: number }) {
   );
 }
 
+/** G5 : jauge du « Tribut des seigneurs ». */
+function TributeGauge({ live, now }: { live: PlayerState; now: number }) {
+  const left = tributeLeft(live, now);
+  const pct = Math.round((left / TRIBUTE_MAX_SECONDS) * 100);
+  const fullIn = ((TRIBUTE_MAX_SECONDS - left) / TRIBUTE_RECHARGE) * 1000;
+  return (
+    <div className="elan tribute" title="Les seigneurs ne cèdent que ce que contient cette réserve : 2 h de ta production de base au plus, 1 h au plus par raid. Elle se recharge de 20 minutes par heure.">
+      <span>
+        🏰 Tribut des seigneurs : {Math.floor(left / 60)} min / 2 h{fullIn > 1000 ? ` · pleine dans ${duration(fullIn)}` : " · pleine"}
+      </span>
+      <div className="bar">
+        <span style={{ width: `${pct}%` }} />
+      </div>
+    </div>
+  );
+}
+
 /** Améliorations en cours, sous le compteur de pierre. */
 function ResearchLine({ state, now }: { state: PlayerState; now: number }) {
   const queue = (state.research ?? []).filter((r) => r.endsAt > now);
@@ -1406,6 +1426,7 @@ function Army({ snap, live, now, run }: { snap: GameSnapshot; live: PlayerState;
             riposte en face. Une partie des troupes perdues revient de l&apos;infirmerie au bout de 30 minutes.
           </p>
           <Marches snap={snap} now={now} run={run} />
+          <TributeGauge live={live} now={now} />
           <Spies snap={snap} live={live} now={now} run={run} />
           <Garrison live={live} run={run} />
           <CurfewCard live={live} now={now} run={run} />
@@ -1682,6 +1703,7 @@ function RivalRow({
               (r.fairness ?? 1) < 1
                 ? `équité ×${(r.fairness ?? 1).toLocaleString("fr-FR", { maximumFractionDigits: 2 })} (${r.isLord ? ((r.fairness ?? 1) < 0.5 ? "trop petit pour toi" : "seigneur plus petit que toi") : "cible plus petite"})`
                 : null,
+              r.isLord && r.lootCap !== undefined && r.stoneKnown !== false && loot >= Math.floor(r.lootCap) ? "plafonné par ton tribut des seigneurs" : null,
             ]
               .filter(Boolean)
               .join(" · ")}

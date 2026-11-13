@@ -440,4 +440,13 @@ export const CHANGELOG: ChangeEntry[] = [
       "⏳ Le dernier jour, un bandeau en jeu rappelle l'heure de la fin.",
     ],
   },
+  {
+    id: 52,
+    date: "13 novembre",
+    items: [
+      "🏰 Tribut des seigneurs : un raid sur un seigneur rapporte au plus 1 heure de ta production de base. Chaque joueur a aussi une réserve de 2 heures de production, pleine au départ, qui se recharge de 20 minutes par heure (pleine en 6 heures). Le butin pris aux seigneurs est limité à ce qui reste dans la réserve et la vide d'autant. La fiche du seigneur affiche le butin réellement attendu, et l'onglet Armée montre la jauge.",
+      "🚀 Héritage : Départ lancé passe à +10 % de production par niveau pendant les 24 premières heures (au lieu de +50 %).",
+      "🧱 Héritage : Garde renforcée est remplacée par Rempart, +3 % de points de vie des fortifications par niveau (5 niveaux, 15 écus × niveau). Personne ne l'avait encore achetée.",
+    ],
+  },
 ];

@@ -3,6 +3,9 @@ import { BURN_MS, GUARDS_PER_DOMAIN, INFIRMARY_MS, LORD_SHIELD_MS, RAID_COOLDOWN
 import { armyFromBudget, battle, estimateChance, seededRng } from "./battle";
 import {
   settleWounded,
+  tributeLeft,
+  spendTribute,
+  lordLootCapOf,
   fairness,
   advance,
   applyClicks,
@@ -480,5 +483,26 @@ describe("G2 : équité sur les seigneurs", () => {
     const half = resolveRaid(player(), lord, ctx({ defenderArmy: {}, marching: true, attackerArmy: { chevalier: 20 }, lordFairness: 0.5 }));
     if (!full.ok || !half.ok) throw new Error("raid refusé");
     expect(half.value.report.stolen).toBe(Math.floor(full.value.report.stolen / 2));
+  });
+});
+
+describe("G5 : tribut des seigneurs", () => {
+  it("plafonne le butin pris à un seigneur", () => {
+    const lord = player({ troops: {}, stone: 1_000_000 });
+    const capped = resolveRaid(player(), lord, ctx({ defenderArmy: {}, marching: true, attackerArmy: { chevalier: 20 }, lordLootCap: 1234 }));
+    if (!capped.ok) throw new Error("raid refusé");
+    expect(capped.value.report.stolen).toBe(1234);
+  });
+  it("2 h au plus, 1 h par raid, +20 min par heure", () => {
+    const now = 10_000_000;
+    expect(tributeLeft({}, now)).toBe(7200);
+    expect(lordLootCapOf({}, 10, now)).toBe(36_000);
+    const after = spendTribute({}, 36_000, 10, now);
+    expect(after.seconds).toBe(3600);
+    const drained = { tribute: spendTribute({ tribute: after }, 36_000, 10, now) };
+    expect(lordLootCapOf(drained, 10, now)).toBe(0);
+    expect(tributeLeft(drained, now + 3_600_000)).toBeCloseTo(1200);
+    expect(tributeLeft(drained, now + 6 * 3_600_000)).toBe(7200);
+    expect(tributeLeft(drained, now + 9 * 3_600_000)).toBe(7200);
   });
 });

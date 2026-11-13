@@ -46,6 +46,9 @@ import {
   MIN_TARGET_SIZE,
   PVP_LOOT_CAP_SECONDS,
   LORD_LOOT_CAP_SECONDS,
+  LORD_LOOT_PLAYER_CAP_SECONDS,
+  TRIBUTE_MAX_SECONDS,
+  TRIBUTE_RECHARGE,
   INFIRMARY_MS,
   WOUNDED_WINNER,
   WOUNDED_ATTACKER_BEATEN,
@@ -106,6 +109,7 @@ import {
   LEGACY,
   LEGACY_CARRIER,
   LEGACY_START,
+  LEGACY_RAMPART,
   LEGACY_START_MS,
   LEGACY_CAVE_SECONDS,
   type LegacyId,
@@ -209,6 +213,8 @@ export interface PlayerState {
   counterUntil?: number;
   rumor?: { mode: "fort" | "faible"; until: number } | null;
   granaryCutUntil?: number;
+  /** G5 : réserve « Tribut des seigneurs » (secondes de production au moment `at`) ; absente = pleine. */
+  tribute?: { seconds: number; at: number };
   blindUntil?: number;
   spyLog?: { at: number; text: string }[];
   academy: number;
@@ -1069,7 +1075,7 @@ export function attackArmy(state: PlayerState): Army {
 
 /** Armée qui défend le domaine : troupes (renforts compris), fortifications et gardes du château. */
 export function defenseArmy(state: PlayerState): Army {
-  return cleanArmy({ ...troopsHere(state), ...state.defenses, garde: GUARDS_PER_DOMAIN + legacyLevel(state, "garde") });
+  return cleanArmy({ ...troopsHere(state), ...state.defenses, garde: GUARDS_PER_DOMAIN });
 }
 
 /**
@@ -1211,6 +1217,24 @@ export function lootOf(stone: number, rate: number, revenge: boolean, opts: { lo
   return opts.cap !== undefined ? Math.min(loot, Math.floor(opts.cap)) : loot;
 }
 
+/** G5 : secondes de production restant dans le « Tribut des seigneurs » (pleine si jamais entamée). */
+export function tributeLeft(state: Pick<PlayerState, "tribute">, now: number): number {
+  const t = state.tribute;
+  if (!t) return TRIBUTE_MAX_SECONDS;
+  return Math.max(0, Math.min(TRIBUTE_MAX_SECONDS, t.seconds + Math.max(0, now - t.at) / 1000 * TRIBUTE_RECHARGE));
+}
+
+/** G5 : plafond du butin sur un seigneur, en pierre, pour une production de base donnée. */
+export function lordLootCapOf(state: Pick<PlayerState, "tribute">, baseRate: number, now: number): number {
+  return Math.max(0, baseRate) * Math.min(LORD_LOOT_PLAYER_CAP_SECONDS, tributeLeft(state, now));
+}
+
+/** G5 : le tribut après un pillage de seigneur ayant rapporté `stolen` pierres. */
+export function spendTribute(state: Pick<PlayerState, "tribute">, stolen: number, baseRate: number, now: number): { seconds: number; at: number } {
+  const used = baseRate > 0 ? stolen / baseRate : 0;
+  return { seconds: Math.max(0, tributeLeft(state, now) - used), at: now };
+}
+
 /** E3 : coefficient d'équité entre joueurs, min(1, 2 × taille relative) ; 1 en revanche. */
 export function fairness(relative: number | undefined, revenge: boolean): number {
   if (revenge || relative === undefined || !Number.isFinite(relative)) return 1;
@@ -1265,6 +1289,8 @@ export interface RaidContext {
   allyArmies?: Record<string, Army>;
   /** G2 : équité sur le butin pris à un seigneur (1 sans réduction). */
   lordFairness?: number;
+  /** G5 : plafond du butin d'un joueur sur un seigneur (1 h de production de base, borné par le tribut restant). */
+  lordLootCap?: number;
   /** Tirages aléatoires entre 0 et 1 (fournis pour des tests reproductibles). */
   rng: () => number;
 }
@@ -1306,7 +1332,7 @@ export function withAllies(own: Army, allies?: Record<string, Army>): Army {
 
 export function raidArmies(attacker: PlayerState, victim: PlayerState, ctx: Pick<RaidContext, "attackerArmy" | "defenderArmy" | "victimId" | "now" | "stagesDone" | "allyArmies">) {
   // Le coup de pouce de la victime rend ses défenseurs plus durs à abattre.
-  const sturdy = (masterActive(victim, "defense", ctx.now) ? 1 + MASTER_BONUSES.defense.value : 1) * (ctx.defenderArmy ? 1 : 1 + stagePerk(ctx.stagesDone ?? 0, "defenseHp")) * (ctx.defenderArmy ? 1 : reinforcementStrength(victim));
+  const sturdy = (masterActive(victim, "defense", ctx.now) ? 1 + MASTER_BONUSES.defense.value : 1) * (ctx.defenderArmy ? 1 : 1 + stagePerk(ctx.stagesDone ?? 0, "defenseHp")) * (ctx.defenderArmy ? 1 : reinforcementStrength(victim) * rampartStrength(victim));
   const attackBonus = (hasRevenge(attacker, ctx.victimId, ctx.now) ? REVENGE_ATTACK_BONUS : 1) / (1 + (victim.catchUp ?? 0)) / sturdy;
   const opts: BattleOptions = { attackBonus, attackerLevels: attacker.levels, defenderLevels: victim.levels };
   return {
@@ -1324,6 +1350,15 @@ export function reinforcementStrength(victim: PlayerState): number {
   const all = armySize(troopsHere(victim));
   const guests = all - armySize(cleanArmy({ ...victim.troops }));
   return all > 0 ? 1 + (bonus * guests) / all : 1;
+}
+
+/** G6 : le Rempart rend les fortifications plus dures, au prorata de leur valeur dans la défense. */
+export function rampartStrength(victim: PlayerState): number {
+  const lv = legacyLevel(victim, "rempart");
+  if (lv <= 0) return 1;
+  const all = armyValue(defenseArmy(victim));
+  const walls = armyValue(cleanArmy({ ...victim.defenses }));
+  return all > 0 ? 1 + (LEGACY_RAMPART * lv * walls) / all : 1;
 }
 
 /** Halle : vitesse en plus d'une armée (écuries, et salle d'armes pour des renforts). */
@@ -1445,7 +1480,8 @@ export function resolveRaid(
     securedFactor: (victim.granaryCutUntil ?? 0) > now ? 0.5 : 1,
     lord: !!ctx.defenderArmy,
     // Un seigneur prend au plus 30 minutes de la production de sa victime, revanche comprise.
-    cap: ctx.attackerIsLord ? ctx.victimRate * LORD_LOOT_CAP_SECONDS : playerVsPlayer && ctx.attackerRate !== undefined ? ctx.attackerRate * PVP_LOOT_CAP_SECONDS : undefined,
+    // G5 : un joueur prend au plus le plafond de tribut fourni par le serveur à un seigneur.
+    cap: ctx.attackerIsLord ? ctx.victimRate * LORD_LOOT_CAP_SECONDS : ctx.defenderArmy ? ctx.lordLootCap : playerVsPlayer && ctx.attackerRate !== undefined ? ctx.attackerRate * PVP_LOOT_CAP_SECONDS : undefined,
     factor: factor * lootBonus,
     stagesDone: ctx.stagesDone,
   });
