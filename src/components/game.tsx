@@ -126,6 +126,7 @@ export function Game({ userId }: { userId: string }) {
   const [tab, setTab] = useState<Tab>("ateliers");
   const [lastSub, setLastSub] = useState<Partial<Record<Group, Tab>>>({});
   const [focus, setFocus] = useState<Focus | null>(null);
+  const [moveFocus, setMoveFocus] = useState<{ key: string; at: number } | null>(null);
   useTick(250);
 
   const snap = game.snap;
@@ -176,7 +177,7 @@ export function Game({ userId }: { userId: string }) {
   const affordableUpgrades = UPGRADES.filter((u) => !live.upgrades.includes(u.id) && upgradeUnlocked(live, u) && upgradeCost(live, u) <= live.stone).length;
 
   return (
-    <SnapContext.Provider value={{ snap, live, now, go: (where, id, army) => {
+    <SnapContext.Provider value={{ snap, live, now, moveFocus, showMove: (key) => setMoveFocus({ key, at: now }), go: (where, id, army) => {
       setFocus({ id, army, at: now });
       selectTab(where);
     } }}>
@@ -1921,7 +1922,15 @@ function SendArmy({
 }
 
 /** U1 : l'état du jeu à portée des cartes qui n'en reçoivent qu'une partie (temps de trajet). */
-const SnapContext = createContext<{ snap: GameSnapshot; live: PlayerState; now: number; go?: (where: "carte" | "raids", id: string, army?: Record<string, number>) => void } | null>(null);
+const SnapContext = createContext<{
+  snap: GameSnapshot;
+  live: PlayerState;
+  now: number;
+  go?: (where: "carte" | "raids", id: string, army?: Record<string, number>) => void;
+  /** U1 : ligne du tableau des mouvements à ouvrir et montrer. */
+  moveFocus?: { key: string; at: number } | null;
+  showMove?: (key: string) => void;
+} | null>(null);
 
 /** U2 : cible à ouvrir après un bouton de rapport (carte, ou fiche avec l'armée prête). */
 interface Focus {
@@ -1941,6 +1950,19 @@ function TravelTo({ place, pos, army, reinforce = false }: { place?: string; pos
   if (!to || armySize(clean) === 0) return null;
   const bonus = armySpeedBonus(ctx.live, reinforce);
   return <TravelLine army={clean} out={travelMs(clean, mapDistance(mine, to), bonus)} now={ctx.now} bonus={bonus} />;
+}
+
+/** U1 : caravane et colosse, toute l'armée part : durée et arrivée sous le bouton. */
+function EventTravel({ e, now }: { e: EventView; now: number }) {
+  const live = useContext(SnapContext)?.live;
+  const pos: [number, number] | undefined = e.path
+    ? (() => {
+        const f = Math.min(1, Math.max(0, (now - e.startsAt) / Math.max(1, e.endsAt - e.startsAt)));
+        return [e.path.from[0] + (e.path.to[0] - e.path.from[0]) * f, e.path.from[1] + (e.path.to[1] - e.path.from[1]) * f];
+      })()
+    : e.pos;
+  if (!live || !pos) return null;
+  return <TravelTo pos={pos} army={live.troops as Record<string, number>} />;
 }
 
 /** U1 : durée de l'aller à la seconde, heures d'arrivée et de retour, et ce qui fixe la vitesse. */
@@ -2005,6 +2027,9 @@ interface MoveRow {
   icon: string;
   from: string;
   to: string;
+  /** Identifiants des deux bouts, quand ils sont sur la carte (toucher le nom centre la carte). */
+  fromId?: string;
+  toId?: string;
   troops: string;
   end: number;
   /** Heure de retour prévue, pour un aller. */
@@ -2034,10 +2059,28 @@ export function Movements({ snap, live, now, run }: { snap: GameSnapshot; live: 
     });
   };
   const me = "Chez moi";
+  const ctx = useContext(SnapContext);
+  const go = ctx?.go;
+  const focusKey = ctx?.moveFocus && now - ctx.moveFocus.at < 8000 ? ctx.moveFocus.key : null;
+  const focusAt = ctx?.moveFocus?.at;
+  // U1 : une armée touchée sur la carte ouvre le tableau et montre sa ligne.
+  useEffect(() => {
+    if (!focusAt) return;
+    const t = setTimeout(() => document.getElementById(`move-${ctx?.moveFocus?.key}`)?.scrollIntoView({ block: "center", behavior: "smooth" }), 50);
+    return () => clearTimeout(t);
+  }, [focusAt]); // eslint-disable-line react-hooks/exhaustive-deps
+  const place = (name: string, id?: string) =>
+    go && id && snap.map?.places[id] ? (
+      <button className="link-btn" onClick={() => go("carte", id)}>
+        {name}
+      </button>
+    ) : (
+      name
+    );
   const rows: MoveRow[] = [];
   for (const i of snap.incoming ?? []) {
     if (i.arriveAt <= now) continue;
-    rows.push({ key: `in-${i.id}`, tone: "attack", icon: "⚔️", from: i.from ?? "Inconnu", to: me, troops: i.troops ? armyIcons(i.troops as Record<string, number>, "?") : "?", end: i.arriveAt });
+    rows.push({ key: `in-${i.id}`, tone: "attack", icon: "⚔️", from: i.from ?? "Inconnu", fromId: i.from ? snap.rivals.find((r) => r.name === i.from)?.id : undefined, to: me, troops: i.troops ? armyIcons(i.troops as Record<string, number>, "?") : "?", end: i.arriveAt });
   }
   for (const m of snap.state.marches ?? []) {
     const name = targetName(snap, m.target);
@@ -2046,25 +2089,25 @@ export function Movements({ snap, live, now, run }: { snap: GameSnapshot; live: 
     if (m.status === "back") {
       if (m.returnAt <= now) continue;
       const verdict = m.outcome === "won" ? "🏆" : m.outcome === "lost" ? "💀" : m.outcome === "turned" ? "⤺" : m.outcome === "recalled" ? "↩" : undefined;
-      rows.push({ key: m.id, tone: "back", icon: "↩️", from: name, to: me, troops, end: m.returnAt, load: m.loot + m.ransom, verdict });
+      rows.push({ key: m.id, tone: "back", icon: "↩️", from: name, fromId: m.target, to: me, troops, end: m.returnAt, load: m.loot + m.ransom, verdict });
     } else if (m.status === "camp") {
-      rows.push({ key: m.id, tone: "camp", icon: "⛺", from: me, to: name, troops, end: m.returnAt, recall: m.id });
+      rows.push({ key: m.id, tone: "camp", icon: "⛺", from: me, to: name, toId: m.target, troops, end: m.returnAt, recall: m.id });
     } else {
-      rows.push({ key: m.id, tone: helping ? "ally" : "out", icon: MARCH_ICON[m.kind] ?? "⚔️", from: me, to: name, troops, end: m.arriveAt, back: m.arriveAt + (m.arriveAt - m.departAt), recall: m.arriveAt > now ? m.id : undefined });
+      rows.push({ key: m.id, tone: helping ? "ally" : "out", icon: MARCH_ICON[m.kind] ?? "⚔️", from: me, to: name, toId: m.target, troops, end: m.arriveAt, back: m.arriveAt + (m.arriveAt - m.departAt), recall: m.arriveAt > now ? m.id : undefined });
     }
   }
   for (const a of snap.allyMoves ?? []) {
     const troops = armyIcons(a.troops as Record<string, number>, "—");
-    if (a.status === "out") rows.push({ key: `ally-${a.id}`, tone: "ally", icon: "🛡️", from: a.from, to: me, troops, end: a.arriveAt });
-    else rows.push({ key: `ally-${a.id}`, tone: "ally", icon: "↩️", from: me, to: a.from, troops, end: a.returnAt });
+    if (a.status === "out") rows.push({ key: `ally-${a.id}`, tone: "ally", icon: "🛡️", from: a.from, fromId: snap.rivals.find((r) => r.name === a.from)?.id, to: me, troops, end: a.arriveAt });
+    else rows.push({ key: `ally-${a.id}`, tone: "ally", icon: "↩️", from: me, to: a.from, toId: snap.rivals.find((r) => r.name === a.from)?.id, troops, end: a.returnAt });
   }
   for (const sp of live.spies ?? []) {
     if (sp.arriveAt <= now) continue;
-    rows.push({ key: `spy-${sp.id}`, tone: "spy", icon: "🕵️", from: me, to: targetName(snap, sp.target), troops: "🕵️1", end: sp.arriveAt });
+    rows.push({ key: `spy-${sp.id}`, tone: "spy", icon: "🕵️", from: me, to: targetName(snap, sp.target), toId: sp.target, troops: "🕵️1", end: sp.arriveAt });
   }
   for (const m of live.moles ?? []) {
     if (m.until <= now) continue;
-    rows.push({ key: `mole-${m.id}`, tone: "spy", icon: "🐀", from: me, to: targetName(snap, m.target), troops: "taupe", end: m.until });
+    rows.push({ key: `mole-${m.id}`, tone: "spy", icon: "🐀", from: me, to: targetName(snap, m.target), toId: m.target, troops: "taupe", end: m.until });
   }
   if (rows.length === 0) return null;
   rows.sort((a, b) => (a.tone === "attack" ? 0 : 1) - (b.tone === "attack" ? 0 : 1) || a.end - b.end);
@@ -2072,7 +2115,7 @@ export function Movements({ snap, live, now, run }: { snap: GameSnapshot; live: 
   const next = Math.min(...rows.map((r) => r.end));
   return (
     <section className={`moves${attacks > 0 ? " moves-alert" : ""}`} aria-label="Mouvements">
-      <button className="moves-head" aria-expanded={open} onClick={toggle}>
+      <button className="moves-head" aria-expanded={open || !!focusKey} onClick={toggle}>
         <span className="moves-long">
           🧭 {rows.length} mouvement{rows.length > 1 ? "s" : ""} · prochain <span className="num">{countdown(next - now)}</span>
           {attacks > 0 ? <strong className="moves-warn"> · ⚠️ {attacks} attaque{attacks > 1 ? "s" : ""}</strong> : null}
@@ -2081,17 +2124,17 @@ export function Movements({ snap, live, now, run }: { snap: GameSnapshot; live: 
           🧭 {rows.length} · {countdown(next - now)}
           {attacks > 0 ? <strong className="moves-warn"> · ⚠️ {attacks}</strong> : null}
         </span>
-        <span aria-hidden>{open ? "▴" : "▾"}</span>
+        <span aria-hidden>{open || focusKey ? "▴" : "▾"}</span>
       </button>
-      {open && (
+      {(open || focusKey) && (
         <ul className="moves-list">
           {rows.map((r) => (
-            <li key={r.key} className={`move move-${r.tone}`}>
+            <li key={r.key} id={`move-${r.key}`} className={`move move-${r.tone}${focusKey === r.key ? " move-focus" : ""}`}>
               <span className="move-icon" aria-hidden>
                 {r.icon}
               </span>
               <span className="move-route">
-                {r.from} → {r.to}
+                {place(r.from, r.fromId)} → {place(r.to, r.toId)}
                 {r.verdict ? ` ${r.verdict}` : ""}
               </span>
               <span className="move-time num">
@@ -3124,6 +3167,7 @@ function EventCard({ e, now, busy, onAttack, history, me }: { e: EventView; now:
           {e.blocker ?? (e.kind === "caravane" ? `${pct} % de chances de battre l'escorte.` : `Un assaut devrait faucher environ ${formatNumber(e.take)} 🪨 de son armée.`)}
         </div>
       </div>
+      {!e.blocker && <EventTravel e={e} now={now} />}
       <button className="btn btn-primary" disabled={busy || e.blocker !== null} onClick={onAttack}>
         {e.kind === "caravane" ? "Piller" : "Attaquer"}
         {e.kind === "caravane" && <span className="cost num">{pct} %</span>}
@@ -3421,6 +3465,17 @@ function buildReports(snap: GameSnapshot, live: PlayerState, now: number): Repor
     if (!(r.intelUntil > now)) continue;
     out.push({ key: `intel-${r.id}-${r.intelUntil}`, cat: "espionnage", icon: "📜", title: `Rapport sur ${r.name}`, chips: [{ t: `valable ${countdown(r.intelUntil - now)}` }], at: r.intelUntil - SPY_INTEL_MS, rival: r, target: r.id });
   }
+  // H1, U2 : écus de clôture de la saison passée, un rapport « Chantier ».
+  const rw = snap.seasonRewards;
+  if (rw && rw.total > 0) {
+    const label = (id: string) => HALL.find((h) => h.id === id)?.title ?? id;
+    const lines = [
+      rw.details.stageEcus > 0 ? `🏗️ ${rw.details.stages} étapes du beffroi avec un palier de don : ${rw.details.stageEcus} écus` : null,
+      ...rw.details.podium.map((p) => `🏆 ${label(p.category)}, ${p.rank === 1 ? "1re" : `${p.rank}e`} place : ${p.ecus} écus`),
+      rw.details.loginEcus > 0 ? `📅 ${rw.details.days} jours de présence : ${rw.details.loginEcus} écus` : null,
+    ].filter(Boolean);
+    out.push({ key: `close-${rw.season}`, cat: "chantier", icon: "🏁", title: `Clôture de la saison ${rw.season}`, chips: [{ t: `🪙 +${rw.total}`, tone: "gain" }], at: live.seasonStart || now, text: lines.join(" · ") });
+  }
   const recent = out.filter((r) => r.at > now - INBOX_KEEP_MS).sort((a, b) => b.at - a.at);
   return INBOX_CATEGORIES.flatMap((c) => recent.filter((r) => r.cat === c).slice(0, INBOX_MAX));
 }
@@ -3586,6 +3641,7 @@ function readMapNames(): boolean {
 
 function KingdomMap({ snap, live, now, run, focus }: { snap: GameSnapshot; live: PlayerState; now: number; run: ReturnType<typeof useGame>["run"]; focus?: Focus | null }) {
   const [picked, setPicked] = useState<string | null>(() => (focus && now - focus.at < 5000 ? focus.id : null));
+  const showMove = useContext(SnapContext)?.showMove;
   const [busy, setBusy] = useState<string | null>(null);
   const [zoomed, setZoomed] = useState(false);
   const [names, setNames] = useState(readMapNames);
@@ -3734,6 +3790,7 @@ function KingdomMap({ snap, live, now, run, focus }: { snap: GameSnapshot; live:
             now={now}
             marches={marches}
             incoming={incoming}
+            onMarch={(id) => showMove?.(id)}
             picked={picked}
             onPick={setPicked}
             showNames={names || zoomed}

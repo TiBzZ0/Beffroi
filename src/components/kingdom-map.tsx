@@ -48,6 +48,8 @@ interface BoardProps {
   incoming: { id: string; from: Pt | null }[];
   picked: string | null;
   onPick: (id: string | null) => void;
+  /** U1 : toucher une armée ouvre sa ligne dans le tableau des mouvements. */
+  onMarch?: (id: string) => void;
   showNames: boolean;
   travel: { to: Pt; label: string } | null;
   meColor?: string;
@@ -589,7 +591,16 @@ export function MapBoard(props: BoardProps) {
           const at = quad(a, c, b, m.f);
           const d = m.status === "back" ? `M${b[0]} ${b[1]} Q${c[0]} ${c[1]} ${a[0]} ${a[1]}` : `M${a[0]} ${a[1]} Q${c[0]} ${c[1]} ${b[0]} ${b[1]}`;
           return (
-            <g key={m.id} className={`map-march ${m.status}`} style={{ ["--flag" as string]: props.meColor ?? "var(--map-me)" }}>
+            <g
+              key={m.id}
+              className={`map-march ${m.status}`}
+              style={{ ["--flag" as string]: props.meColor ?? "var(--map-me)", cursor: props.onMarch ? "pointer" : undefined }}
+              onClick={(ev) => {
+                if (!props.onMarch) return;
+                ev.stopPropagation();
+                props.onMarch(m.id);
+              }}
+            >
               <path d={d} className="map-march-line" />
               {m.status === "camp" && <use href="#mg-tent" transform={`translate(${b[0] + 9} ${b[1] + 4}) scale(0.8)`} />}
               <use href="#mg-flag" transform={`translate(${at[0].toFixed(1)} ${(at[1] - 2).toFixed(1)})`} />
@@ -601,7 +612,17 @@ export function MapBoard(props: BoardProps) {
       {me &&
         props.incoming.map((i) =>
           i.from ? (
-            <path key={i.id} d={`M${sx(i.from)} ${sy(i.from)} L${sx(me.pos)} ${sy(me.pos)}`} className="map-incoming-line" />
+            <path
+              key={i.id}
+              d={`M${sx(i.from)} ${sy(i.from)} L${sx(me.pos)} ${sy(me.pos)}`}
+              className="map-incoming-line"
+              style={{ cursor: props.onMarch ? "pointer" : undefined, pointerEvents: props.onMarch ? "stroke" : undefined }}
+              onClick={(ev) => {
+                if (!props.onMarch) return;
+                ev.stopPropagation();
+                props.onMarch(`in-${i.id}`);
+              }}
+            />
           ) : null,
         )}
 
