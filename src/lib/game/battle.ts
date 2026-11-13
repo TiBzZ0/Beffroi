@@ -42,7 +42,11 @@ export interface BattleOptions {
   attackerLevels?: Levels;
   defenderLevels?: Levels;
   /** Q2 : fortune de la bataille, un tirage unique entre 0,8 et 1,2 sur les dégâts de l'attaquant. */
-  fortune?: boolean;
+  fortune?: boolean | { min: number; max: number };
+  /** L2 : multiplicateur des dégâts de l'attaquant contre les fortifications (Béliers lourds). */
+  fortBonus?: number;
+  /** L2 : part des pertes de l'attaquant qui tombent vraiment (Vétérans : 0,9). */
+  attackerLosses?: number;
 }
 
 function defOf(id: string): CombatantDef | undefined {
@@ -86,7 +90,7 @@ const MIN_BREACH_FACTOR = 0.2;
  * n'en absorbent jamais plus de la moitié (un quart pour les palissades). Les béliers visent
  * d'abord les obstacles et réduisent la part qu'ils absorbent pour les autres.
  */
-function damageOn(shooters: Army, targets: Army, mult: number, shooterLv?: Levels, targetLv?: Levels): Map<CombatantId, number> {
+function damageOn(shooters: Army, targets: Army, mult: number, shooterLv?: Levels, targetLv?: Levels, fortBonus = 1): Map<CombatantId, number> {
   const out = new Map<CombatantId, number>();
   const alive = (Object.entries(targets) as [CombatantId, number][]).filter(([id, m]) => m > 0 && defOf(id));
   const hpOf = (id: CombatantId, m: number) => m * defOf(id)!.hp * levelFactor(targetLv, id);
@@ -134,7 +138,7 @@ function damageOn(shooters: Army, targets: Army, mult: number, shooterLv?: Level
     const plan = s.bonus?.fortification ? siege : normal;
     for (const [tid, share] of plan) {
       const t = defOf(tid)!;
-      const dmg = n * s.attack * levelFactor(shooterLv, sid) * (s.bonus?.[t.category] ?? 1) * share * mult;
+      const dmg = n * s.attack * levelFactor(shooterLv, sid) * (s.bonus?.[t.category] ?? 1) * (t.category === "fortification" ? fortBonus : 1) * share * mult;
       out.set(tid, (out.get(tid) ?? 0) + dmg);
     }
   }
@@ -182,7 +186,8 @@ export function battle(attacker: Army, defender: Army, rng: () => number, opts: 
   let defenderLost: Army = {};
   let rounds = 0;
   const log: RoundLog[] = [];
-  const fortune = opts.fortune ? 1 - BATTLE_FORTUNE + rng() * 2 * BATTLE_FORTUNE : 1;
+  const range = typeof opts.fortune === "object" ? opts.fortune : opts.fortune ? { min: 1 - BATTLE_FORTUNE, max: 1 + BATTLE_FORTUNE } : null;
+  const fortune = range ? range.min + rng() * (range.max - range.min) : 1;
   const mult = (opts.attackBonus ?? 1) * fortune;
   while (rounds < BATTLE_ROUNDS && armySize(att) > 0 && canFight(def)) {
     rounds++;
@@ -191,8 +196,8 @@ export function battle(attacker: Army, defender: Army, rng: () => number, opts: 
     // A11 : à chaque round, les dégâts de chaque camp varient de ±15 %.
     const swingAtt = 1 - BATTLE_SWING + rng() * 2 * BATTLE_SWING;
     const swingDef = 1 - BATTLE_SWING + rng() * 2 * BATTLE_SWING;
-    const onDef = casualties(def, damageOn(att, def, mult * swingAtt, aLv, dLv), rng, dLv);
-    const onAtt = casualties(att, damageOn(def, att, swingDef, dLv, aLv), rng, aLv);
+    const onDef = casualties(def, damageOn(att, def, mult * swingAtt, aLv, dLv, opts.fortBonus ?? 1), rng, dLv);
+    const onAtt = casualties(att, damageOn(def, att, swingDef * (opts.attackerLosses ?? 1), dLv, aLv), rng, aLv);
     def = subtract(def, onDef);
     att = subtract(att, onAtt);
     defenderLost = add(defenderLost, onDef);
@@ -219,7 +224,7 @@ export function estimateChance(attacker: Army, defender: Army, opts: BattleOptio
   if (armySize(cleanArmy(attacker)) === 0) return 0;
   // Les tirages sont fixes : mêmes armées, même résultat. On garde les derniers calculs (le serveur
   // recalcule sinon la chance contre chaque rival à chaque synchronisation).
-  const key = JSON.stringify([attacker, defender, opts.attackerLevels ?? null, opts.defenderLevels ?? null, opts.attackBonus ?? null, opts.fortune ?? false]);
+  const key = JSON.stringify([attacker, defender, opts.attackerLevels ?? null, opts.defenderLevels ?? null, opts.attackBonus ?? null, opts.fortune ?? false, opts.fortBonus ?? 1, opts.attackerLosses ?? 1]);
   const known = chanceCache.get(key);
   if (known !== undefined) return known;
   const rng = seededRng(0xbeff);

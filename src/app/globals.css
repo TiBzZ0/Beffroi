@@ -2387,3 +2387,35 @@ use.g-enemy {
 .block-head > .info { margin: 0; }
 .block-head > .info[open] { flex-basis: 100%; }
 .row > div > select.input { display: block; width: 100%; max-width: 100%; min-width: 0; box-sizing: border-box; }
+
+/* L3 : la Lignée */
+.badge-renown { margin-left: 6px; }
+.lin-head { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; margin: 4px 0 8px; }
+.lin-head .btn-wrap, .lin-head > .btn { margin-left: auto; }
+.lin-gauges { margin-bottom: 10px; }
+.chip-full { opacity: 0.6; }
+.lin-tabs { display: none; }
+.lin-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; }
+.lin-col-title { margin-top: 0; }
+.lin-rank { margin-bottom: 10px; }
+.lin-rank-label { font-size: 0.75rem; color: var(--ink-soft); margin: 0 0 4px; text-transform: uppercase; letter-spacing: 0.04em; }
+.lin-node { border: 1px dashed var(--line, #cdbb98); border-radius: 8px; margin-bottom: 6px; background: transparent; }
+.lin-node.open { border: 1px solid var(--dom, var(--accent)); background: color-mix(in srgb, var(--dom, var(--accent)) 6%, transparent); }
+.lin-node.owned { border: 1px solid var(--dom, var(--accent)); background: color-mix(in srgb, var(--dom, var(--accent)) 22%, transparent); }
+.lin-node.locked { opacity: 0.55; }
+.lin-node.locked.expanded { opacity: 1; }
+.lin-node-head { all: unset; box-sizing: border-box; cursor: pointer; display: flex; align-items: center; gap: 8px; width: 100%; padding: 8px 10px; min-width: 0; }
+.lin-node-head:focus-visible { outline: 2px solid var(--dom, var(--accent)); border-radius: 8px; }
+.lin-node-name { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 600; }
+.lin-node-cost { flex: 0 0 auto; white-space: nowrap; font-size: 0.85em; color: var(--ink-soft); }
+.lin-node-body { padding: 0 10px 8px; display: flex; flex-direction: column; gap: 6px; align-items: flex-start; }
+@media (max-width: 720px) {
+  .lin-tabs { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 10px; }
+  .lin-grid { grid-template-columns: 1fr; }
+  .lin-col { display: none; }
+  .lin-col.on { display: block; }
+  .lin-col-title { display: none; }
+}
+.lin-gauges { justify-content: flex-start; }
+.lin-head .btn { white-space: nowrap; }
+.lin-head .btn .cost { display: inline; margin-left: 4px; }

@@ -18,7 +18,6 @@ import {
   ELAN_PER_CLICK_MS,
   MAX_TITHE,
   ADVISED_TITHE,
-  donorTiersFor,
   DONOR_TIER_ECUS,
   DONOR_TIER_BONUS,
   CURFEW_MINUTES,
@@ -54,6 +53,10 @@ import {
   mapDistance,
 } from "@/lib/game/config";
 import {
+  armyPrice,
+  donorThresholds,
+  elanMaxMs,
+  playerAttackOpts,
   advance,
   inCurfew,
   stagePerk,
@@ -100,11 +103,12 @@ import { formatNumber, formatRate } from "@/lib/game/format";
 import { armySize, armyValue, battle, cleanArmy, estimateChance, seededRng, type Army } from "@/lib/game/battle";
 import { worldFrom, type AwaySummary, type LotView, type AllianceSummary, type ChronicleEntry, type EventView, type GameSnapshot, type RivalView } from "@/lib/game/types";
 import { useChat, useGame, useLeaderboard, usePush, useTick } from "./use-game";
+import { BRANCHES, lineageMark, NODE_BY_ID, NODES, nodeBlocker, RANK_COST, RANK_REQUIRED, RENOWN, RENOWN_CAPPED, RESPEC_FEE, respecBlocker, spentIn, type BranchId } from "@/lib/game/lineage";
 import { MapBoard, type BoardMarch, type BoardPlace } from "./kingdom-map";
 import { CHAT_MAX_LENGTH, CHAT_REACTIONS, type ChatChannel } from "@/lib/game/chat-config";
 import { CHANGELOG } from "@/lib/game/changelog";
 
-type Tab = "ateliers" | "ameliorations" | "chantier" | "armee" | "carte" | "raids" | "alliance" | "messages" | "classement" | "heritage";
+type Tab = "ateliers" | "ameliorations" | "chantier" | "armee" | "carte" | "raids" | "alliance" | "messages" | "classement" | "heritage" | "lignee";
 /** U3 : sept onglets, certains avec des sous-onglets. */
 type Group = "domaine" | "chantier" | "armee" | "carte" | "alliance" | "messages" | "rangs";
 const GROUPS: Record<Group, Tab[]> = {
@@ -114,9 +118,9 @@ const GROUPS: Record<Group, Tab[]> = {
   carte: ["carte", "raids"],
   alliance: ["alliance"],
   messages: ["messages"],
-  rangs: ["classement", "heritage"],
+  rangs: ["classement", "lignee", "heritage"],
 };
-const SUBTAB_LABELS: Partial<Record<Tab, string>> = { ateliers: "Ateliers", ameliorations: "Savoirs", carte: "Carte", raids: "Cibles", classement: "Classements", heritage: "Héritage" };
+const SUBTAB_LABELS: Partial<Record<Tab, string>> = { ateliers: "Ateliers", ameliorations: "Savoirs", carte: "Carte", raids: "Cibles", classement: "Classements", lignee: "Lignée", heritage: "Héritage" };
 const groupOf = (t: Tab): Group => (Object.keys(GROUPS) as Group[]).find((g) => GROUPS[g].includes(t)) ?? "domaine";
 type Qty = 1 | 10 | "max";
 const DAY_MS = 86_400_000;
@@ -222,6 +226,7 @@ export function Game({ userId }: { userId: string }) {
             {tab === "messages" && <Inbox snap={snap} live={live} now={now} run={game.run} userId={userId} />}
             {tab === "classement" && <Ranking boards={leaderboard} userId={userId} />}
             {tab === "heritage" && <Heritage snap={snap} run={game.run} />}
+            {tab === "lignee" && <Lineage snap={snap} now={now} run={game.run} />}
           </div>
         </section>
       </div>
@@ -551,6 +556,12 @@ function TopBar({ snap, now }: { snap: GameSnapshot; now: number }) {
       <div className="topbar-meta">
         <div>
           <strong>{snap.username}</strong>
+          {lineageMark(snap.state.lineage) && <span title="Lignée"> {lineageMark(snap.state.lineage)}</span>}
+          {snap.renown && (
+            <span className="badge badge-renown num" title="Renom disponible">
+              🎖️ {snap.renown.available}
+            </span>
+          )}
           {(snap.myTitles ?? []).map((t) => (
             <span key={t} className="badge badge-title">
               {t}
@@ -625,6 +636,108 @@ function SeasonEndCard({ snap }: { snap: GameSnapshot }) {
         Fermer
       </button>
     </div>
+  );
+}
+
+/** L2, L3 : la Lignée, trois branches de nœuds achetés en renom. */
+export function Lineage({ snap, now, run }: { snap: GameSnapshot; now: number; run: ReturnType<typeof useGame>["run"] }) {
+  const [busy, setBusy] = useState(false);
+  const [branch, setBranch] = useState<BranchId>(() => {
+    const top = (snap.state.lineage?.nodes ?? []).map((id) => NODE_BY_ID.get(id)?.branch).find(Boolean);
+    return top ?? "batisseur";
+  });
+  const [open, setOpen] = useState<string | null>(null);
+  const r = snap.renown ?? { earned: 0, available: 0, today: {} };
+  const l = snap.state.lineage;
+  const nodes = l?.nodes ?? [];
+  const act = async (action: Parameters<typeof run>[0]) => {
+    setBusy(true);
+    await run(action);
+    setBusy(false);
+  };
+  return (
+    <>
+      <div className="block-head">
+        <h3 className="section-title">🎖️ Lignée</h3>
+        <Info>
+          Le renom se gagne en jouant : raids gagnés (3), défenses réussies (2), seigneurs battus (1), reconnaissances réussies (1), quêtes du jour (3),
+          participation à un événement (2, et 3 de plus sur le podium), étape finie avec au moins un palier de don (10). Rien pour un raid dans ta propre
+          alliance ou contre un compte de la même adresse. Les limites du jour se remettent à zéro à minuit, heure de Paris. Chaque branche a quatre rangs :
+          pour prendre un nœud du rang 2, 3 ou 4, il faut avoir dépensé 6, 24 ou 50 renom dans la branche. Un seul nœud de rang 4 dans toute la Lignée : son
+          icône s&apos;affiche à côté de ton nom. Changer de voie rend tout sauf 10 renom, une fois par jour. C&apos;est un essai : tout repart de zéro avec la
+          saison suivante.
+        </Info>
+      </div>
+      <div className="lin-head">
+        <span className="chip num chip-gain">🎖️ {r.available} disponible{r.available > 1 ? "s" : ""}</span>
+        <span className="chip num">{r.earned - r.available} dépensé{r.earned - r.available > 1 ? "s" : ""}</span>
+        <Btn className="btn btn-small" busy={busy} reason={respecBlocker(l, now)} onClick={() => void act({ type: "lineage_respec" })}>
+          🔄 Changer de voie <span className="cost num">−{RESPEC_FEE} 🎖️</span>
+        </Btn>
+      </div>
+      <div className="report-chips lin-gauges">
+        {RENOWN_CAPPED.map((k) => (
+          <span key={k} className={`chip num${(r.today[k] ?? 0) >= (RENOWN[k].cap ?? 0) ? " chip-full" : ""}`}>
+            {RENOWN[k].icon} {RENOWN[k].label} {r.today[k] ?? 0}/{RENOWN[k].cap}
+          </span>
+        ))}
+        {(["quest", "event", "podium", "stage"] as const).filter((k) => (r.today[k] ?? 0) > 0).map((k) => (
+          <span key={k} className="chip num">
+            {RENOWN[k].icon} {RENOWN[k].label} +{r.today[k]}
+          </span>
+        ))}
+      </div>
+      <div className="subtabs lin-tabs" role="group" aria-label="Branches">
+        {BRANCHES.map((b) => (
+          <button key={b.id} className="btn btn-small" aria-pressed={branch === b.id} onClick={() => setBranch(b.id)}>
+            {b.icon} {b.name}
+            <span className="num"> {spentIn(nodes, b.id)}</span>
+          </button>
+        ))}
+      </div>
+      <div className="lin-grid">
+        {BRANCHES.map((b) => (
+          <div key={b.id} className={`lin-col${branch === b.id ? " on" : ""}`}>
+            <h4 className="hall-sub lin-col-title">
+              {b.icon} {b.name} <span className="num">· {spentIn(nodes, b.id)} 🎖️</span>
+            </h4>
+            {([1, 2, 3, 4] as const).map((rank) => (
+              <div key={rank} className="lin-rank">
+                <div className="lin-rank-label num">
+                  Rang {rank}
+                  {RANK_REQUIRED[rank] > 0 ? ` · dès ${RANK_REQUIRED[rank]}` : ""}
+                </div>
+                {NODES.filter((n) => n.branch === b.id && n.rank === rank).map((n) => {
+                  const owned = nodes.includes(n.id);
+                  const why = owned ? null : nodeBlocker(l, n.id, r.available);
+                  const state = owned ? "owned" : why ? "locked" : "open";
+                  const isOpen = open === n.id;
+                  return (
+                    <div key={n.id} className={`lin-node ${state}${isOpen ? " expanded" : ""}`}>
+                      <button className="lin-node-head" aria-expanded={isOpen} onClick={() => setOpen(isOpen ? null : n.id)}>
+                        <span aria-hidden>{n.icon}</span>
+                        <span className="lin-node-name">{n.name}</span>
+                        <span className="num lin-node-cost">{owned ? "✓" : `${RANK_COST[rank]} 🎖️`}</span>
+                      </button>
+                      {isOpen && (
+                        <div className="lin-node-body">
+                          <p className="row-desc">{n.effect}</p>
+                          {!owned && (
+                            <Btn className="btn btn-primary btn-small" busy={busy} reason={why} onClick={() => void act({ type: "lineage_buy", node: n.id })}>
+                              Prendre <span className="cost num">{RANK_COST[rank]} 🎖️</span>
+                            </Btn>
+                          )}
+                        </div>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+            ))}
+          </div>
+        ))}
+      </div>
+    </>
   );
 }
 
@@ -811,7 +924,8 @@ function Hero({ snap, rate, clickGain, game }: { snap: GameSnapshot; rate: numbe
           )}
           {elanBonus(snap.state) > 0 && (
             <ElanGauge
-              left={Math.min(ELAN_MAX_MS, Math.max(0, (snap.state.elanUntil ?? 0) - game.serverNow()) + game.pendingClicks() * ELAN_PER_CLICK_MS)}
+              max={elanMaxMs(snap.state)}
+              left={Math.min(elanMaxMs(snap.state), Math.max(0, (snap.state.elanUntil ?? 0) - game.serverNow()) + game.pendingClicks() * ELAN_PER_CLICK_MS)}
               bonus={elanBonus(snap.state) + stagePerk(snap.worksite.stageCompletedAt.length, "elan")}
             />
           )}
@@ -1216,7 +1330,7 @@ function ShareLine({ snap, detailed = false }: { snap: GameSnapshot; detailed?: 
   const ecus = snap.ecus ?? 0;
   const bonus = Math.round((snap.state.donorTiers ?? 0) * DONOR_TIER_BONUS * 100);
   if (!share || share.stage !== snap.worksite.stage) return null;
-  const tiers = donorTiersFor(share.stage);
+  const tiers = donorThresholds(snap.state, share.stage);
   const next = share.tiers < tiers.length ? tiers[share.tiers] : null;
   const goal = next !== null ? share.size * next : share.size;
   const pct = Math.min(100, (share.given / Math.max(1, goal)) * 100);
@@ -1393,8 +1507,8 @@ function duration(msLeft: number): string {
 }
 
 /** Jauge d'élan : tant qu'elle n'est pas vide, la production est augmentée. */
-function ElanGauge({ left, bonus }: { left: number; bonus: number }) {
-  const pct = Math.round((left / ELAN_MAX_MS) * 100);
+function ElanGauge({ left, bonus, max = ELAN_MAX_MS }: { left: number; bonus: number; max?: number }) {
+  const pct = Math.round((left / max) * 100);
   return (
     <div className="elan" title="Chaque coup ajoute 3 s d'élan (10 minutes au plus). Tant qu'il en reste, ta production est augmentée.">
       <span>
@@ -1730,7 +1844,7 @@ function RivalRow({
       </div>
       <div>
         <div className="row-title">
-          {r.name}
+          {r.name}{r.mark ? ` ${r.mark}` : ""}
           {r.isLord && <span className={`badge badge-level-${r.difficulty ?? 1}`}>{DIFFICULTY_LABELS[r.difficulty ?? 1]}</span>}
           {r.revenge && <span className="badge badge-revenge">revanche !</span>}
           {r.allianceName && <span className="badge">🤝 {r.allianceName}</span>}
@@ -1904,7 +2018,7 @@ function SendArmy({
   const army = Object.fromEntries(UNITS.map((u) => [u.id, Math.min(have[u.id] ?? 0, Math.max(0, Math.floor(chosen[u.id] ?? 0)))]).filter(([, n]) => (n as number) > 0)) as Record<string, number>;
   const all = withAllies && hasGuests ? sumGroups([army, guests]) : army;
   const out = travelMs(all as Army, distance, armySpeedBonus(me));
-  const chance = estimateChance(all as Army, r.army as Army, { attackBonus: r.revenge ? REVENGE_ATTACK_BONUS : 1, attackerLevels: me.levels, fortune: true });
+  const chance = estimateChance(all as Army, r.army as Army, playerAttackOpts(me, { attackBonus: r.revenge ? REVENGE_ATTACK_BONUS : 1 }));
   const away = (me.marches ?? []).length;
   return (
     <div className="simulator send-army">
@@ -2332,7 +2446,7 @@ function SpyReport({ r, now }: { r: RivalView; now: number }) {
 /** B7 : simulateur avant l'attaque, une bataille pour de faux contre l'armée vue en face (rien n'est perdu). */
 function Simulator({ me, army, r, intel, seed, onReplay, onClose }: { me: PlayerState; army: Army; r: RivalView; intel: boolean; seed: number; onReplay: () => void; onClose: () => void }) {
   const attack = army;
-  const opts = { attackBonus: r.revenge ? REVENGE_ATTACK_BONUS : 1, attackerLevels: me.levels, fortune: true };
+  const opts = playerAttackOpts(me, { attackBonus: r.revenge ? REVENGE_ATTACK_BONUS : 1 });
   const fight = battle(attack, r.army as Army, seededRng(seed * 7919), opts);
   return (
     <div className="simulator">
@@ -3511,6 +3625,14 @@ function reportOf(e: ChronicleEntry, me: string, myAlliance: number | null, riva
     cat = "chantier";
     title = `${d.name ?? stageDef(d.stage ?? 0).name} achevé`;
     if ((d.ecus ?? 0) > 0) chips.push({ t: `🪙 ${d.ecus}`, tone: "gain" });
+  } else if (e.kind === "renown") {
+    // L1 : chaque gain de renom, en ligne courte.
+    if (!attacker) return { key: `c${e.id}`, cat: "royaume", icon: "", title: "", chips: [], at: 0 };
+    const rd = d as { amount?: number; label?: string };
+    cat = "chantier";
+    icon = "🎖️";
+    title = rd.label ?? "Renom";
+    chips.push({ t: `🎖️ +${rd.amount ?? 0}`, tone: "gain" });
   } else if (e.kind === "quest" || e.kind === "chest" || e.kind === "ecus") {
     if (!attacker) return { key: `c${e.id}`, cat: "royaume", icon: "", title: "", chips: [], at: 0 };
     cat = "chantier";
@@ -4109,9 +4231,9 @@ function Garrison({ live, run }: { live: PlayerState; run: ReturnType<typeof use
             </div>
             {d.bonus && <div className="row-desc strong-vs">{strengths(d.bonus)}</div>}
           </div>
-          <Btn className="btn btn-primary" reason={d.cost * qty > live.stone ? "Pas assez de pierre." : null} onClick={() => buy(kind, d.id)}>
+          <Btn className="btn btn-primary" reason={Math.ceil(armyPrice(live, kind, d.cost) * qty) > live.stone ? "Pas assez de pierre." : null} onClick={() => buy(kind, d.id)}>
             +{qty}
-            <span className="cost num">{formatNumber(d.cost * qty)} 🪨</span>
+            <span className="cost num">{formatNumber(Math.ceil(armyPrice(live, kind, d.cost) * qty))} 🪨</span>
           </Btn>
         </div>
       );

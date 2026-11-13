@@ -21,6 +21,8 @@ export interface SeasonView {
 export interface RivalView {
   id: string;
   name: string;
+  /** L2 : icône de la branche du nœud de rang 4 de sa Lignée. */
+  mark?: string;
   isLord: boolean;
   blazon?: string;
   temper?: string;
@@ -131,7 +133,7 @@ export interface AwaySummary {
 export interface ChronicleEntry {
   id: number;
   at: number;
-  kind: "raid" | "gift" | "spy" | "war" | "fortress" | "event" | "sabotage" | "lot" | "hall" | "hall_siege" | "stage" | "quest" | "chest" | "ecus";
+  kind: "raid" | "gift" | "spy" | "war" | "fortress" | "event" | "sabotage" | "lot" | "hall" | "hall_siege" | "stage" | "quest" | "chest" | "ecus" | "renown";
   actorId: string | null;
   actorName: string;
   targetId: string | null;
@@ -302,6 +304,8 @@ export interface GameSnapshot {
   allyMoves?: AllyMoveView[];
   daily?: DailyView;
   guild?: HallView;
+  /** L1 : renom gagné dans la saison, disponible, et gains du jour par source. */
+  renown?: { earned: number; available: number; today: Partial<Record<string, number>> };
 }
 
 export interface LeaderboardRow {
@@ -336,6 +340,8 @@ export interface Leaderboards {
 
 export type GameAction =
   | { type: "sync" }
+  | { type: "lineage_buy"; node: string }
+  | { type: "lineage_respec" }
   | { type: "click"; count: number }
   | { type: "buy"; generator: string; qty: number }
   | { type: "upgrade"; upgrade: string }

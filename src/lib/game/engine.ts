@@ -168,6 +168,7 @@ import {
   type EventKind,
 } from "./config";
 import { armySize, armyValue, battle, cleanArmy, type Army, type BattleOptions, type Levels, type RoundLog } from "./battle";
+import { lin, LIN_ATTACK, LIN_ATTACK_LOSSES, LIN_CAVE_SECONDS, LIN_DONOR_TIERS, LIN_ELAN, LIN_FORT_DAMAGE, LIN_FORTUNE, LIN_GENERATOR_DISCOUNT, LIN_PRODUCTION, LIN_PROTECTED, LIN_PVP_CAP, LIN_REBUILD, LIN_RESEARCH_SPEED, LIN_REVENGE_MS, LIN_RUIN_OUTPUT, LIN_SABOTAGE, LIN_SPEED, LIN_SPY_SPEED, LIN_TROOP_DISCOUNT, LIN_WOUNDED, type LineageState } from "./lineage";
 
 export interface PlayerState {
   stone: number;
@@ -278,6 +279,8 @@ export interface PlayerState {
   hall?: Wings;
   /** Part de la dîme qui va à la halle (0 à 0,5). */
   hallTithe?: number;
+  /** L2 : nœuds de la Lignée achetés en renom (repart à zéro à chaque saison). */
+  lineage?: LineageState;
 }
 
 /** Une recherche de la Forge : un type de troupe ou de fortification, ou l'espionnage. */
@@ -343,8 +346,9 @@ export function moleCost(base: number): number {
 }
 
 /** E3 : durée du trajet d'un espion (vitesse 3, 1 minute au moins). */
-export function spyTravelMs(distance: number): number {
-  return Math.max(SPY_MIN_MS, Math.round((TRAVEL_BASE_MIN + (TRAVEL_PER_CELL_MIN * distance) / SPY_SPEED) * 60_000));
+export function spyTravelMs(distance: number, fast = false): number {
+  // L2 : Pieds légers, espions 25 % plus rapides.
+  return Math.max(SPY_MIN_MS, Math.round(((TRAVEL_BASE_MIN + (TRAVEL_PER_CELL_MIN * distance) / SPY_SPEED) * 60_000) / (fast ? 1 + LIN_SPY_SPEED : 1)));
 }
 
 /** E3 : risque d'être repéré pour un écart de niveau `gap` et une distance en cases. */
@@ -354,7 +358,7 @@ export function spyRisk(gap: number, distance: number): number {
 
 /** V15 : secondes de stock à l'abri achetées au marchand. */
 export function extraSecured(state: PlayerState, t: number): number {
-  return (t < (state.boostSafeUntil ?? 0) ? MERCHANT_SAFE_SECONDS : 0) + WING_SAFE_SECONDS[wingLevel(state.hall, "grenier")] + LEGACY_CAVE_SECONDS * legacyLevel(state, "cave");
+  return (t < (state.boostSafeUntil ?? 0) ? MERCHANT_SAFE_SECONDS : 0) + WING_SAFE_SECONDS[wingLevel(state.hall, "grenier")] + LEGACY_CAVE_SECONDS * legacyLevel(state, "cave") + (lin(state, "cave") ? LIN_CAVE_SECONDS : 0);
 }
 
 /** V15 : prix du marchand, 30 minutes de sa production. */
@@ -642,7 +646,7 @@ export function productionMultiplier(state: PlayerState, world: WorldState, stag
   for (const u of ownedUpgrades(state)) {
     if (u.effect.kind === "production") m *= u.effect.multiplier;
   }
-  return m * (1 + masteryBonus(state)) * (1 + WING_PRODUCTION[wingLevel(state.hall, "loge")]) * stageMultiplier(stagesDone, "production") * (1 + LEGACY_CARRIER * legacyLevel(state, "carrier"));
+  return m * (1 + masteryBonus(state)) * (1 + WING_PRODUCTION[wingLevel(state.hall, "loge")]) * stageMultiplier(stagesDone, "production") * (1 + LEGACY_CARRIER * legacyLevel(state, "carrier") + (lin(state, "carriere") ? LIN_PRODUCTION : 0));
 }
 
 /** H2 : niveau d'héritage, borné. */
@@ -660,7 +664,8 @@ export function legacyStartUntil(state: PlayerState): number {
 export function productionPerSecond(state: PlayerState, world: WorldState, stagesDone: number): number {
   let base = 0;
   for (const g of GENERATORS) {
-    const n = owned(state, g.id);
+    // L2 : l'Architecte royal fait encore produire les ruines à 50 %.
+    const n = owned(state, g.id) + (lin(state, "architecte") ? LIN_RUIN_OUTPUT * ruinsOf(state, g.id) : 0);
     if (n > 0) base += n * generatorRate(state, g.id);
   }
   return base * productionMultiplier(state, world, stagesDone);
@@ -689,6 +694,11 @@ export function chainMasterBonuses(list: { kind: MasterBonusKind; from: number; 
 /** Le bonus de maître d'œuvre `kind` est-il actif à `t` ? */
 export function masterActive(state: PlayerState, kind: MasterBonusKind, t: number): boolean {
   return (state.masterBonuses ?? []).some((m) => m.kind === kind && t >= m.from && t < m.until);
+}
+
+/** Réserve d'élan maximale (L2 : doublée par le Marteau infatigable). */
+export function elanMaxMs(state: PlayerState): number {
+  return ELAN_MAX_MS * (lin(state, "marteau") ? LIN_ELAN : 1);
 }
 
 export function elanBonus(state: PlayerState): number {
@@ -759,7 +769,12 @@ export function generatorCost(state: PlayerState, id: GeneratorId, qty = 1): num
   const def = GENERATORS.find((g) => g.id === id)!;
   // Les ruines comptent : se faire détruire un bâtiment ne rend pas le suivant moins cher.
   const n = owned(state, id) + ruinsOf(state, id);
-  return Math.ceil((def.baseCost * Math.pow(COST_GROWTH, n) * (Math.pow(COST_GROWTH, qty) - 1) * fairFactor(state, FAIR_GENERATOR_FACTOR)) / (COST_GROWTH - 1));
+  return Math.ceil((def.baseCost * Math.pow(COST_GROWTH, n) * (Math.pow(COST_GROWTH, qty) - 1) * fairFactor(state, FAIR_GENERATOR_FACTOR) * generatorDiscount(state)) / (COST_GROWTH - 1));
+}
+
+/** L2 : Main-d'œuvre, ateliers 5 % moins chers. */
+function generatorDiscount(state: PlayerState): number {
+  return lin(state, "main_oeuvre") ? 1 - LIN_GENERATOR_DISCOUNT : 1;
 }
 
 /** V3 : remise de la foire, à l'heure de l'état (il est toujours avancé avant un achat). */
@@ -776,7 +791,7 @@ export function upgradeCost(state: PlayerState, u: UpgradeDef): number {
 export function maxAffordable(state: PlayerState, id: GeneratorId): number {
   const def = GENERATORS.find((g) => g.id === id)!;
   const n = owned(state, id) + ruinsOf(state, id);
-  const first = def.baseCost * Math.pow(COST_GROWTH, n) * fairFactor(state, FAIR_GENERATOR_FACTOR);
+  const first = def.baseCost * Math.pow(COST_GROWTH, n) * fairFactor(state, FAIR_GENERATOR_FACTOR) * generatorDiscount(state);
   if (state.stone < first) return 0;
   let qty = Math.floor(Math.log((state.stone * (COST_GROWTH - 1)) / first + 1) / Math.log(COST_GROWTH));
   while (qty > 0 && generatorCost(state, id, qty) > state.stone) qty--;
@@ -846,7 +861,7 @@ export function applyClicks(
       totalProduced: state.totalProduced + gain,
       totalClicks: state.totalClicks + accepted,
       lastClickAt: now,
-      elanUntil: Math.min(now + ELAN_MAX_MS, Math.max(state.elanUntil ?? 0, now) + accepted * ELAN_PER_CLICK_MS),
+      elanUntil: Math.min(now + elanMaxMs(state), Math.max(state.elanUntil ?? 0, now) + accepted * ELAN_PER_CLICK_MS),
       // Frapper la pierre aide à éteindre l'incendie des ateliers.
       burnedUntil: state.burnedUntil > now ? Math.max(now, state.burnedUntil - accepted * BURN_CLICK_REDUCTION_MS) : state.burnedUntil,
     },
@@ -998,13 +1013,19 @@ export function shareSize(state: PlayerState, world: WorldState, now: number, st
   return Math.max(1, Math.ceil(productionPerSecond(state, world, stagesDoneAt(world, now)) * hours * 3600));
 }
 
+/** Seuils des paliers de don (L2 : 20 % de moins avec la Dîme généreuse). */
+export function donorThresholds(state: PlayerState, stage: number): number[] {
+  const f = lin(state, "dime") ? LIN_DONOR_TIERS : 1;
+  return donorTiersFor(stage).map((t) => t * f);
+}
+
 /** Compte un don dans la part de chantier ; renvoie les paliers franchis et les écus gagnés. */
 export function recordGift(state: PlayerState, amount: number): { state: PlayerState; tiers: number; ecus: number } {
   const share = state.share;
   // Q4 : un don nul rattrape aussi les paliers franchis quand les seuils baissent.
   if (!share || !(amount >= 0)) return { state, tiers: 0, ecus: 0 };
   const given = share.given + amount;
-  const thresholds = donorTiersFor(share.stage);
+  const thresholds = donorThresholds(state, share.stage);
   let tiers = share.tiers;
   let ecus = 0;
   while (tiers < thresholds.length && given >= share.size * thresholds[tiers]) {
@@ -1032,7 +1053,7 @@ export function stageSize(activeRates: number[], hours = STAGE_SIZE_HOURS): numb
 /** Prix de reconstruction d'une ruine : moitié du prix d'un bâtiment au niveau actuel. */
 export function ruinCost(state: PlayerState, id: GeneratorId): number {
   const def = GENERATORS.find((g) => g.id === id)!;
-  return Math.ceil(def.baseCost * Math.pow(COST_GROWTH, owned(state, id)) * RUIN_REBUILD_FACTOR);
+  return Math.ceil(def.baseCost * Math.pow(COST_GROWTH, owned(state, id)) * RUIN_REBUILD_FACTOR * (lin(state, "charpentiers") ? LIN_REBUILD : 1));
 }
 
 export function rebuildRuin(state: PlayerState, id: GeneratorId): Result<PlayerState> {
@@ -1100,7 +1121,9 @@ export function woundedOf(lost: Army, share: number): Army {
 export function addWounded(state: PlayerState, wounded: Army, now: number): PlayerState {
   if (Object.keys(wounded).length === 0) return state;
   const w: PlayerState["wounded"] = { ...(state.wounded ?? {}) };
-  for (const [id, n] of Object.entries(wounded) as [UnitId, number][]) w[id] = (w[id] ?? 0) + n;
+  // L2 : les Chirurgiens soignent 10 % de blessés en plus.
+  const care = lin(state, "chirurgiens") ? 1 + LIN_WOUNDED : 1;
+  for (const [id, n] of Object.entries(wounded) as [UnitId, number][]) w[id] = (w[id] ?? 0) + Math.round(n * care);
   return { ...state, wounded: w, healAt: now + (wingLevel(state.hall, "infirmerie") > 0 ? WING_HEAL_MS[wingLevel(state.hall, "infirmerie")] : INFIRMARY_MS) };
 }
 
@@ -1193,11 +1216,16 @@ export function armyWorth(state: PlayerState): number {
   return armyValue(cleanArmy({ ...state.troops, ...state.defenses }));
 }
 
+/** Prix d'une troupe ou d'une fortification (L2 : Recrues, troupes 5 % moins chères). */
+export function armyPrice(state: PlayerState, kind: "unit" | "defense", cost: number): number {
+  return kind === "unit" && lin(state, "recrues") ? cost * (1 - LIN_TROOP_DISCOUNT) : cost;
+}
+
 export function buyArmy(state: PlayerState, kind: "unit" | "defense", id: string, qty: number): Result<PlayerState> {
   const def = kind === "unit" ? UNITS.find((u) => u.id === id) : DEFENSES.find((d) => d.id === id);
   if (!def) return { ok: false, error: kind === "unit" ? "Troupe inconnue." : "Fortification inconnue." };
   if (!Number.isSafeInteger(qty) || qty < 1) return { ok: false, error: "Quantité invalide." };
-  const cost = def.cost * qty;
+  const cost = Math.ceil(armyPrice(state, kind, def.cost) * qty);
   if (cost > state.stone) return { ok: false, error: "Pas assez de pierre." };
   const key = kind === "unit" ? "troops" : "defenses";
   const current = (state[key] as Record<string, number>)[id] ?? 0;
@@ -1352,14 +1380,37 @@ export function withAllies(own: Army, allies?: Record<string, Army>): Army {
 export function raidArmies(attacker: PlayerState, victim: PlayerState, ctx: Pick<RaidContext, "attackerArmy" | "defenderArmy" | "victimId" | "now" | "stagesDone" | "allyArmies" | "attackerIsLord">) {
   // Le coup de pouce de la victime rend ses défenseurs plus durs à abattre.
   const sturdy = (masterActive(victim, "defense", ctx.now) ? 1 + MASTER_BONUSES.defense.value : 1) * (ctx.defenderArmy ? 1 : 1 + stagePerk(ctx.stagesDone ?? 0, "defenseHp")) * (ctx.defenderArmy ? 1 : reinforcementStrength(victim) * rampartStrength(victim));
-  const attackBonus = (hasRevenge(attacker, ctx.victimId, ctx.now) ? REVENGE_ATTACK_BONUS : 1) / (1 + (victim.catchUp ?? 0)) / sturdy;
-  const opts: BattleOptions = { attackBonus, attackerLevels: attacker.levels, defenderLevels: victim.levels, fortune: !ctx.attackerIsLord };
+  const attackBonus = ((hasRevenge(attacker, ctx.victimId, ctx.now) ? REVENGE_ATTACK_BONUS : 1) + (ctx.attackerIsLord ? 0 : warAttack(attacker))) / (1 + (victim.catchUp ?? 0)) / sturdy;
+  const opts: BattleOptions = { ...(ctx.attackerIsLord ? {} : warOpts(attacker)), attackBonus, attackerLevels: attacker.levels, defenderLevels: victim.levels, fortune: ctx.attackerIsLord ? false : warFortune(attacker) };
   return {
     attack: ctx.attackerArmy ? withAllies(ctx.attackerArmy, ctx.allyArmies) : attackArmy(attacker),
     defense: ctx.defenderArmy ?? defenseArmy(victim),
     attackBonus,
     opts,
   };
+}
+
+/** L2 : bonus d'attaque additif de la Forge vive. */
+export function warAttack(state: PlayerState): number {
+  return lin(state, "forge") ? LIN_ATTACK : 0;
+}
+
+/** L2 : fortune d'une bataille menée par ce joueur (Chef de guerre : 0,95 à 1,25). */
+export function warFortune(state: PlayerState): BattleOptions["fortune"] {
+  return lin(state, "chef") ? { ...LIN_FORTUNE } : true;
+}
+
+/** L2 : options de bataille que la Lignée donne à l'attaquant (béliers lourds, vétérans). */
+export function warOpts(state: PlayerState): Pick<BattleOptions, "fortBonus" | "attackerLosses"> {
+  return {
+    ...(lin(state, "beliers") ? { fortBonus: 1 + LIN_FORT_DAMAGE } : {}),
+    ...(lin(state, "veterans") ? { attackerLosses: LIN_ATTACK_LOSSES } : {}),
+  };
+}
+
+/** L2 : options complètes d'une attaque de joueur hors raid (forteresse, halles, événements, simulateur). */
+export function playerAttackOpts(state: PlayerState, opts: BattleOptions = {}): BattleOptions {
+  return { ...opts, ...warOpts(state), attackBonus: (opts.attackBonus ?? 1) + warAttack(state), attackerLevels: opts.attackerLevels ?? state.levels, fortune: warFortune(state) };
 }
 
 /** Halle : la salle d'armes rend les renforts postés plus durs, au prorata de leur part dans la défense. */
@@ -1382,7 +1433,7 @@ export function rampartStrength(victim: PlayerState): number {
 
 /** Halle : vitesse en plus d'une armée (écuries, et salle d'armes pour des renforts). */
 export function armySpeedBonus(state: PlayerState, reinforce = false): number {
-  return WING_ARMY_SPEED[wingLevel(state.hall, "ecuries")] + (reinforce ? WING_REINFORCE_SPEED[wingLevel(state.hall, "armes")] : 0);
+  return WING_ARMY_SPEED[wingLevel(state.hall, "ecuries")] + (reinforce ? WING_REINFORCE_SPEED[wingLevel(state.hall, "armes")] : 0) + (lin(state, "marche") ? LIN_SPEED : 0);
 }
 
 /** Vérifie qu'un raid est permis. Renvoie un message d'erreur, ou null. */
@@ -1500,7 +1551,7 @@ export function resolveRaid(
     lord: !!ctx.defenderArmy,
     // Un seigneur prend au plus 30 minutes de la production de base de sa victime, revanche comprise.
     // G5 : un joueur prend au plus le plafond de tribut fourni par le serveur à un seigneur.
-    cap: ctx.attackerIsLord ? Math.min(ctx.victimRate, ctx.victimBaseRate ?? ctx.victimRate) * LORD_LOOT_CAP_SECONDS : ctx.defenderArmy ? ctx.lordLootCap : playerVsPlayer && ctx.attackerRate !== undefined ? ctx.attackerRate * PVP_LOOT_CAP_SECONDS : undefined,
+    cap: ctx.attackerIsLord ? Math.min(ctx.victimRate, ctx.victimBaseRate ?? ctx.victimRate) * LORD_LOOT_CAP_SECONDS : ctx.defenderArmy ? ctx.lordLootCap : playerVsPlayer && ctx.attackerRate !== undefined ? ctx.attackerRate * PVP_LOOT_CAP_SECONDS * (1 + (lin(attacker, "pillard") ? LIN_PVP_CAP : 0)) : undefined,
     factor: factor * lootBonus,
     stagesDone: ctx.stagesDone,
   });
@@ -1523,7 +1574,7 @@ export function resolveRaid(
   const destroyed: RaidReport["destroyed"] = {};
   for (const g of [...GENERATORS].reverse()) {
     if (toDestroy <= 0) break;
-    if (owned(victim, g.id) > PROTECTED_PER_TYPE) {
+    if (owned(victim, g.id) > PROTECTED_PER_TYPE + (lin(victim, "fondations") ? LIN_PROTECTED : 0)) {
       generators[g.id] = owned(victim, g.id) - 1;
       ruins[g.id] = ruinsOf(victim, g.id) + 1;
       destroyed[g.id] = 1;
@@ -1545,7 +1596,7 @@ export function resolveRaid(
         ruinImmuneUntil: Object.keys(destroyed).length > 0 ? now + RUIN_IMMUNITY_MS : (victim.ruinImmuneUntil ?? 0),
         shieldUntil: now + (ctx.defenderArmy ? LORD_SHIELD_MS : SHIELD_MS),
         revengeTarget: ctx.attackerId,
-        revengeUntil: now + REVENGE_MS,
+        revengeUntil: now + REVENGE_MS + (lin(victim, "rancune") ? LIN_REVENGE_MS : 0),
       },
       report: { ...base, stolen, allyShares, destroyed, ransom, fairness: factor },
     },
@@ -1615,7 +1666,7 @@ export function researchCost(state: PlayerState, id: ResearchId, base = 0): numb
 }
 
 export function researchTime(state: PlayerState, id: ResearchId, stagesDone = 0): number {
-  return Math.ceil((RESEARCH_BASE_MS * RESEARCH_TIME_GROWTH ** queuedLevel(state, id)) / (1 + ACADEMY_SPEED * (state.academy ?? 0)) / (1 + stagePerk(stagesDone, "researchSpeed")));
+  return Math.ceil((RESEARCH_BASE_MS * RESEARCH_TIME_GROWTH ** queuedLevel(state, id)) / (1 + ACADEMY_SPEED * (state.academy ?? 0)) / (1 + stagePerk(stagesDone, "researchSpeed") + (lin(state, "savants") ? LIN_RESEARCH_SPEED : 0)));
 }
 
 /** Types qu'on peut améliorer : troupes et fortifications (pas les gardes). */
@@ -1679,7 +1730,7 @@ export function cancelResearch(state: PlayerState, endsAt: number, now: number, 
 export function sabotageCost(saboteur: PlayerState, target: PlayerState, world: WorldState, now: number): number {
   void target;
   // E4 : 10 minutes de production de base, quelle que soit la cible.
-  return Math.max(SABOTAGE_MIN_COST, Math.ceil(baseRate(saboteur, world, now) * SABOTAGE_COST_SECONDS));
+  return Math.max(SABOTAGE_MIN_COST, Math.ceil(baseRate(saboteur, world, now) * SABOTAGE_COST_SECONDS * (lin(saboteur, "poudre") ? LIN_SABOTAGE : 1)));
 }
 
 export type SabotageAim = "academie" | "grenier" | "guet";

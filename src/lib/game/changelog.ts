@@ -523,4 +523,13 @@ export const CHANGELOG: ChangeEntry[] = [
       "🏰 Correctif : un seigneur prend au plus 30 minutes de ta production de base. Jusqu'ici, l'élan, le coffre du jour et les autres bonus passagers gonflaient ce plafond.",
     ],
   },
+  {
+    id: 62,
+    date: "13 novembre",
+    items: [
+      "🎖️ Nouveau : le renom. Il se gagne en jouant, pas en produisant : raid gagné contre un joueur 3 (15 par jour au plus), défense réussie 2 (10 par jour), seigneur battu 1 (6 par jour), reconnaissance réussie 1 (4 par jour), quête du jour 3, participation à un événement 2 et 3 de plus sur le podium, étape finie avec au moins un palier de don 10. Rien dans sa propre alliance ni entre comptes d'une même adresse. Les limites repartent à minuit, heure de Paris. Ton renom s'affiche en haut, et chaque gain arrive dans tes rapports.",
+      "🌳 Nouveau : la Lignée, dans 🏆 Rangs. Trois branches (⛏️ Bâtisseur, ⚔️ Seigneur de guerre, 🕵️ Maître espion) de neuf nœuds sur quatre rangs, achetés en renom. Un seul nœud de rang 4 dans toute la Lignée, et son icône s'affiche à côté de ton nom. Changer de voie rend tout sauf 10 renom, une fois par jour.",
+      "🧪 C'est un essai : 20 renom sont offerts pour commencer, et renom comme Lignée repartent de zéro le 23 novembre avec la nouvelle saison.",
+    ],
+  },
 ];
