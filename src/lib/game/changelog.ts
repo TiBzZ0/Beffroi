@@ -516,4 +516,11 @@ export const CHANGELOG: ChangeEntry[] = [
       "✂️ Alliance, Chantier, Domaine et Rangs allégés comme Armée et Carte : boutons courts, chiffres en pastilles, explications derrière ⓘ, et un bouton grisé dit pourquoi quand tu le touches. Les coûts, durées et bonus restent visibles.",
     ],
   },
+  {
+    id: 61,
+    date: "13 novembre",
+    items: [
+      "🏰 Correctif : un seigneur prend au plus 30 minutes de ta production de base. Jusqu'ici, l'élan, le coffre du jour et les autres bonus passagers gonflaient ce plafond.",
+    ],
+  },
 ];

@@ -3074,6 +3074,7 @@ async function settleMarches(
     attackerId: owner.id,
     victimId: victim.id,
     victimRate: vRate,
+    victimBaseRate: victim.isLord ? vRate : baseRate(vState, world, at),
     stagesDone: stagesDoneAt(world, at),
     defenderArmy: victim.isLord ? lordArmies(entities, world, at, flat).get(victim.id)?.defense : undefined,
     allied: isAllied(owner, victim),

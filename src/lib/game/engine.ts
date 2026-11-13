@@ -1284,6 +1284,8 @@ export interface RaidContext {
   victimId: string;
   /** Production actuelle de la victime (pour son stock sécurisé). */
   victimRate: number;
+  /** Production de base de la victime (sans bonus passagers) : sert au plafond d'un seigneur. */
+  victimBaseRate?: number;
   /** Les seigneurs n'achètent pas de troupes : on fournit leur armée (jamais entamée). */
   attackerIsLord?: boolean;
   /** Riposte d'un seigneur : il peut frapper deux fois de suite la même cible. */
@@ -1496,9 +1498,9 @@ export function resolveRaid(
     extraSecured: extraSecured(victim, now),
     securedFactor: (victim.granaryCutUntil ?? 0) > now ? 0.5 : 1,
     lord: !!ctx.defenderArmy,
-    // Un seigneur prend au plus 30 minutes de la production de sa victime, revanche comprise.
+    // Un seigneur prend au plus 30 minutes de la production de base de sa victime, revanche comprise.
     // G5 : un joueur prend au plus le plafond de tribut fourni par le serveur à un seigneur.
-    cap: ctx.attackerIsLord ? ctx.victimRate * LORD_LOOT_CAP_SECONDS : ctx.defenderArmy ? ctx.lordLootCap : playerVsPlayer && ctx.attackerRate !== undefined ? ctx.attackerRate * PVP_LOOT_CAP_SECONDS : undefined,
+    cap: ctx.attackerIsLord ? Math.min(ctx.victimRate, ctx.victimBaseRate ?? ctx.victimRate) * LORD_LOOT_CAP_SECONDS : ctx.defenderArmy ? ctx.lordLootCap : playerVsPlayer && ctx.attackerRate !== undefined ? ctx.attackerRate * PVP_LOOT_CAP_SECONDS : undefined,
     factor: factor * lootBonus,
     stagesDone: ctx.stagesDone,
   });
