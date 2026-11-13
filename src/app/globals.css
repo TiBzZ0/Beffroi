@@ -2366,3 +2366,10 @@ use.g-enemy {
   box-shadow: var(--shadow);
 }
 .rival-chips { justify-content: flex-start; margin: 4px 0; }
+.stage.done, .stage.upcoming { padding-top: 6px; padding-bottom: 6px; }
+.stage.done .stage-bonus, .stage.upcoming .stage-bonus { font-size: 0.85em; }
+.row > div { min-width: 0; }
+.reinforce { flex-wrap: wrap; }
+.reinforce select { min-width: 0; }
+.reinforce select { flex: 1 1 120px; }
+.reinforce .input-qty { flex: 0 1 72px; width: 72px; }

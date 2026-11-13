@@ -509,4 +509,11 @@ export const CHANGELOG: ChangeEntry[] = [
       "🏁 Les écus de clôture de saison arrivent aussi en rapport, catégorie Chantier.",
     ],
   },
+  {
+    id: 60,
+    date: "13 novembre",
+    items: [
+      "✂️ Alliance, Chantier, Domaine et Rangs allégés comme Armée et Carte : boutons courts, chiffres en pastilles, explications derrière ⓘ, et un bouton grisé dit pourquoi quand tu le touches. Les coûts, durées et bonus restent visibles.",
+    ],
+  },
 ];

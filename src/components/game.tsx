@@ -663,10 +663,10 @@ function Heritage({ snap, run }: { snap: GameSnapshot; run: ReturnType<typeof us
                 </div>
                 <div className="row-desc">{l.effect}</div>
               </div>
-              <button className="btn btn-primary" disabled={busy || maxed || cost > ecus} onClick={() => void buy(l.id)}>
-                {maxed ? "Au plus haut" : `Niveau ${level + 1}`}
+              <Btn className="btn btn-primary" busy={busy} reason={maxed ? "Niveau maximal atteint." : cost > ecus ? "Pas assez d'écus." : null} onClick={() => void buy(l.id)}>
+                {maxed ? "Max" : `Niv. ${level + 1}`}
                 {!maxed && <span className="cost num">{cost} 🪙</span>}
-              </button>
+              </Btn>
             </div>
           );
         })}
@@ -869,7 +869,7 @@ function Hero({ snap, rate, clickGain, game }: { snap: GameSnapshot; rate: numbe
   );
 }
 
-function Generators({ live, stagesDone, snap, run }: { live: PlayerState; stagesDone: number; snap: GameSnapshot; run: ReturnType<typeof useGame>["run"] }) {
+export function Generators({ live, stagesDone, snap, run }: { live: PlayerState; stagesDone: number; snap: GameSnapshot; run: ReturnType<typeof useGame>["run"] }) {
   const [qty, setQty] = useState<Qty>(1);
   const [busy, setBusy] = useState<GeneratorId | null>(null);
   const world = worldFrom(snap.worksite);
@@ -910,7 +910,7 @@ function Generators({ live, stagesDone, snap, run }: { live: PlayerState; stages
       </div>
       {mastery > 0 && (
         <p className="mastery-line num">
-          🛠️ Corps de métier : +{Math.round(mastery * 100)} % de production (une tranche par lot complet de 50 bâtiments d&apos;un type)
+          <span title="Une tranche par lot complet de 50 bâtiments d'un type">🛠️ Corps de métier +{Math.round(mastery * 100)} %</span>
         </p>
       )}
       <div className="list">
@@ -921,7 +921,7 @@ function Generators({ live, stagesDone, snap, run }: { live: PlayerState; stages
           const cost = generatorCost(live, g.id, count);
           const each = generatorRate(live, g.id) * mult;
           return (
-            <div key={g.id} className={`row${hidden ? " locked" : ""}`}>
+            <div key={g.id} className={`row${hidden ? " locked" : ""}`} title={hidden ? undefined : g.description}>
               <div className="row-icon" aria-hidden>
                 {hidden ? "❔" : g.icon}
               </div>
@@ -931,28 +931,28 @@ function Generators({ live, stagesDone, snap, run }: { live: PlayerState; stages
                   {n > 0 && <span className="row-count num">{n}</span>}
                   {!hidden && g.id === best?.id && (
                     <span className="badge badge-best" title="La meilleure production gagnée par pierre dépensée, paliers compris">
-                      ⭐ le plus rentable{best.qty > 1 ? ` : prends-en ${best.qty}` : ""}
+                      ⭐ rentable{best.qty > 1 ? ` ×${best.qty}` : ""}
                     </span>
                   )}
                 </div>
                 <div className="row-desc num">
-                  {hidden ? "Continue de bâtir pour le découvrir." : `${g.description} ${formatRate(each)}/s chacun${n > 0 ? ` · total ${formatRate(each * n)}/s` : ""}`}
-                  {!hidden && cost > live.stone && rate > 0 ? ` · à toi dans ${duration(((cost - live.stone) / rate) * 1000)}` : ""}
+                  {hidden ? "Continue de bâtir pour le découvrir." : `${formatRate(each)}/s chacun${n > 0 ? ` · Σ ${formatRate(each * n)}/s` : ""}`}
+                  {!hidden && cost > live.stone && rate > 0 ? ` · ⏳ ${duration(((cost - live.stone) / rate) * 1000)}` : ""}
                 </div>
                 {!hidden && n > 0 && <TierLine live={live} id={g.id} />}
               </div>
-              <button className="btn btn-primary" disabled={hidden || cost > live.stone} onClick={() => buy(g.id, count)}>
+              <Btn className="btn btn-primary" reason={hidden ? "Continue de bâtir pour le découvrir." : cost > live.stone ? "Pas assez de pierre." : null} onClick={() => buy(g.id, count)}>
                 +{count}
                 <span className="cost num">{formatNumber(cost)} 🪨</span>
-              </button>
+              </Btn>
               {ruinsOf(live, g.id) > 0 && (
                 <div className="ruins">
                   <span>
-                    🏚️ {ruinsOf(live, g.id)} en ruine après un raid
+                    🏚️ {ruinsOf(live, g.id)} en ruine
                   </span>
-                  <button className="btn" disabled={ruinCost(live, g.id) > live.stone || busy !== null} onClick={() => rebuild(g.id)}>
+                  <Btn busy={busy !== null} reason={ruinCost(live, g.id) > live.stone ? "Pas assez de pierre." : null} onClick={() => rebuild(g.id)}>
                     Rebâtir · <span className="num">{formatNumber(ruinCost(live, g.id))} 🪨</span>
-                  </button>
+                  </Btn>
                 </div>
               )}
             </div>
@@ -970,8 +970,8 @@ function TierLine({ live, id }: { live: PlayerState; id: GeneratorId }) {
   const big = companion ? GENERATORS.find((g) => g.id === companion.target) : undefined;
   return (
     <div className="row-tier num">
-      🛠️ encore {t.mastery.missing} pour +{t.mastery.bonus * 100} % de production
-      {companion && big && ` · 🤝 encore ${companion.missing} pour +${companion.bonus * 100} % aux ${big.plural}`}
+      <span title="Corps de métier : prochaine tranche de 50">🛠️ +{t.mastery.missing} → +{t.mastery.bonus * 100} %</span>
+      {companion && big && <span title={`Compagnonnage : +${companion.bonus * 100} % à la production des ${big.plural.toLowerCase()}`}>{` · 🤝 +${companion.missing} → ${big.icon} +${companion.bonus * 100} %`}</span>}
     </div>
   );
 }
@@ -1024,21 +1024,22 @@ function Upgrades({ live, run }: { live: PlayerState; run: ReturnType<typeof use
             <div className="row-title">{u.name}</div>
             <div className="row-desc">{u.description}</div>
           </div>
-          <button className="btn btn-primary" disabled={upgradeCost(live, u) > live.stone} onClick={() => buy(u.id)}>
+          <Btn className="btn btn-primary" reason={upgradeCost(live, u) > live.stone ? "Pas assez de pierre." : null} onClick={() => buy(u.id)}>
             Apprendre
             <span className="cost num">{formatNumber(upgradeCost(live, u))} 🪨</span>
-          </button>
+          </Btn>
         </div>
       ))}
       {nextLocked?.requires && (
         <p className="note">
-          Prochain savoir : posséder {nextLocked.requires.count} {GENERATORS.find((g) => g.id === nextLocked.requires!.generator)!.plural.toLowerCase()}.
+          🔒 {nextLocked.requires.count} {GENERATORS.find((g) => g.id === nextLocked.requires!.generator)!.plural.toLowerCase()}
         </p>
       )}
       {bought.length > 0 && (
-        <p className="note">
-          Savoirs acquis ({bought.length}) : {bought.map((u) => u.name).join(", ")}.
-        </p>
+        <details className="info">
+          <summary>✓ {bought.length} savoirs acquis</summary>
+          <div className="note">{bought.map((u) => u.name).join(", ")}.</div>
+        </details>
       )}
     </div>
   );
@@ -1067,19 +1068,19 @@ function Worksite({ snap, live, run }: { snap: GameSnapshot; live: PlayerState; 
           const pct = done ? 100 : current ? Math.min(100, (w.progress / Math.max(1, w.target)) * 100) : 0;
           const at = w.stageCompletedAt[i];
           return (
-            <div key={s.name} className={`stage${done ? " done" : current ? "" : " upcoming"}`}>
+            <div key={s.name} className={`stage${done ? " done" : current ? "" : " upcoming"}`} title={s.description}>
               <div className="stage-head">
                 <span className="stage-name">
                   {i < STAGES.length ? `${i + 1}. ` : "✨ "}
                   {s.name}
                 </span>
                 <span className="stage-status">
-                  {done ? `✓ achevé${at ? ` le ${new Date(at).toLocaleDateString("fr-FR", { day: "numeric", month: "short" })}` : ""}` : current ? `${Math.floor(pct)} %` : "à venir"}
+                  {done ? `✓${at ? ` ${new Date(at).toLocaleDateString("fr-FR", { day: "numeric", month: "short" })}` : ""}` : current ? `${Math.floor(pct)} %` : "—"}
                 </span>
               </div>
               <div className="stage-bonus">🎁 {s.bonusLabel}</div>
               {snap.masters?.[i] && <div className="stage-bonus">👑 Maître d&apos;œuvre : {snap.masters[i]}</div>}
-              {(current || done) && (
+              {current && (
                 <>
                   <div className="bar">
                     <span style={{ width: `${pct}%` }} />
@@ -1093,13 +1094,13 @@ function Worksite({ snap, live, run }: { snap: GameSnapshot; live: PlayerState; 
                   )}
                 </>
               )}
-              {!current && !done && <div className="row-desc">{s.description}</div>}
+              {current && <div className="row-desc">{s.description}</div>}
             </div>
           );
         })}
       </div>
       {(snap.lots ?? []).length > 0 && <Lots lots={snap.lots ?? []} now={snap.serverNow} run={run} />}
-      <div className="row-title">{finished ? "Orner le beffroi" : "Verser de la pierre au chantier"}</div>
+      <div className="row-title">{finished ? "🪨 Orner" : "🪨 Verser"}</div>
       <div className="contrib">
         {[
           [0.1, "10 %"],
@@ -1114,9 +1115,11 @@ function Worksite({ snap, live, run }: { snap: GameSnapshot; live: PlayerState; 
       </div>
       {!finished && <ShareLine snap={snap} detailed />}
       {!finished && <TitheSlider state={snap.state} run={run} />}
-      <p className="note num">
-        Tu as versé {formatNumber(snap.state.totalContributed)} pierres. {w.activePlayers} bâtisseur{w.activePlayers > 1 ? "s" : ""} actif{w.activePlayers > 1 ? "s" : ""} cette semaine. Chaque étape vaut plusieurs heures de leur production (24 h pour un embellissement), fixée à son ouverture.
-      </p>
+      <div className="report-chips rival-chips">
+        <span className="chip num" title="Tout ce que tu as versé cette saison">🪨 {formatNumber(snap.state.totalContributed)}</span>
+        <span className="chip num" title="Bâtisseurs actifs cette semaine">👷 {w.activePlayers}</span>
+      </div>
+      <Info>Chaque étape vaut plusieurs heures de la production des bâtisseurs actifs de la semaine (24 h pour un embellissement), fixée à son ouverture.</Info>
     </>
   );
 }
@@ -1139,7 +1142,7 @@ function Lots({ lots, now, run }: { lots: LotView[]; now: number; run: ReturnTyp
       </Info>
       {mine && (
         <div className="notice notice-info">
-          <strong>👑 Maître d&apos;œuvre !</strong> Choisis le bonus de 24 heures de ton lot (sinon ce sera la production) :
+          <strong>👑 Maître d&apos;œuvre !</strong> Bonus de 24 h (production par défaut) :
           <div className="row-actions">
             {(Object.keys(MASTER_BONUSES) as MasterBonusKind[]).map((k) => (
               <button key={k} className="btn btn-primary" disabled={busy} onClick={() => choose(k)}>
@@ -1167,12 +1170,12 @@ function Lots({ lots, now, run }: { lots: LotView[]; now: number; run: ReturnTyp
             </div>
             {l.mine && l.myShare !== undefined && (
               <div className="note num">
-                Ta part : {formatNumber(l.myGiven ?? 0)} / {formatNumber(l.myShare)} versées
-                {(l.myGiven ?? 0) >= l.myShare * 0.25 ? " ✓ prime assurée si le lot est fini" : ` (25 % pour la prime : ${formatNumber(l.myShare * 0.25)})`}
+                🧱 {formatNumber(l.myGiven ?? 0)} / {formatNumber(l.myShare)}
+                {(l.myGiven ?? 0) >= l.myShare * 0.25 ? " · ✓ prime" : ` · prime à ${formatNumber(l.myShare * 0.25)}`}
               </div>
             )}
             {l.master && l.masterChoice && l.masterUntil && l.masterUntil > now && (
-              <div className="note">Bonus du maître d&apos;œuvre : {MASTER_BONUSES[l.masterChoice].label} jusqu&apos;à {new Date(l.masterUntil).toLocaleTimeString("fr-FR", { hour: "2-digit", minute: "2-digit" })}.</div>
+              <div className="note num">👑 {MASTER_BONUSES[l.masterChoice].label} · {new Date(l.masterUntil).toLocaleTimeString("fr-FR", { hour: "2-digit", minute: "2-digit" })}</div>
             )}
           </div>
         );
@@ -1233,7 +1236,7 @@ function TitheSlider({ state, run }: { state: PlayerState; run: ReturnType<typeo
   return (
     <div className="tithe">
       <label className="row-title" htmlFor="tithe">
-        Dîme automatique : <span className="num">{value} %</span>
+        Dîme : <span className="num">{value} %</span>
       </label>
       <input id="tithe" type="range" min={0} max={MAX_TITHE * 100} step={1} value={value} onChange={(e) => change(Number(e.target.value))} />
       <Info>
@@ -1302,7 +1305,7 @@ function Ranking({ boards, userId }: { boards: ReturnType<typeof useLeaderboard>
       )}
       {view === "pantheon" &&
         (hall.length === 0 ? (
-          <p className="empty">Aucune saison terminée pour l&apos;instant. Le premier podium sera gravé à la fin de cette saison.</p>
+          <p className="empty">🏛️ Premier podium à la fin de cette saison.</p>
         ) : (
           hall.map((season) => (
             <div key={season.season} className="hall-season">
@@ -1554,7 +1557,7 @@ function Raids({ snap, live, now, run, focus }: { snap: GameSnapshot; live: Play
 }
 
 /** Onglet Alliance : fondation, invitations, alliés et renforts. */
-function AllianceTab({ snap, live, now, run }: { snap: GameSnapshot; live: PlayerState; now: number; run: ReturnType<typeof useGame>["run"] }) {
+export function AllianceTab({ snap, live, now, run }: { snap: GameSnapshot; live: PlayerState; now: number; run: ReturnType<typeof useGame>["run"] }) {
   const [busy, setBusy] = useState<string | null>(null);
   const allies = snap.rivals.filter((r) => r.allied);
   const invitable = snap.alliance && snap.alliance.members.length < MAX_ALLIANCE_SIZE ? snap.rivals.filter((r) => !r.isLord && !r.allianceName) : [];
@@ -2435,10 +2438,7 @@ function GuildHall({ snap, live, now, run }: { snap: GameSnapshot; live: PlayerS
               </div>
               <div>
                 <div className="row-title">Halle · {t.name}</div>
-                <div className="row-desc">
-                  {wings.length ? wings.map((w) => `${w.icon} ${t.wings[w.id]}`).join("  ") : "Aucune aile en service."} · chance ≈ {Math.round(t.chance * 100)} %
-                  {t.blocker ? ` · ${t.blocker}` : ""}
-                </div>
+                <div className="row-desc num">{wings.length ? wings.map((w) => `${w.icon} ${t.wings[w.id]}`).join("  ") : "Aucune aile en service"}</div>
                 {wings.length > 0 && (
                   <select className="input" value={target} onChange={(e) => setAim({ ...aim, [t.id]: e.target.value })} aria-label="Aile visée">
                     {wings.map((w) => (
@@ -2450,9 +2450,10 @@ function GuildHall({ snap, live, now, run }: { snap: GameSnapshot; live: PlayerS
                 )}
               </div>
               {!t.blocker && <TravelTo place={`hall:${t.id}`} army={live.troops as Record<string, number>} />}
-              <button className="btn btn-primary" disabled={busy || t.blocker !== null} onClick={() => act({ type: "hall", op: "siege", hall: t.id, wing: target || undefined })}>
-                Assaut
-              </button>
+              <Btn className="btn btn-primary" busy={busy} reason={t.blocker} onClick={() => act({ type: "hall", op: "siege", hall: t.id, wing: target || undefined })}>
+                ⚔️ Assaut
+                <span className="cost num">≈ {Math.round(t.chance * 100)} %</span>
+              </Btn>
             </div>
           );
         })}
@@ -2470,24 +2471,19 @@ function GuildHall({ snap, live, now, run }: { snap: GameSnapshot; live: PlayerS
     return (
       <div className="hall">
         <h3 className="section-title">{title}</h3>
-        <p className="note">
+        <Info>
           {g.lodge
             ? "Seul, tu peux fonder une petite loge près de ton domaine : 4 étapes et deux ailes au plus. Si tu rejoins une alliance qui a sa halle, la moitié de ce que tu lui as versé y passe."
-            : "Un chantier propre à l'alliance, posé sur la carte près de vos domaines. La fondation puis chaque étape terminée donnent un niveau d'aile : production, stock à l'abri, renforts, guet, écuries ou infirmerie. Il y a dix étapes, et dix-huit niveaux possibles."}
-        </p>
-        {g.dormantLodge && <p className="note">Ta loge attend : la moitié de ce que tu lui as versé rejoindra la halle dès qu&apos;elle sera fondée.</p>}
-        {g.chief ? (
-          <>
-            <p className="note num">
-              {g.lodge ? "Ouvre le chantier, puis verse-lui" : "Ouvre le chantier : toute l'alliance pourra y verser, dons et part de dîme compris,"} environ {formatNumber(g.foundCost)} pierres pour la fonder.
-            </p>
-            <button className="btn btn-primary" disabled={busy} onClick={() => act({ type: "hall", op: "found" })}>
-              Ouvrir le chantier {g.lodge ? "de ma loge" : "de la halle"}
-            </button>
-          </>
-        ) : (
-          <p className="note">Seul le chef{g.chiefName ? ` (${g.chiefName})` : ""} peut la fonder.</p>
-        )}
+            : "Un chantier propre à l'alliance, posé sur la carte près de vos domaines. La fondation puis chaque étape terminée donnent un niveau d'aile : production, stock à l'abri, renforts, guet, écuries ou infirmerie. Il y a dix étapes, et dix-huit niveaux possibles."}{" "}
+          {g.lodge ? "Ouvre le chantier, puis verse-lui la somme de fondation." : "Une fois le chantier ouvert, toute l'alliance peut y verser, dons et part de dîme compris."}
+        </Info>
+        {g.dormantLodge && <p className="note">💤 Loge en attente : la moitié de tes versements rejoindra la halle à sa fondation.</p>}
+        <div className="row-actions">
+          <Btn className="btn btn-primary" busy={busy} reason={g.chief ? null : `Seul le chef${g.chiefName ? ` (${g.chiefName})` : ""} peut la fonder.`} onClick={() => act({ type: "hall", op: "found" })}>
+            🏗️ Fonder
+            <span className="cost num">≈ {formatNumber(g.foundCost)} 🪨</span>
+          </Btn>
+        </div>
         {sieges}
       </div>
     );
@@ -2531,12 +2527,13 @@ function GuildHall({ snap, live, now, run }: { snap: GameSnapshot; live: PlayerS
         </button>
       </form>
       {!done && (
-        <p className="note num">
-          Il manque {formatNumber(Math.max(0, h.cost - h.progress))} pierres. Ta part déjà versée : {formatNumber(h.gifts.find((x) => x.id === snap.userId)?.amount ?? 0)}.
-        </p>
+        <div className="report-chips rival-chips">
+          <span className="chip num">manque {formatNumber(Math.max(0, h.cost - h.progress))} 🪨</span>
+          <span className="chip num chip-gain">ta part {formatNumber(h.gifts.find((x) => x.id === snap.userId)?.amount ?? 0)}</span>
+        </div>
       )}
       <label className="hall-tithe">
-        Part de ta dîme pour {g.lodge ? "ta loge" : "la halle"} :{" "}
+        Dîme vers {g.lodge ? "la loge" : "la halle"} :{" "}
         <select className="input" value={tithe} disabled={busy} onChange={(e) => act({ type: "hall", op: "tithe", percent: Number(e.target.value) })}>
           {Array.from({ length: 11 }, (_, i) => i * 5).map((p) => (
             <option key={p} value={p}>
@@ -2548,12 +2545,12 @@ function GuildHall({ snap, live, now, run }: { snap: GameSnapshot; live: PlayerS
       <Info>
         Le reste de ta dîme ({Math.round((live.tithe ?? 0) * 100)} % de ta production) continue d&apos;aller au beffroi. Ce qui est versé ici ne compte ni pour le beffroi, ni
         pour les lots, ni pour les paliers de don, et ne peut être ni repris ni pillé.
+        {founding ? " Chantier de fondation : versez ensemble la somme affichée. Une fois fondée, chaque étape donnera un niveau d'aile." : ""}
       </Info>
-      {founding && <p className="note">Chantier de fondation : versez ensemble la somme affichée. Une fois fondée, chaque étape donnera un niveau d&apos;aile.</p>}
       <h4 className="hall-sub">
         Ailes · {h.placed}/{h.available} niveaux placés{h.masterLevels > 0 ? ` (dont ${h.masterLevels} offert${h.masterLevels > 1 ? "s" : ""} par le beffroi)` : ""}
       </h4>
-      {free > 0 && <p className="note">{g.chief ? `${free} niveau${free > 1 ? "x" : ""} à placer.` : `${free} niveau${free > 1 ? "x" : ""} à placer par ${g.chiefName ?? "le chef"} : propose ton choix dans le canal d'alliance.`}</p>}
+      {free > 0 && <p className="note num">✨ {free} à placer{g.chief ? "" : ` par ${g.chiefName ?? "le chef"} (propose ton choix dans le canal d'alliance)`}</p>}
       <div className="list">
         {WINGS.map((w) => {
           const lvl = h.wings[w.id] ?? 0;
@@ -2570,9 +2567,9 @@ function GuildHall({ snap, live, now, run }: { snap: GameSnapshot; live: PlayerS
                   <span className="row-count num">{lvl}/3</span>
                 </div>
                 <div className="row-desc">
-                  {down > now ? `🔥 Hors service encore ${duration(down - now)} · ` : ""}
-                  {lvl > 0 ? w.levels[lvl - 1] : "Pas encore bâtie."}
-                  {lvl < 3 ? ` · niveau ${lvl + 1} : ${w.levels[lvl]}` : ""}
+                  {down > now ? `🔥 ${duration(down - now)} · ` : ""}
+                  {lvl > 0 ? w.levels[lvl - 1] : "—"}
+                  {lvl < 3 ? ` → ${w.levels[lvl]}` : ""}
                 </div>
               </div>
               {g.chief && free > 0 && !blocked && (
@@ -2585,18 +2582,17 @@ function GuildHall({ snap, live, now, run }: { snap: GameSnapshot; live: PlayerS
         })}
       </div>
       {h.gifts.length > 0 && (
-        <p className="note num">Versements : {h.gifts.map((x) => `${x.id === snap.userId ? "toi" : x.name} ${formatNumber(x.amount)}`).join(" · ")}</p>
+        <p className="note num">💰 {h.gifts.map((x) => `${x.id === snap.userId ? "toi" : x.name} ${formatNumber(x.amount)}`).join(" · ")}</p>
       )}
       {!g.lodge && !founding && (
         <>
           <h4 className="hall-sub">🛡️ Garnison</h4>
           <p className="row-desc num">
-            Murs : {armyIcons(h.walls as Record<string, number>, "aucun")} (10 % de la pierre reçue)
-            {h.immuneUntil > now ? ` · à l'abri des assauts encore ${duration(h.immuneUntil - now)}` : ""}
+            🧱 {armyIcons(h.walls as Record<string, number>, "aucun")}
+            {h.immuneUntil > now ? ` · 🛡️ ${duration(h.immuneUntil - now)}` : ""}
           </p>
           <p className="row-desc num">
-            Troupes postées :{" "}
-            {h.garrison.length === 0 ? "aucune" : h.garrison.map((x) => `${x.id === snap.userId ? "toi" : x.name} ${armyIcons(x.troops as Record<string, number>)}`).join(" · ")}
+            ⛺ {h.garrison.length === 0 ? "aucune troupe" : h.garrison.map((x) => `${x.id === snap.userId ? "toi" : x.name} ${armyIcons(x.troops as Record<string, number>)}`).join(" · ")}
           </p>
           {chosen ? (
             <div className="reinforce">
@@ -2614,14 +2610,14 @@ function GuildHall({ snap, live, now, run }: { snap: GameSnapshot; live: PlayerS
               </button>
             </div>
           ) : (
-            <p className="row-desc">Aucune troupe chez toi à poster à la halle.</p>
+            <p className="row-desc">Aucune troupe à poster.</p>
           )}
           {h.garrison.some((x) => x.id === snap.userId) && (
             <button className="btn" disabled={busy} onClick={() => act({ type: "hall", op: "recall" })}>
-              Rappeler mes troupes de la halle
+              ↩️ Rappeler
             </button>
           )}
-          <Info>Seule une alliance en guerre avec la vôtre peut assiéger la halle. Un assaut réussi met une aile hors service 24 h, sans rien détruire.</Info>
+          <Info>Les murs valent 10 % de la pierre reçue. Seule une alliance en guerre avec la vôtre peut assiéger la halle. Un assaut réussi met une aile hors service 24 h, sans rien détruire.</Info>
         </>
       )}
       {sieges}
@@ -2659,7 +2655,7 @@ function Alliance({ snap, run }: { snap: GameSnapshot; run: ReturnType<typeof us
                 ✉️
               </div>
               <div className="row-desc">
-                {inv.inviterName} t&apos;invite dans l&apos;alliance <strong>{inv.allianceName}</strong>.
+                ✉️ <strong>{inv.allianceName}</strong> · {inv.inviterName}
               </div>
               <div className="row-actions">
                 <button className="btn btn-primary" disabled={busy} onClick={() => act({ type: "alliance_accept", alliance: inv.allianceId })}>
@@ -2687,7 +2683,7 @@ function Alliance({ snap, run }: { snap: GameSnapshot; run: ReturnType<typeof us
       )}
       {snap.reinforcements.length > 0 && (
         <p className="row-desc">
-          Renforts chez toi :{" "}
+          🛡️{" "}
           {snap.reinforcements.map((g) => (
             <span key={g.id} className="num">
               {g.name} {armyIcons(g.troops)}{" "}
@@ -2701,7 +2697,7 @@ function Alliance({ snap, run }: { snap: GameSnapshot; run: ReturnType<typeof us
             🏕️
           </div>
           <div className="row-desc num">
-            Tes troupes chez {g.name} : {armyIcons(g.troops)}
+            {g.name} · {armyIcons(g.troops)}
           </div>
           <button className="btn" disabled={busy} onClick={() => act({ type: "recall", host: g.id })}>
             Rappeler
@@ -2710,7 +2706,7 @@ function Alliance({ snap, run }: { snap: GameSnapshot; run: ReturnType<typeof us
       ))}
       {a && (
         <button className="btn btn-ghost alliance-leave" disabled={busy} onClick={() => act({ type: "alliance_leave" })}>
-          Quitter l&apos;alliance
+          🚪 Quitter
         </button>
       )}
     </div>
@@ -2735,20 +2731,20 @@ function Wars({ snap, run, now }: { snap: GameSnapshot; run: ReturnType<typeof u
           <div className="row-title">⚔️ Contre {w.enemyName}</div>
           <div className="war-score num">
             <span>
-              Toi et tes alliés : <strong>{formatNumber(w.myScore)}</strong>
+              🤝 <strong>{formatNumber(w.myScore)}</strong>
             </span>
             <span>
-              Eux : <strong>{formatNumber(w.enemyScore)}</strong>
+              ⚔️ <strong>{formatNumber(w.enemyScore)}</strong>
             </span>
           </div>
-          <div className="row-desc">
-            {w.startsAt > now ? `Commence dans ${duration(w.startsAt - now)}, puis dure 24 h.` : `Encore ${duration(w.endsAt - now)}.`} Pendant la guerre, plus de
-            bouclier entre vous (le repos de 5 min reste, et pas deux fois de suite la même cible) : chaque pierre pillée compte. Les vainqueurs se
-            partagent une prime égale à la moitié du butin total.
-          </div>
+          <div className="row-desc num">{w.startsAt > now ? `⏳ début dans ${duration(w.startsAt - now)} · 24 h` : `⏳ ${duration(w.endsAt - now)}`}</div>
+          <Info>
+            Pendant la guerre, plus de bouclier entre vous (le repos de 5 min reste, et pas deux fois de suite la même cible) : chaque pierre pillée compte. Les
+            vainqueurs se partagent une prime égale à la moitié du butin total.
+          </Info>
         </div>
       ) : others.length === 0 ? (
-        <p className="empty">Aucune autre alliance à qui déclarer la guerre pour l&apos;instant.</p>
+        <p className="empty">Aucune alliance adverse.</p>
       ) : (
         <div className="list">
           {others.map((a) => (
@@ -2758,13 +2754,11 @@ function Wars({ snap, run, now }: { snap: GameSnapshot; run: ReturnType<typeof u
               </div>
               <div>
                 <div className="row-title">{a.name}</div>
-                <div className="row-desc">
-                  {a.size} membre{a.size > 1 ? "s" : ""}
-                </div>
+                <div className="row-desc num">👥 {a.size}</div>
               </div>
-              <button className="btn btn-primary" disabled={busy} onClick={() => declare(a.id)}>
-                Déclarer
-                <span className="cost">la guerre (24 h)</span>
+              <button className="btn btn-primary" disabled={busy} onClick={() => declare(a.id)} title="Déclare la guerre pour 24 h, à partir de 2 h après la déclaration.">
+                ⚔️ Guerre
+                <span className="cost">24 h</span>
               </button>
             </div>
           ))}
@@ -2802,42 +2796,37 @@ function Fortress({ snap, live, now, run }: { snap: GameSnapshot; live: PlayerSt
             {f.name}
             {f.mine && <span className="badge badge-level-1">à vous</span>}
           </div>
-          <div className="row-desc">
-            {f.holderName
-              ? `Tenue par ${f.holderName}, défendue uniquement par les troupes que ses membres y envoient.`
-              : "Tenue par personne, gardée par une garnison neutre."}{" "}
-            L&apos;alliance qui la tient gagne +20 % de production.
-          </div>
+          <div className="row-desc num">{f.holderName ? `👑 ${f.holderName}` : "👑 personne (garnison neutre)"} · +20 % de production</div>
           <div className="row-desc army-line num">
-            {intel ? `🕵️ ${armyIcons(f.army)} (rapport encore ${duration(f.intelUntil! - now)})` : f.exact ? armyIcons(f.army) : `≈ ${armyIcons(f.army)}`}
+            {intel ? `🕵️ ${armyIcons(f.army)} · ${duration(f.intelUntil! - now)}` : f.exact ? armyIcons(f.army) : `≈ ${armyIcons(f.army)}`}
           </div>
-          <div className="row-desc">{f.blocker ?? `${f.exact ? "" : "~"}${Math.round(f.chance * 100)} % de chances de la prendre.`}</div>
+          <Info>La forteresse n&apos;est défendue que par les troupes que les membres de l&apos;alliance qui la tient y envoient. L&apos;alliance qui la tient gagne +20 % de production.</Info>
           {!f.mine && !f.blocker && <TravelTo place="fortress" army={live.troops as Record<string, number>} />}
         </div>
         {!f.mine && (
           <div className="row-actions">
-            <button className="btn btn-primary" disabled={busy || f.blocker !== null} onClick={() => act({ type: "fortress_attack" })}>
-              Assiéger
+            <Btn className="btn btn-primary" busy={busy} reason={f.blocker} onClick={() => act({ type: "fortress_attack" })}>
+              ⚔️ Siège
               <span className="cost num">
                 {f.exact ? "" : "~"}
                 {Math.round(f.chance * 100)} %
               </span>
-            </button>
+            </Btn>
             {!intel && (
-              <button className="btn" disabled={busy || live.stone < spyPrice} onClick={() => act({ type: "spy", target: "fortress" })} title="L'espion part sur la route ; son rapport montre la garnison et les murs pendant 1 h. Il peut être repéré.">
-                🕵️ Espionner
+              <Btn busy={busy} reason={live.stone < spyPrice ? "Pas assez de pierre." : null} onClick={() => act({ type: "spy", target: "fortress" })} title="L'espion part sur la route ; son rapport montre la garnison et les murs pendant 1 h. Il peut être repéré.">
+                🕵️ Espion
                 <span className="cost num">{formatNumber(spyPrice)} 🪨</span>
-              </button>
+              </Btn>
             )}
           </div>
         )}
       </div>
       {f.mine && (
         <>
-          {f.garrison.length === 0 && <p className="status-burn">⚠️ Personne ne défend la forteresse : envoyez des troupes, sinon le premier assaut la prend.</p>}
+          {f.garrison.length === 0 && <p className="status-burn">⚠️ Forteresse sans défenseur : le premier assaut la prend.</p>}
           {f.garrison.length > 0 && (
             <p className="row-desc num">
-              Garnison :{" "}
+              ⛺{" "}
               {f.garrison.map((g) => (
                 <span key={g.id}>
                   {g.id === snap.userId ? "toi" : g.name} {armyIcons(g.troops)}{" "}
@@ -2865,13 +2854,13 @@ function Fortress({ snap, live, now, run }: { snap: GameSnapshot; live: PlayerSt
               </button>
             </div>
           ) : (
-            <p className="row-desc">Aucune troupe chez toi à poster dans la forteresse.</p>
+            <p className="row-desc">Aucune troupe à poster.</p>
           )}
         </>
       )}
       {hasGarrison && (
         <button className="btn" disabled={busy} onClick={() => act({ type: "fortress_recall" })}>
-          Rappeler mes troupes de la forteresse ({armyIcons(f.myGarrison)})
+          ↩️ Rappeler ({armyIcons(f.myGarrison)})
         </button>
       )}
     </>
@@ -2938,13 +2927,12 @@ function AllyRow({ r, live, now, run }: { r: RivalView; live: PlayerState; now: 
             />
           </div>
         ) : (
-          <div className="row-desc">Aucune troupe disponible chez toi à envoyer.</div>
+          <div className="row-desc">Aucune troupe à envoyer.</div>
         )}
         {travel}
       </div>
       <button className="btn btn-primary" disabled={busy || !chosen} onClick={send}>
-        Envoyer
-        <span className="cost">en renfort</span>
+        🛡️ Renfort
       </button>
     </div>
   );
