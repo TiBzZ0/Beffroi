@@ -224,6 +224,7 @@ import {
   worldFrom,
   type ChronicleEntry,
   type AwaySummary,
+  type AllyMoveView,
   type LotView,
   type GameAction,
   type GameSnapshot,
@@ -2745,6 +2746,7 @@ export async function runAction(admin: SupabaseClient, userId: string, action: G
       chronicle,
       map: { ...mapView(positions), halls: guildPlaces(entities, names) },
       incoming: incomingFor(userId, entities, now),
+      allyMoves: allyMovesFor(userId, entities, now),
       daily: dailyView(finalState, dailyCounts, now),
       guild: guildView(meNow, finalState, entities, chiefs, worldFrom(worksite), now, conflicts.wars, names, intel),
     };
@@ -3294,6 +3296,17 @@ function incomingFor(meId: string, entities: Map<string, Entity>, now: number): 
     (e.state.marches ?? [])
       .filter((m) => m.kind === "raid" && m.target === meId && m.status === "out" && m.warned && !m.hidden && m.arriveAt > now)
       .map((m) => ({ id: m.id, arriveAt: m.arriveAt, from: m.revealed ? e.name : null, ...(wingLevel(entities.get(meId)?.state.hall, "guet") >= 3 ? { troops: m.troops } : {}) })),
+  );
+}
+
+/** U1 : renforts d'alliés qui arrivent chez moi ou qui en repartent. */
+function allyMovesFor(meId: string, entities: Map<string, Entity>, now: number): AllyMoveView[] {
+  return [...entities.values()].flatMap((e) =>
+    e.id === meId
+      ? []
+      : (e.state.marches ?? [])
+          .filter((m) => m.kind === "reinforce" && m.target === meId && (m.status === "out" ? m.arriveAt > now : m.status === "back" && m.returnAt > now))
+          .map((m) => ({ id: m.id, from: e.name, troops: m.troops, status: m.status === "out" ? ("out" as const) : ("back" as const), arriveAt: m.arriveAt, returnAt: m.returnAt })),
   );
 }
 

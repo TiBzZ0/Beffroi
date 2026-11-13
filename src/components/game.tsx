@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useId, useRef, useState } from "react";
+import { createContext, useContext, useEffect, useId, useRef, useState } from "react";
 import { signOut } from "@/app/(auth)/actions";
 import {
   CATEGORY_LABELS,
@@ -175,6 +175,7 @@ export function Game({ userId }: { userId: string }) {
   const affordableUpgrades = UPGRADES.filter((u) => !live.upgrades.includes(u.id) && upgradeUnlocked(live, u) && upgradeCost(live, u) <= live.stone).length;
 
   return (
+    <SnapContext.Provider value={{ snap, live, now }}>
     <div className="game">
       <WhatsNew />
       {game.away && <AwayModal away={game.away} event={snap.event} onClose={game.dismissAway} />}
@@ -226,6 +227,7 @@ export function Game({ userId }: { userId: string }) {
         </div>
       )}
     </div>
+    </SnapContext.Provider>
   );
 }
 
@@ -1907,6 +1909,22 @@ function SendArmy({
   );
 }
 
+/** U1 : l'état du jeu à portée des cartes qui n'en reçoivent qu'une partie (temps de trajet). */
+const SnapContext = createContext<{ snap: GameSnapshot; live: PlayerState; now: number } | null>(null);
+
+/** U1 : temps de trajet exact vers un lieu (« fortress », « hall:<id> », un joueur) ou une position. */
+function TravelTo({ place, pos, army, reinforce = false }: { place?: string; pos?: readonly [number, number]; army: Record<string, number>; reinforce?: boolean }) {
+  const ctx = useContext(SnapContext);
+  const map = ctx?.snap.map;
+  const mine = map?.places[ctx?.snap.userId ?? ""];
+  if (!ctx || !map || !mine) return null;
+  const to = pos ?? (place === "fortress" ? map.fortress : place?.startsWith("hall:") ? map.halls?.find((h) => `hall:${h.id}` === place)?.pos : place ? map.places[place] : undefined);
+  const clean = cleanArmy(army as Army);
+  if (!to || armySize(clean) === 0) return null;
+  const bonus = armySpeedBonus(ctx.live, reinforce);
+  return <TravelLine army={clean} out={travelMs(clean, mapDistance(mine, to), bonus)} now={ctx.now} bonus={bonus} />;
+}
+
 /** U1 : durée de l'aller à la seconde, heures d'arrivée et de retour, et ce qui fixe la vitesse. */
 function TravelLine({ army, out, now, bonus }: { army: Army; out: number; now: number; bonus: number }) {
   const ids = (Object.entries(army) as [string, number][]).filter(([, n]) => n > 0).map(([id]) => id);
@@ -2016,6 +2034,11 @@ export function Movements({ snap, live, now, run }: { snap: GameSnapshot; live: 
     } else {
       rows.push({ key: m.id, tone: helping ? "ally" : "out", icon: MARCH_ICON[m.kind] ?? "⚔️", from: me, to: name, troops, end: m.arriveAt, back: m.arriveAt + (m.arriveAt - m.departAt), recall: m.arriveAt > now ? m.id : undefined });
     }
+  }
+  for (const a of snap.allyMoves ?? []) {
+    const troops = armyIcons(a.troops as Record<string, number>, "—");
+    if (a.status === "out") rows.push({ key: `ally-${a.id}`, tone: "ally", icon: "🛡️", from: a.from, to: me, troops, end: a.arriveAt });
+    else rows.push({ key: `ally-${a.id}`, tone: "ally", icon: "↩️", from: me, to: a.from, troops, end: a.returnAt });
   }
   for (const sp of live.spies ?? []) {
     if (sp.arriveAt <= now) continue;
@@ -2321,6 +2344,7 @@ function GuildHall({ snap, live, now, run }: { snap: GameSnapshot; live: PlayerS
                   </select>
                 )}
               </div>
+              {!t.blocker && <TravelTo place={`hall:${t.id}`} army={live.troops as Record<string, number>} />}
               <button className="btn btn-primary" disabled={busy || t.blocker !== null} onClick={() => act({ type: "hall", op: "siege", hall: t.id, wing: target || undefined })}>
                 Assaut
               </button>
@@ -2479,6 +2503,7 @@ function GuildHall({ snap, live, now, run }: { snap: GameSnapshot; live: PlayerS
                 ))}
               </select>
               <input className="input input-qty" type="number" min={1} value={qty} onChange={(e) => setQty(Math.max(1, Math.floor(Number(e.target.value) || 1)))} aria-label="Nombre" />
+              <TravelTo pos={h.pos} army={{ [chosen.id]: Math.min(qty, live.troops[chosen.id] ?? 0) }} reinforce />
               <button className="btn btn-primary" disabled={busy} onClick={() => act({ type: "hall", op: "station", unit: chosen.id, qty: Math.min(qty, live.troops[chosen.id] ?? 0) })}>
                 Poster
               </button>
@@ -2682,6 +2707,7 @@ function Fortress({ snap, live, now, run }: { snap: GameSnapshot; live: PlayerSt
             {intel ? `🕵️ ${armyIcons(f.army)} (rapport encore ${duration(f.intelUntil! - now)})` : f.exact ? armyIcons(f.army) : `≈ ${armyIcons(f.army)}`}
           </div>
           <div className="row-desc">{f.blocker ?? `${f.exact ? "" : "~"}${Math.round(f.chance * 100)} % de chances de la prendre.`}</div>
+          {!f.mine && !f.blocker && <TravelTo place="fortress" army={live.troops as Record<string, number>} />}
         </div>
         {!f.mine && (
           <div className="row-actions">
@@ -2724,6 +2750,7 @@ function Fortress({ snap, live, now, run }: { snap: GameSnapshot; live: PlayerSt
                 ))}
               </select>
               <input className="input input-qty" type="number" min={1} value={qty} onChange={(e) => setQty(Math.max(1, Math.floor(Number(e.target.value) || 1)))} aria-label="Nombre" />
+              <TravelTo place="fortress" army={{ [chosen.id]: Math.min(qty, live.troops[chosen.id] ?? 0) }} reinforce />
               <button
                 className="btn btn-primary"
                 disabled={busy}
@@ -2774,6 +2801,7 @@ function AllyRow({ r, live, now, run }: { r: RivalView; live: PlayerState; now: 
     await run({ type: "reinforce", target: r.id, unit: chosen.id, qty: Math.min(qty, max) });
     setBusy(false);
   };
+  const travel = chosen ? <TravelTo place={r.id} army={{ [chosen.id]: Math.min(qty, max) }} reinforce /> : null;
   return (
     <div className="row">
       <div className="row-icon" aria-hidden>
@@ -2807,6 +2835,7 @@ function AllyRow({ r, live, now, run }: { r: RivalView; live: PlayerState; now: 
         ) : (
           <div className="row-desc">Aucune troupe disponible chez toi à envoyer.</div>
         )}
+        {travel}
       </div>
       <button className="btn btn-primary" disabled={busy || !chosen} onClick={send}>
         Envoyer
@@ -2915,6 +2944,7 @@ function PlaceEventCard({ e, live, now, run }: { e: EventView; live: PlayerState
   };
   const composer = (camp?: string) => (
     <div className="simulator send-army">
+      <TravelTo pos={camp ? e.camps?.find((c) => c.id === camp)?.pos : e.pos} army={army} />
       {UNITS.filter((u) => (have[u.id] ?? 0) > 0).map((u) => (
         <label key={u.id} className="send-line">
           <span>

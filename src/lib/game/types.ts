@@ -193,6 +193,16 @@ export interface DailyView {
   resetAt: number;
 }
 
+/** U1 : renforts d'un allié en route vers moi (out) ou qui rentrent chez lui (back). */
+export interface AllyMoveView {
+  id: string;
+  from: string;
+  troops: Partial<Record<string, number>>;
+  status: "out" | "back";
+  arriveAt: number;
+  returnAt: number;
+}
+
 export interface IncomingView {
   id: string;
   arriveAt: number;
@@ -284,6 +294,7 @@ export interface GameSnapshot {
   chronicle?: ChronicleEntry[];
   map?: MapView;
   incoming?: IncomingView[];
+  allyMoves?: AllyMoveView[];
   daily?: DailyView;
   guild?: HallView;
 }

@@ -484,4 +484,12 @@ export const CHANGELOG: ChangeEntry[] = [
       "🎨 Une couleur par domaine : ocre pour la production, rouge pour l'armée, bleu pour l'alliance, violet pour l'espionnage, or pour les événements.",
     ],
   },
+  {
+    id: 57,
+    date: "13 novembre",
+    items: [
+      "🛡️ Le tableau des mouvements montre aussi les renforts de tes alliés qui arrivent chez toi ou qui en repartent.",
+      "⏱️ Durée exacte, heure d'arrivée et heure de retour aussi pour la forteresse, les halles, les renforts et les événements.",
+    ],
+  },
 ];
