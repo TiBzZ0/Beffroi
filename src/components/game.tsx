@@ -105,23 +105,24 @@ import { worldFrom, type AwaySummary, type LotView, type AllianceSummary, type C
 import { useChat, useGame, useLeaderboard, usePush, useTick } from "./use-game";
 import { BRANCHES, lineageMark, NODE_BY_ID, NODES, nodeBlocker, RANK_COST, RANK_REQUIRED, RENOWN, RENOWN_CAPPED, RESPEC_FEE, respecBlocker, spentIn, type BranchId } from "@/lib/game/lineage";
 import { allocation, BARRACKS_MAX, BARRACKS_MS, barracksBlocker, barracksCost, barracksLevel, COMPANY_CAP, fortBlocker, fortCost, fortCount, fortMs, FORT_MAX, maxCompanies, RECRUIT_MS, recruitPrice, recruitSlots, trainBlocker, trainCost, trainMs, TRAIN_MAX } from "@/lib/game/companies";
+import { ALTERATIONS, riftCompanyBlocker, riftFightBlocker, riftOf, RIFT_IDLE_MS, RIFT_MAX_COMPANIES, SHAPES, type AlterationId } from "@/lib/game/rift";
 import { MapBoard, type BoardMarch, type BoardPlace } from "./kingdom-map";
 import { CHAT_MAX_LENGTH, CHAT_REACTIONS, type ChatChannel } from "@/lib/game/chat-config";
 import { CHANGELOG } from "@/lib/game/changelog";
 
-type Tab = "ateliers" | "ameliorations" | "chantier" | "armee" | "carte" | "raids" | "alliance" | "messages" | "classement" | "heritage" | "lignee";
+type Tab = "ateliers" | "ameliorations" | "chantier" | "armee" | "carte" | "raids" | "alliance" | "messages" | "classement" | "heritage" | "lignee" | "faille";
 /** U3 : sept onglets, certains avec des sous-onglets. */
 type Group = "domaine" | "chantier" | "armee" | "carte" | "alliance" | "messages" | "rangs";
 const GROUPS: Record<Group, Tab[]> = {
   domaine: ["ateliers", "ameliorations"],
   chantier: ["chantier"],
   armee: ["armee"],
-  carte: ["carte", "raids"],
+  carte: ["carte", "raids", "faille"],
   alliance: ["alliance"],
   messages: ["messages"],
   rangs: ["classement", "lignee", "heritage"],
 };
-const SUBTAB_LABELS: Partial<Record<Tab, string>> = { ateliers: "Ateliers", ameliorations: "Savoirs", carte: "Carte", raids: "Cibles", classement: "Classements", lignee: "Lignée", heritage: "Héritage" };
+const SUBTAB_LABELS: Partial<Record<Tab, string>> = { ateliers: "Ateliers", ameliorations: "Savoirs", carte: "Carte", raids: "Cibles", faille: "🌀 Faille", classement: "Classements", lignee: "Lignée", heritage: "Héritage" };
 const groupOf = (t: Tab): Group => (Object.keys(GROUPS) as Group[]).find((g) => GROUPS[g].includes(t)) ?? "domaine";
 type Qty = 1 | 10 | "max";
 const DAY_MS = 86_400_000;
@@ -206,9 +207,9 @@ export function Game({ userId }: { userId: string }) {
             <TabButton id="messages" tab={group} setTab={selectGroup} label="✉️ Messages" dot={tab !== "messages" && unreadCount(snap, live, now) > 0} />
             <TabButton id="rangs" tab={group} setTab={selectGroup} label="🏆 Rangs" />
           </div>
-          {GROUPS[group].length > 1 && (
+          {GROUPS[group].filter((t) => t !== "faille" || !!snap.rift).length > 1 && (
             <div className="subtabs group-subtabs" role="group" aria-label="Sections">
-              {GROUPS[group].map((t) => (
+              {GROUPS[group].filter((t) => t !== "faille" || !!snap.rift).map((t) => (
                 <button key={t} className="btn btn-small" aria-pressed={tab === t} onClick={() => selectTab(t)}>
                   {SUBTAB_LABELS[t]}
                   {t === "ameliorations" && affordableUpgrades > 0 ? " •" : ""}
@@ -228,6 +229,7 @@ export function Game({ userId }: { userId: string }) {
             {tab === "classement" && <Ranking boards={leaderboard} userId={userId} />}
             {tab === "heritage" && <Heritage snap={snap} run={game.run} />}
             {tab === "lignee" && <Lineage snap={snap} now={now} run={game.run} />}
+            {tab === "faille" && snap.rift && <Rift snap={snap} live={live} now={now} run={game.run} />}
           </div>
         </section>
       </div>
@@ -1430,6 +1432,12 @@ function Ranking({ boards, userId }: { boards: ReturnType<typeof useLeaderboard>
             À la fin de la saison, le podium de chaque catégorie entre au Panthéon, et chaque premier porte son titre à côté de son nom pendant toute la
             saison suivante. Les seigneurs voisins n&apos;y figurent pas.
           </Info>
+          {boards.rift && (
+            <div>
+              <h3 className="section-title">🌀 Faille de la semaine</h3>
+              <Board rows={boards.rift} userId={userId} empty="Personne n'a encore franchi d'étage." unit="count" />
+            </div>
+          )}
           {HALL.map((h) => {
             const rows = standings.find((st) => st.category === h.id)?.rows ?? [];
             return (
@@ -4192,6 +4200,154 @@ function RoundsReport({ log, open = false, details }: { log: NonNullable<Chronic
         </p>
       )}
     </details>
+  );
+}
+
+/** F1, F2 : la faille, étages à garnison fixe et altérations de la semaine. */
+export function Rift({ snap, live, now, run }: { snap: GameSnapshot; live: PlayerState; now: number; run: ReturnType<typeof useGame>["run"] }) {
+  const [busy, setBusy] = useState(false);
+  const [picked, setPicked] = useState<string[]>([]);
+  const view = snap.rift!;
+  const rs = riftOf(live, now);
+  const e = rs.exp;
+  const act = async (a: Extract<Parameters<typeof run>[0], { type: "rift" }>) => {
+    setBusy(true);
+    await run(a);
+    setBusy(false);
+  };
+  const unitOf = (id: string) => UNITS.find((u) => u.id === id);
+  const alloc = allocation(live);
+  const toggle = (id: string) => setPicked((p) => (p.includes(id) ? p.filter((x) => x !== id) : p.length >= RIFT_MAX_COMPANIES ? p : [...p, id]));
+  const chosen = picked.filter((id) => !riftCompanyBlocker(live, id, now));
+  return (
+    <>
+      <div className="block-head">
+        <h3 className="section-title">🌀 La faille</h3>
+        <Info>
+          Des étages à garnison fixe, les mêmes pour tout le monde. Chaque étage a une ou deux altérations, connues d&apos;avance pour la semaine : choisis tes
+          compagnies en conséquence. Envoie de 1 à {RIFT_MAX_COMPANIES} compagnies ; elles montent étage par étage tant qu&apos;elles gagnent, et tu choisis après
+          chaque étage de continuer ou de rentrer. Les pertes sont réelles. Une compagnie ne repart que 4 heures après son départ. Premier passage d&apos;un étage
+          dans la semaine : 1 renom par tranche de 3 étages, et un coffre de 10 minutes de production tous les 5 étages. Tous les 10 étages, un gardien demande
+          deux joueurs d&apos;une même alliance. Remise à zéro chaque lundi à 4 h.
+        </Info>
+      </div>
+      <p className="row-desc num">
+        Ton plus haut étage cette semaine : <strong>{rs.best}</strong> · remise à zéro dans {countdown(view.endsAt - now)}
+      </p>
+      {e ? (
+        <div className="row rift-exp">
+          <div className="row-icon" aria-hidden>
+            🌀
+          </div>
+          <div>
+            <div className="row-title">
+              {e.status === "out" ? `En route, arrivée dans ${countdown(e.arriveAt - now)}` : e.status === "wait" ? `Devant l'étage ${e.floor}` : `Sur le retour, au domaine dans ${countdown(e.returnAt - now)}`}
+            </div>
+            <div className="row-desc num">
+              {armyIcons(e.troops as Record<string, number>)}
+              {Object.keys(e.wounded).length > 0 ? ` · 🩹 ${armyIcons(e.wounded as Record<string, number>)}` : ""}
+            </div>
+            {e.status === "wait" && <div className="row-desc num">Rentre seule dans {countdown(e.lastAt + RIFT_IDLE_MS - now)} sans ordre.</div>}
+            {e.fights.length > 0 && (
+              <ul className="rift-fights num">
+                {e.fights
+                  .slice(-4)
+                  .reverse()
+                  .map((f) => (
+                    <li key={f.at}>
+                      {f.won ? "✅" : "❌"} Étage {f.floor} : pertes {armyIcons(f.lost as Record<string, number>, "aucune")}
+                    </li>
+                  ))}
+              </ul>
+            )}
+          </div>
+          <div className="row-actions">
+            {e.status === "wait" && (
+              <Btn className="btn btn-primary" busy={busy} reason={riftFightBlocker(live, now)} onClick={() => void act({ type: "rift", op: "fight" })}>
+                ⚔️ Étage {e.floor}
+                {view.floors[0]?.chance !== undefined && <span className="cost num">{Math.round(view.floors[0].chance * 100)} %</span>}
+              </Btn>
+            )}
+            {e.status !== "back" && (
+              <button className="btn" disabled={busy} onClick={() => void act({ type: "rift", op: "return" })}>
+                ↩️ Rentrer
+              </button>
+            )}
+          </div>
+        </div>
+      ) : (
+        <>
+          <h3 className="section-title">Compagnies à envoyer ({chosen.length}/{RIFT_MAX_COMPANIES})</h3>
+          <div className="list">
+            {(live.companies ?? []).map((c, i) => {
+              const u = unitOf(c.unit);
+              const why = riftCompanyBlocker(live, c.id, now);
+              const rest = (rs.rest[c.id] ?? 0) > now ? rs.rest[c.id] : 0;
+              return (
+                <label key={c.id} className={`row rift-pick${why ? " is-off" : ""}`}>
+                  <input type="checkbox" checked={chosen.includes(c.id)} disabled={!!why || busy} onChange={() => toggle(c.id)} />
+                  <div>
+                    <div className="row-title row-title-one">
+                      <span className="row-name">
+                        {u?.icon} {i + 1}. {u?.plural}
+                      </span>
+                      <span className="badge">⭐ {c.train}</span>
+                    </div>
+                    <div className="row-desc num one-line">
+                      {formatNumber(alloc.get(c.id)?.men ?? 0)} hommes{why ? ` · ${rest ? `repos ${countdown(rest - now)}` : why}` : ""}
+                    </div>
+                  </div>
+                </label>
+              );
+            })}
+          </div>
+          <Btn className="btn btn-primary" busy={busy} reason={chosen.length === 0 ? "Choisis au moins une compagnie." : null} onClick={() => void act({ type: "rift", op: "send", ids: chosen }).then(() => setPicked([]))}>
+            🌀 Partir vers l&apos;étage {rs.best + 1}
+          </Btn>
+        </>
+      )}
+      <h3 className="section-title">Prochains étages</h3>
+      <div className="list">
+        {view.floors.map((f) => (
+          <div key={f.floor} className="row rift-floor">
+            <div className="row-icon" aria-hidden>
+              {f.guardian ? "👹" : "🚪"}
+            </div>
+            <div>
+              <div className="row-title row-title-one">
+                <span className="row-name">Étage {f.floor}</span>
+                <span className="badge">⭐ {f.train}</span>
+                {f.guardian && <span className="badge">Gardien</span>}
+              </div>
+              <div className="row-desc">{SHAPES[f.shape]?.name ?? (f.shape === "horde" ? "Horde" : "Champions")} : {armyIcons(f.army as Record<string, number>)}</div>
+              {f.alterations.map((a) => {
+                const alt = ALTERATIONS[a as AlterationId];
+                return alt ? (
+                  <div key={a} className="row-desc">
+                    {alt.icon} <strong>{alt.name}</strong> : {alt.text}
+                  </div>
+                ) : null;
+              })}
+              {f.first && <div className="row-desc">🪦 Gravé : {f.first}</div>}
+            </div>
+          </div>
+        ))}
+      </div>
+      {view.top.length > 0 && (
+        <>
+          <h3 className="section-title">🏆 Cette semaine</h3>
+          <ol className="ranking">
+            {view.top.map((r, i) => (
+              <li key={i} className={r.me ? "me" : undefined}>
+                <span className="rank">{["🥇", "🥈", "🥉"][i] ?? i + 1}</span>
+                <span>{r.name}</span>
+                <span className="num">étage {r.floor}</span>
+              </li>
+            ))}
+          </ol>
+        </>
+      )}
+    </>
   );
 }
 

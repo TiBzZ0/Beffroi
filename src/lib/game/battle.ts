@@ -47,6 +47,10 @@ export interface BattleOptions {
   fortBonus?: number;
   /** L2 : part des pertes de l'attaquant qui tombent vraiment (Vétérans : 0,9). */
   attackerLosses?: number;
+  /** F1 : altérations de la faille, multiplicateur de dégâts selon le tireur, la cible et le round (les deux camps). */
+  dmgMod?: (shooter: CombatantDef, target: CombatantDef, round: number) => number;
+  /** Clé de `dmgMod` pour le cache des chances (sans clé, pas de cache). */
+  modKey?: string;
 }
 
 function defOf(id: string): CombatantDef | undefined {
@@ -90,7 +94,7 @@ const MIN_BREACH_FACTOR = 0.2;
  * n'en absorbent jamais plus de la moitié (un quart pour les palissades). Les béliers visent
  * d'abord les obstacles et réduisent la part qu'ils absorbent pour les autres.
  */
-function damageOn(shooters: Army, targets: Army, mult: number, shooterLv?: Levels, targetLv?: Levels, fortBonus = 1): Map<CombatantId, number> {
+function damageOn(shooters: Army, targets: Army, mult: number, shooterLv?: Levels, targetLv?: Levels, fortBonus = 1, mod?: (s: CombatantDef, t: CombatantDef) => number): Map<CombatantId, number> {
   const out = new Map<CombatantId, number>();
   const alive = (Object.entries(targets) as [CombatantId, number][]).filter(([id, m]) => m > 0 && defOf(id));
   const hpOf = (id: CombatantId, m: number) => m * defOf(id)!.hp * levelFactor(targetLv, id);
@@ -138,7 +142,7 @@ function damageOn(shooters: Army, targets: Army, mult: number, shooterLv?: Level
     const plan = s.bonus?.fortification ? siege : normal;
     for (const [tid, share] of plan) {
       const t = defOf(tid)!;
-      const dmg = n * s.attack * levelFactor(shooterLv, sid) * (s.bonus?.[t.category] ?? 1) * (t.category === "fortification" ? fortBonus : 1) * share * mult;
+      const dmg = n * s.attack * levelFactor(shooterLv, sid) * (s.bonus?.[t.category] ?? 1) * (t.category === "fortification" ? fortBonus : 1) * share * mult * (mod ? mod(s, t) : 1);
       out.set(tid, (out.get(tid) ?? 0) + dmg);
     }
   }
@@ -196,8 +200,10 @@ export function battle(attacker: Army, defender: Army, rng: () => number, opts: 
     // A11 : à chaque round, les dégâts de chaque camp varient de ±15 %.
     const swingAtt = 1 - BATTLE_SWING + rng() * 2 * BATTLE_SWING;
     const swingDef = 1 - BATTLE_SWING + rng() * 2 * BATTLE_SWING;
-    const onDef = casualties(def, damageOn(att, def, mult * swingAtt, aLv, dLv, opts.fortBonus ?? 1), rng, dLv);
-    const onAtt = casualties(att, damageOn(def, att, swingDef * (opts.attackerLosses ?? 1), dLv, aLv), rng, aLv);
+    const r = rounds;
+    const mod = opts.dmgMod ? (s: CombatantDef, t: CombatantDef) => opts.dmgMod!(s, t, r) : undefined;
+    const onDef = casualties(def, damageOn(att, def, mult * swingAtt, aLv, dLv, opts.fortBonus ?? 1, mod), rng, dLv);
+    const onAtt = casualties(att, damageOn(def, att, swingDef * (opts.attackerLosses ?? 1), dLv, aLv, 1, mod), rng, aLv);
     def = subtract(def, onDef);
     att = subtract(att, onAtt);
     defenderLost = add(defenderLost, onDef);
@@ -224,13 +230,15 @@ export function estimateChance(attacker: Army, defender: Army, opts: BattleOptio
   if (armySize(cleanArmy(attacker)) === 0) return 0;
   // Les tirages sont fixes : mêmes armées, même résultat. On garde les derniers calculs (le serveur
   // recalcule sinon la chance contre chaque rival à chaque synchronisation).
-  const key = JSON.stringify([attacker, defender, opts.attackerLevels ?? null, opts.defenderLevels ?? null, opts.attackBonus ?? null, opts.fortune ?? false, opts.fortBonus ?? 1, opts.attackerLosses ?? 1]);
-  const known = chanceCache.get(key);
+  const key = JSON.stringify([attacker, defender, opts.attackerLevels ?? null, opts.defenderLevels ?? null, opts.attackBonus ?? null, opts.fortune ?? false, opts.fortBonus ?? 1, opts.attackerLosses ?? 1, opts.modKey ?? null]);
+  const cacheable = !opts.dmgMod || !!opts.modKey;
+  const known = cacheable ? chanceCache.get(key) : undefined;
   if (known !== undefined) return known;
   const rng = seededRng(0xbeff);
   let wins = 0;
   for (let i = 0; i < CHANCE_SIMULATIONS; i++) if (battle(attacker, defender, rng, opts).success) wins++;
   const chance = wins / CHANCE_SIMULATIONS;
+  if (!cacheable) return chance;
   if (chanceCache.size >= CHANCE_CACHE_SIZE) chanceCache.delete(chanceCache.keys().next().value as string);
   chanceCache.set(key, chance);
   return chance;

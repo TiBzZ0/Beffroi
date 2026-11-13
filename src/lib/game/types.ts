@@ -306,6 +306,30 @@ export interface GameSnapshot {
   guild?: HallView;
   /** L1 : renom gagné dans la saison, disponible, et gains du jour par source. */
   renown?: { earned: number; available: number; today: Partial<Record<string, number>> };
+  /** F1 : la faille de la semaine (saison 1 et suivantes). */
+  rift?: RiftView;
+}
+
+export interface RiftFloorView {
+  floor: number;
+  alterations: string[];
+  shape: string;
+  army: Partial<Record<string, number>>;
+  train: number;
+  guardian: boolean;
+  /** Premier joueur à l'avoir franchi cette semaine. */
+  first?: string;
+  /** Chance de l'expédition en cours, quand elle attend devant cet étage. */
+  chance?: number;
+}
+
+export interface RiftView {
+  week: string;
+  endsAt: number;
+  floors: RiftFloorView[];
+  /** Les noms gravés : étage → premier joueur. */
+  firsts: Record<number, string>;
+  top: { name: string; floor: number; me: boolean }[];
 }
 
 export interface LeaderboardRow {
@@ -331,6 +355,8 @@ export interface SeasonHall {
 
 export interface Leaderboards {
   plunderers: LeaderboardRow[];
+  /** F1 : faille de la semaine, par étage atteint. */
+  rift?: LeaderboardRow[];
   /** Saison en cours, toutes catégories. */
   standings: Standing[];
   /** Saisons terminées, la plus récente d'abord. */
@@ -342,6 +368,7 @@ export type GameAction =
   | { type: "sync" }
   | { type: "lineage_buy"; node: string }
   | { type: "lineage_respec" }
+  | { type: "rift"; op: "send" | "fight" | "return"; ids?: string[] }
   | { type: "company"; op: "create" | "dissolve" | "retype" | "recruit" | "train" | "barracks" | "fort"; id?: string; unit?: string; qty?: number }
   | { type: "click"; count: number }
   | { type: "buy"; generator: string; qty: number }

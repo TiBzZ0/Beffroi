@@ -2,7 +2,7 @@
 // Le renom se gagne par des actions et ne grossit pas avec la production. Il repart de zéro à chaque saison.
 // La Lignée : trois branches de neuf nœuds sur quatre rangs, achetés en renom ; un seul nœud de rang 4 en tout.
 
-export type RenownSource = "raid" | "defense" | "lord" | "recon" | "quest" | "event" | "podium" | "stage" | "gift";
+export type RenownSource = "raid" | "defense" | "lord" | "recon" | "quest" | "event" | "podium" | "stage" | "gift" | "rift";
 
 /** Renom par action, et limite par jour (heure de Paris). */
 export const RENOWN: Record<RenownSource, { amount: number; cap?: number; label: string; icon: string }> = {
@@ -15,6 +15,7 @@ export const RENOWN: Record<RenownSource, { amount: number; cap?: number; label:
   podium: { amount: 3, label: "Podiums", icon: "🏆" },
   stage: { amount: 10, label: "Étapes", icon: "🏗️" },
   gift: { amount: 20, label: "Offert", icon: "🎁" },
+  rift: { amount: 1, label: "Faille", icon: "🌀" },
 };
 /** Sources affichées en jauges (celles qui ont une limite par jour). */
 export const RENOWN_CAPPED: RenownSource[] = ["raid", "defense", "lord", "recon"];

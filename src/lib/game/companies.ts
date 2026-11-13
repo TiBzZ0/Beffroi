@@ -44,6 +44,8 @@ export interface ArmyHolder {
   recruits?: RecruitOrder[];
   /** Mes troupes postées ailleurs (alliés, halle, forteresse). Fixé par le serveur, jamais enregistré. */
   abroad?: Army;
+  /** F1 : expédition en cours dans la faille (hommes par compagnie, blessés en route). */
+  rift?: { exp?: { by: Record<string, number>; troops: Army; wounded: Army } | null } | null;
   /** Le modèle des compagnies est en vigueur (saison 1 et suivantes). Fixé par le serveur, jamais enregistré. */
   companyModel?: boolean;
 }
@@ -118,6 +120,8 @@ export function queuedMen(s: ArmyHolder): Partial<Record<UnitId, number>> {
 export function menOf(s: ArmyHolder, unit: UnitId): number {
   let n = (s.troops[unit] ?? 0) + (s.wounded?.[unit] ?? 0) + ((s.abroad as Record<string, number> | undefined)?.[unit] ?? 0);
   for (const m of s.marches ?? []) n += (m.troops as Record<string, number>)[unit] ?? 0;
+  const exp = s.rift?.exp;
+  if (exp) n += ((exp.troops as Record<string, number>)[unit] ?? 0) + ((exp.wounded as Record<string, number>)[unit] ?? 0);
   return n;
 }
 
@@ -129,12 +133,21 @@ export function capacityOf(s: ArmyHolder, unit: UnitId): number {
 export function allocation(s: ArmyHolder): Map<string, { men: number; home: number; queued: number }> {
   const out = new Map<string, { men: number; home: number; queued: number }>();
   const queued = queuedMen(s);
+  const pinned = s.rift?.exp?.by ?? {};
   for (const u of UNITS) {
     const list = (s.companies ?? []).filter((c) => c.unit === u.id);
     let men = menOf(s, u.id);
     let home = s.troops[u.id] ?? 0;
     let q = queued[u.id] ?? 0;
+    // Les compagnies parties dans la faille gardent leurs hommes ; les autres se remplissent dans l'ordre.
     for (const c of list) {
+      if (pinned[c.id] === undefined) continue;
+      const m = Math.min(COMPANY_CAP[u.id], Math.max(0, pinned[c.id]), men);
+      out.set(c.id, { men: m, home: 0, queued: 0 });
+      men -= m;
+    }
+    for (const c of list) {
+      if (pinned[c.id] !== undefined) continue;
       const m = Math.min(COMPANY_CAP[u.id], men);
       const h = Math.min(m, home);
       const qq = Math.min(COMPANY_CAP[u.id] - m, q);
@@ -145,6 +158,25 @@ export function allocation(s: ArmyHolder): Map<string, { men: number; home: numb
     }
   }
   return out;
+}
+
+/** Niveaux de combat de quelques compagnies seulement (expédition dans la faille). */
+export function companyLevels(s: ArmyHolder, ids: string[], men: Record<string, number>): Levels {
+  const out: Record<string, number> = { ...(s.levels as Record<string, number>) };
+  for (const u of UNITS) {
+    let total = 0;
+    let weighted = 0;
+    for (const c of s.companies ?? []) {
+      if (c.unit !== u.id || !ids.includes(c.id)) continue;
+      const m = men[c.id] ?? 0;
+      total += m;
+      weighted += m * trainFactor(c);
+    }
+    if (total <= 0) continue;
+    const forge = 1 + LEVEL_BONUS * Math.max(0, out[u.id] ?? 0);
+    out[u.id] = (forge * (weighted / total) - 1) / LEVEL_BONUS;
+  }
+  return out as Levels;
 }
 
 /** Hommes retenus au domaine par l'entraînement de leur compagnie, par type. */

@@ -249,9 +249,12 @@ import {
   type HallCategory,
   type SeasonHall,
   type Standing,
+  type RiftFloorView,
+  type RiftView,
 } from "./types";
 import { armyForChance, armyFromBudget, armySize, armyValue, battle, cleanArmy, estimateChance, seededRng, type Army, type Levels } from "./battle";
 import { recordContribution } from "@/lib/redis";
+import { applyRiftFight, cleanRift, expeditionLevels, floorRenown, floorTrain, riftBattleOpts, riftFightBlocker, riftFloor, riftOf, riftReturn, riftSend, riftWeek, RIFT_CHEST_EVERY, RIFT_CHEST_SECONDS } from "./rift";
 import { COMPANY_VALUE, FIXED_EVENT_COMPANIES, FIXED_TRAIN, FORTRESS_COMPANIES, LORD_COMPANIES, LORD_RAID_SHARE, LORD_TRAIN, trainLevels, buildBarracks, buildFort, combatLevels, cleanCompanies, cleanFortLevels, cleanRecruits, cleanWorks, createCompany, dissolveCompany, recruit, retypeCompany, startTraining } from "./companies";
 import { buyNode, cleanLineage, lin, lineageMark, LIN_MOLE, LIN_SPY_CATCH, NODE_BY_ID, parisDay, RENOWN, RENOWN_GIFT_SEASON, renownAvailable, respec, type RenownSource } from "./lineage";
 import { notify, notifyEach, type PushMessage } from "@/lib/push";
@@ -272,7 +275,7 @@ interface PlayerRow {
   upgrades: string[];
   total_produced: number;
   total_contributed: number;
-  military?: { levels?: Record<string, number>; research?: { id: string; endsAt: number; cost?: number }[] | { id: string; endsAt: number } | null; academy?: number; sabotageImmuneUntil?: number; ruinImmuneUntil?: number; elanUntil?: number; tithe?: number; titheOwed?: number; titheSet?: boolean; share?: StageShare | null; donorTiers?: number; curfew?: Curfew | null; seen?: PlayerState["seen"] | null; veinAt?: number; frenzyUntil?: number; quest?: number | null; questFlags?: string[]; wounded?: Record<string, number>; healAt?: number; marches?: unknown; boostProdUntil?: number; boostSafeUntil?: number; merchantEvent?: number; daily?: unknown; dailyBoostUntil?: number; dailyBoost?: number; hallTithe?: number; spyLevel?: number; spies?: unknown; moles?: unknown; counterUntil?: number; rumor?: { mode?: string; until?: number } | null; granaryCutUntil?: number; blindUntil?: number; spyLog?: unknown; tribute?: { seconds?: number; at?: number } | null; inboxRead?: Record<string, unknown> | null; lineage?: unknown; companies?: unknown; barracks?: number; works?: unknown; fortLevels?: unknown; recruits?: unknown } | null;
+  military?: { levels?: Record<string, number>; research?: { id: string; endsAt: number; cost?: number }[] | { id: string; endsAt: number } | null; academy?: number; sabotageImmuneUntil?: number; ruinImmuneUntil?: number; elanUntil?: number; tithe?: number; titheOwed?: number; titheSet?: boolean; share?: StageShare | null; donorTiers?: number; curfew?: Curfew | null; seen?: PlayerState["seen"] | null; veinAt?: number; frenzyUntil?: number; quest?: number | null; questFlags?: string[]; wounded?: Record<string, number>; healAt?: number; marches?: unknown; boostProdUntil?: number; boostSafeUntil?: number; merchantEvent?: number; daily?: unknown; dailyBoostUntil?: number; dailyBoost?: number; hallTithe?: number; spyLevel?: number; spies?: unknown; moles?: unknown; counterUntil?: number; rumor?: { mode?: string; until?: number } | null; granaryCutUntil?: number; blindUntil?: number; spyLog?: unknown; tribute?: { seconds?: number; at?: number } | null; inboxRead?: Record<string, unknown> | null; lineage?: unknown; companies?: unknown; barracks?: number; works?: unknown; fortLevels?: unknown; recruits?: unknown; rift?: unknown } | null;
   total_clicks: number;
   last_ip?: string | null;
   last_update: string;
@@ -441,7 +444,7 @@ function toEntity(row: PlayerRow): Entity {
       lineage: cleanLineage(row.military?.lineage),
       // C1 à C4 : le modèle des compagnies ne vaut qu'à partir de la saison 1.
       ...(currentCompanyModel && !lord && !row.profiles?.is_bot
-        ? { companyModel: true, companies: cleanCompanies(row.military?.companies), barracks: Math.max(0, Math.floor(Number(row.military?.barracks ?? 0) || 0)), works: cleanWorks(row.military?.works), fortLevels: cleanFortLevels(row.military?.fortLevels), recruits: cleanRecruits(row.military?.recruits) }
+        ? { companyModel: true, companies: cleanCompanies(row.military?.companies), barracks: Math.max(0, Math.floor(Number(row.military?.barracks ?? 0) || 0)), works: cleanWorks(row.military?.works), fortLevels: cleanFortLevels(row.military?.fortLevels), recruits: cleanRecruits(row.military?.recruits), rift: cleanRift(row.military?.rift) }
         : {}),
       ...(row.military?.seen ? { seen: { produced: Number(row.military.seen.produced ?? 0), contributed: Number(row.military.seen.contributed ?? 0), levels: armyCounts(row.military.seen.levels ?? {}, [...UNIT_IDS, ...DEFENSE_IDS]) } } : {}),
     },
@@ -471,7 +474,7 @@ function toJson(e: Entity, state: PlayerState, extra: Record<string, unknown> = 
     troops: state.troops,
     defenses: state.defenses,
     stationed: state.stationed,
-    military: { levels: state.levels, research: state.research, academy: state.academy, sabotageImmuneUntil: state.sabotageImmuneUntil, ruinImmuneUntil: state.ruinImmuneUntil, elanUntil: state.elanUntil, tithe: state.tithe, titheOwed: state.titheOwed, titheSet: state.titheSet, share: state.share, donorTiers: state.donorTiers, curfew: state.curfew, seen: state.seen ?? null, veinAt: state.veinAt, frenzyUntil: state.frenzyUntil, quest: state.quest, questFlags: state.questFlags, wounded: state.wounded, healAt: state.healAt, marches: state.marches ?? [], boostProdUntil: state.boostProdUntil, boostSafeUntil: state.boostSafeUntil, merchantEvent: state.merchantEvent, daily: state.daily ?? null, dailyBoostUntil: state.dailyBoostUntil, dailyBoost: state.dailyBoost, hallTithe: state.hallTithe, spyLevel: state.spyLevel ?? 0, spies: state.spies ?? [], moles: state.moles ?? [], counterUntil: state.counterUntil ?? 0, rumor: state.rumor ?? null, granaryCutUntil: state.granaryCutUntil ?? 0, blindUntil: state.blindUntil ?? 0, spyLog: (state.spyLog ?? []).slice(-SPY_LOG_MAX), tribute: state.tribute ?? null, inboxRead: state.inboxRead ?? {}, lineage: state.lineage ?? null, ...(state.companyModel ? { companies: state.companies ?? [], barracks: state.barracks ?? 0, works: state.works ?? {}, fortLevels: state.fortLevels ?? {}, recruits: state.recruits ?? [] } : {}) },
+    military: { levels: state.levels, research: state.research, academy: state.academy, sabotageImmuneUntil: state.sabotageImmuneUntil, ruinImmuneUntil: state.ruinImmuneUntil, elanUntil: state.elanUntil, tithe: state.tithe, titheOwed: state.titheOwed, titheSet: state.titheSet, share: state.share, donorTiers: state.donorTiers, curfew: state.curfew, seen: state.seen ?? null, veinAt: state.veinAt, frenzyUntil: state.frenzyUntil, quest: state.quest, questFlags: state.questFlags, wounded: state.wounded, healAt: state.healAt, marches: state.marches ?? [], boostProdUntil: state.boostProdUntil, boostSafeUntil: state.boostSafeUntil, merchantEvent: state.merchantEvent, daily: state.daily ?? null, dailyBoostUntil: state.dailyBoostUntil, dailyBoost: state.dailyBoost, hallTithe: state.hallTithe, spyLevel: state.spyLevel ?? 0, spies: state.spies ?? [], moles: state.moles ?? [], counterUntil: state.counterUntil ?? 0, rumor: state.rumor ?? null, granaryCutUntil: state.granaryCutUntil ?? 0, blindUntil: state.blindUntil ?? 0, spyLog: (state.spyLog ?? []).slice(-SPY_LOG_MAX), tribute: state.tribute ?? null, inboxRead: state.inboxRead ?? {}, lineage: state.lineage ?? null, ...(state.companyModel ? { companies: state.companies ?? [], barracks: state.barracks ?? 0, works: state.works ?? {}, fortLevels: state.fortLevels ?? {}, recruits: state.recruits ?? [], rift: state.rift ?? null } : {}) },
     click_strikes: state.clickStrikes,
     click_paused_until: iso(state.clickPausedUntil),
     ...extra,
@@ -1032,15 +1035,47 @@ async function loadRenown(admin: SupabaseClient, seasonId: number, userId: strin
  * L1 : verse du renom à un joueur, dans la limite du jour de la source. `ref` évite de payer deux fois la même chose
  * (un événement, une étape). Renvoie le renom versé. Les seigneurs n'en gagnent jamais.
  */
-async function grantRenown(admin: SupabaseClient, seasonId: number, who: Entity | undefined, source: RenownSource, label: string, ref?: string | number): Promise<number> {
+async function grantRenown(admin: SupabaseClient, seasonId: number, who: Entity | undefined, source: RenownSource, label: string, ref?: string | number, amount?: number): Promise<number> {
   if (!who || who.isLord) return 0;
   const rule = RENOWN[source];
   const tally = await loadRenown(admin, seasonId, who.id, Date.now());
   if (ref !== undefined && tally.refs.has(`${source}:${String(ref)}`)) return 0;
-  const room = rule.cap === undefined ? rule.amount : Math.max(0, Math.min(rule.amount, rule.cap - (tally.today[source] ?? 0)));
+  const want = amount ?? rule.amount;
+  const room = rule.cap === undefined ? want : Math.max(0, Math.min(want, rule.cap - (tally.today[source] ?? 0)));
   if (room <= 0) return 0;
   await addChronicle(admin, seasonId, { kind: "renown", actor_id: who.id, details: { amount: room, source, label, ...(ref !== undefined ? { ref: String(ref) } : {}) } });
   return room;
+}
+
+/** F1 : noms gravés (premier joueur par étage) et plus haut étage de chacun, pour la semaine. */
+async function loadRiftBoard(admin: SupabaseClient, seasonId: number, week: string): Promise<{ firsts: Record<number, string>; best: Map<string, { name: string; floor: number }> }> {
+  const { data } = await admin.from("chronicle").select("actor_id, details, created_at").eq("season_id", seasonId).eq("kind", "rift").eq("details->>week", week).order("created_at", { ascending: true }).limit(5000);
+  const firsts: Record<number, string> = {};
+  const best = new Map<string, { name: string; floor: number }>();
+  for (const r of data ?? []) {
+    const d = (r.details ?? {}) as { floor?: unknown; name?: unknown };
+    const floor = Math.floor(Number(d.floor) || 0);
+    const name = String(d.name ?? "?");
+    if (floor <= 0) continue;
+    if (!(floor in firsts)) firsts[floor] = name;
+    const id = String(r.actor_id);
+    if ((best.get(id)?.floor ?? 0) < floor) best.set(id, { name, floor });
+  }
+  return { firsts, best };
+}
+
+function riftView(state: PlayerState, board: { firsts: Record<number, string>; best: Map<string, { name: string; floor: number }> }, userId: string, now: number): RiftView {
+  const w = riftWeek(now);
+  const rs = riftOf(state, now);
+  const from = rs.exp && rs.exp.status !== "back" ? rs.exp.floor : rs.best + 1;
+  const floors: RiftFloorView[] = [];
+  for (let n = from; n < from + 3; n++) {
+    const f = riftFloor(w.key, n);
+    const waiting = rs.exp?.status === "wait" && rs.exp.floor === n && !f.guardian;
+    floors.push({ floor: n, alterations: f.alterations, shape: f.shape, army: f.army, train: floorTrain(n), guardian: f.guardian, ...(board.firsts[n] ? { first: board.firsts[n] } : {}), ...(waiting ? { chance: estimateChance(rs.exp!.troops, f.army, riftBattleOpts(f, expeditionLevels(state, rs.exp!))) } : {}) });
+  }
+  const top = [...board.best.entries()].sort((a, b) => b[1].floor - a[1].floor).slice(0, 10).map(([id, v]) => ({ name: v.name, floor: v.floor, me: id === userId }));
+  return { week: w.key, endsAt: w.end, floors, firsts: board.firsts, top };
 }
 
 /** L1 : pas de renom entre deux comptes qui partagent une adresse IP. */
@@ -1176,7 +1211,7 @@ async function loadChronicle(admin: SupabaseClient, seasonId: number, entities: 
     .select("id, kind, actor_id, target_id, details, created_at")
     .eq("season_id", seasonId)
     .gt("created_at", iso(Date.now() - CHRONICLE_KEEP_MS))
-    .not("kind", "in", "(quest,chest,ecus,renown)")
+    .not("kind", "in", "(quest,chest,ecus,renown,rift)")
     .order("created_at", { ascending: false })
     .limit(80);
   // R10, U2 : tout ce qui concerne le joueur sur 7 jours (150 lignes au plus), même hors des 80 dernières lignes.
@@ -2579,6 +2614,55 @@ export async function runAction(admin: SupabaseClient, userId: string, action: G
           message = `🏛️ ${def.icon} ${def.name} niveau ${legacy?.[def.id] ?? 1} acquis pour ${r.cost} écus. Il te suivra de saison en saison.`;
         }
       }
+    } else if (action.type === "rift") {
+      // F1, F2 : expédition dans la faille, étage par étage.
+      const op = String(action.op);
+      let r: { ok: true; value: PlayerState } | { ok: false; error: string };
+      let cleared: { floor: number; week: string; chest: number } | null = null;
+      if (!current.companyModel) r = { ok: false, error: "La faille s'ouvre avec la saison 1." };
+      else if (op === "send") {
+        const ids = Array.isArray(action.ids) ? action.ids.map(String).slice(0, 8) : [];
+        const sample: Record<string, number> = {};
+        for (const id of ids) {
+          const c = current.companies?.find((x) => x.id === id);
+          if (c) sample[c.unit] = 1;
+        }
+        const travel = await travelToFortress(admin, season.id, entities, userId, sample as Army);
+        r = riftSend(current, ids, travel, now);
+      } else if (op === "return") r = riftReturn(current, now);
+      else if (op === "fight") {
+        const why = riftFightBlocker(current, now);
+        if (why) r = { ok: false, error: why };
+        else {
+          const rs = riftOf(current, now);
+          const e = rs.exp!;
+          const f = riftFloor(rs.week, e.floor);
+          const fight = battle(e.troops, f.army, Math.random, riftBattleOpts(f, expeditionLevels(current, e)));
+          let next = applyRiftFight(current, f, fight, fight.success ? WOUNDED_WINNER : WOUNDED_ATTACKER_BEATEN, now);
+          const first = fight.success && (next.rift?.best ?? 0) > rs.best;
+          let chest = 0;
+          if (first && f.floor % RIFT_CHEST_EVERY === 0) {
+            chest = Math.ceil(baseRate(current, world, now) * RIFT_CHEST_SECONDS);
+            next = { ...next, stone: next.stone + chest };
+          }
+          if (first) cleared = { floor: f.floor, week: rs.week, chest };
+          r = { ok: true, value: next };
+          message = fight.success
+            ? `🌀 Étage ${f.floor} franchi !${chest > 0 ? ` Coffre : ${chest.toLocaleString("fr-FR")} pierres.` : ""}`
+            : `🌀 L'étage ${f.floor} tient bon : tes survivants rentrent.`;
+        }
+      } else r = { ok: false, error: "Action inconnue." };
+      if (!r.ok) error = r.error;
+      else {
+        finalState = r.value;
+        const { data } = await admin.rpc("commit_state", { p_season: season.id, p_state: toJson(me, finalState, {}), p_touch: true, p_contribution: 0, p_stage_bases: stageSizes, p_active_window_days: ACTIVE_WINDOW_DAYS, p_action: `rift_${op}`, p_details: cleared ? { floor: cleared.floor } : null });
+        if ((data as { conflict?: boolean } | null)?.conflict) continue;
+        if (cleared) {
+          await addChronicle(admin, season.id, { kind: "rift", actor_id: userId, details: { week: cleared.week, floor: cleared.floor, name: me.name } });
+          const got = await grantRenown(admin, season.id, me, "rift", `Faille, étage ${cleared.floor}`, `${cleared.week}:${cleared.floor}`, floorRenown(cleared.floor));
+          if (got > 0) message = `${message} +${got} 🎖️`;
+        }
+      }
     } else if (action.type === "lineage_buy" || action.type === "lineage_respec") {
       // L2 : nœuds de la Lignée, payés en renom (gagné moins dépensé).
       const tally = await loadRenown(admin, season.id, userId, now);
@@ -2909,6 +2993,7 @@ export async function runAction(admin: SupabaseClient, userId: string, action: G
       daily: dailyView(finalState, dailyCounts, now),
       guild: guildView(meNow, finalState, entities, chiefs, worldFrom(worksite), now, conflicts.wars, names, intel),
       renown: { earned: renown.earned, available: renownAvailable(renown.earned, finalState.lineage), today: renown.today },
+      ...(finalState.companyModel ? { rift: riftView(finalState, await loadRiftBoard(admin, season.id, riftWeek(now).key), userId, now) } : {}),
     };
     return error ? { ok: false, error, snapshot } : { ok: true, snapshot, message };
   }
@@ -3667,7 +3752,10 @@ export async function getLeaderboards(admin: SupabaseClient, limit = 20): Promis
   const [standings, hall] = await Promise.all([seasonStandings(admin, season.id, Date.now()), loadHall(admin)]);
   const rowsOf = (c: HallCategory) => standings.find((st) => st.category === c)?.rows ?? [];
   const toBoard = (rows: { id: string; name: string; value: number }[]): LeaderboardRow[] => rows.slice(0, limit).map((r) => ({ userId: r.id, username: r.name, total: r.value }));
+  const week = riftWeek(Date.now()).key;
+  const rift = season.number >= COMPANY_SEASON ? [...(await loadRiftBoard(admin, season.id, week)).best.entries()].sort((a, b) => b[1].floor - a[1].floor).slice(0, limit).map(([id, v]) => ({ userId: id, username: v.name, total: v.floor })) : undefined;
   return {
+    ...(rift ? { rift } : {}),
     plunderers: toBoard(rowsOf("plunderer")),
     standings: standings.map((st) => ({ ...st, rows: st.rows.slice(0, limit) })),
     hall,

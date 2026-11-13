@@ -168,6 +168,7 @@ import {
   type EventKind,
 } from "./config";
 import { armySize, armyValue, battle, cleanArmy, type Army, type BattleOptions, type Levels, type RoundLog } from "./battle";
+import { settleRift, type RiftState } from "./rift";
 import { combatLevels, lockedMen, settleArmy, type ArmyWorks, type Company, type RecruitOrder } from "./companies";
 import { lin, LIN_ATTACK, LIN_ATTACK_LOSSES, LIN_CAVE_SECONDS, LIN_DONOR_TIERS, LIN_ELAN, LIN_FORT_DAMAGE, LIN_FORTUNE, LIN_GENERATOR_DISCOUNT, LIN_PRODUCTION, LIN_PROTECTED, LIN_PVP_CAP, LIN_REBUILD, LIN_RESEARCH_SPEED, LIN_REVENGE_MS, LIN_RUIN_OUTPUT, LIN_SABOTAGE, LIN_SPEED, LIN_SPY_SPEED, LIN_TROOP_DISCOUNT, LIN_WOUNDED, type LineageState } from "./lineage";
 
@@ -292,6 +293,8 @@ export interface PlayerState {
   abroad?: Army;
   /** Modèle des compagnies en vigueur. Fixé par le serveur selon la saison, jamais enregistré. */
   companyModel?: boolean;
+  /** F1 : la faille (semaine, plus haut étage, repos des compagnies, expédition). */
+  rift?: RiftState | null;
 }
 
 /** Une recherche de la Forge : un type de troupe ou de fortification, ou l'espionnage. */
@@ -750,7 +753,7 @@ export function rateAt(state: PlayerState, world: WorldState, t: number, opts: A
  * événement survenu pendant l'absence (étape du chantier terminée, fin d'incendie).
  */
 export function advance(state: PlayerState, now: number, world: WorldState, opts: AdvanceOptions = {}): PlayerState {
-  state = settleArmy(settleWounded(settleCurfew(settleResearch(state, now), now), now), now);
+  state = settleRift(settleArmy(settleWounded(settleCurfew(settleResearch(state, now), now), now), now), now, addWounded);
   if (now <= state.lastUpdate) return state;
   const start = Math.max(state.lastUpdate, now - OFFLINE_CAP_MS);
   const events = [...world.stageCompletedAt, state.burnedUntil, state.elanUntil ?? 0, state.frenzyUntil ?? 0, ...(state.masterBonuses ?? []).flatMap((m) => [m.from, m.until]), state.boostProdUntil ?? 0, state.dailyBoostUntil ?? 0, legacyStartUntil(state), ...(state.eventMods ?? []).flatMap((e) => [e.from, e.until])];

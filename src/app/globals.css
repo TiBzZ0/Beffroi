@@ -2442,3 +2442,27 @@ use.g-enemy {
   min-width: 0;
   padding-block: 2px;
 }
+
+/* Faille (saison 1) */
+.rift-pick {
+  cursor: pointer;
+}
+.rift-pick input {
+  width: 22px;
+  height: 22px;
+  margin: 0 4px;
+  accent-color: var(--accent);
+}
+.rift-pick.is-off {
+  opacity: 0.6;
+  cursor: default;
+}
+.rift-fights {
+  margin: 6px 0 0;
+  padding-left: 0;
+  list-style: none;
+  font-size: 0.9em;
+}
+.rift-floor .row-desc + .row-desc {
+  margin-top: 2px;
+}
