@@ -95,6 +95,8 @@ import {
   WOUNDED_WINNER,
   WOUNDED_ATTACKER_BEATEN,
   STAGES,
+  TOTAL_STAGES,
+  stageDef,
   DEFENSE_IDS,
   UNIT_IDS,
   type GeneratorId,
@@ -627,7 +629,7 @@ function lotOwnerOf(e: Entity): string {
  * Renvoie true si quelque chose a été créé.
  */
 async function ensureLots(admin: SupabaseClient, seasonId: number, worksite: WorksiteView, entities: Map<string, Entity>, me: Entity, world: WorldState, now: number): Promise<boolean> {
-  if (worksite.stage >= STAGES.length) return false;
+  if (worksite.stage >= TOTAL_STAGES) return false;
   const lots = (lotsOf.get(entities) ?? []).filter((l) => l.stage === worksite.stage);
   const inLot = new Set(lots.flatMap((l) => Object.keys(l.members)));
   const joiners = lots.length === 0 ? activeHumans(entities, now) : me.isLord || inLot.has(me.id) ? [] : [me];
@@ -678,8 +680,8 @@ function lotsView(lots: Lot[], me: Entity, entities: Map<string, Entity>, allian
 
 /** B6 : récompenses versées une fois quand une étape s'achève (écus du beffroi légendaire). */
 async function stageRewards(admin: SupabaseClient, seasonId: number, before: number, after: number) {
-  for (let i = before; i < Math.min(after, STAGES.length); i++) {
-    const ecus = STAGES[i].bonus.donorEcus ?? 0;
+  for (let i = before; i < Math.min(after, TOTAL_STAGES); i++) {
+    const ecus = stageDef(i).bonus.donorEcus ?? 0;
     if (ecus > 0) await admin.rpc("reward_donors", { p_season: seasonId, p_amount: ecus });
   }
 }
@@ -713,7 +715,7 @@ async function maybeDailySummary(admin: SupabaseClient, seasonId: number, entiti
   ]);
   const ids = new Set((subs ?? []).map((r) => r.user_id as string));
   const lots = lotsOf.get(entities) ?? [];
-  const stagePct = worksite.stage < STAGES.length ? Math.floor((worksite.progress / Math.max(1, worksite.target)) * 100) : 100;
+  const stagePct = worksite.stage < TOTAL_STAGES ? Math.floor((worksite.progress / Math.max(1, worksite.target)) * 100) : 100;
   const messages = new Map<string, PushMessage>();
   for (const id of ids) {
     const e = entities.get(id);
@@ -727,7 +729,7 @@ async function maybeDailySummary(admin: SupabaseClient, seasonId: number, entiti
       lost.length ? `${lost.length} raid${lost.length > 1 ? "s" : ""} subi${lost.length > 1 ? "s" : ""} (${Math.floor(stolen).toLocaleString("fr-FR")} pierres)` : "aucun raid réussi contre toi",
       mine.length - lost.length > 0 ? `${mine.length - lost.length} repoussé${mine.length - lost.length > 1 ? "s" : ""}` : null,
       won ? `${won} pillage${won > 1 ? "s" : ""} réussi${won > 1 ? "s" : ""}` : null,
-      worksite.stage < STAGES.length ? `chantier à ${stagePct} %${lot ? `, ton lot à ${Math.floor((lot.progress / Math.max(1, lot.target)) * 100)} %` : ""}` : "beffroi achevé",
+      worksite.stage < TOTAL_STAGES ? `chantier à ${stagePct} %${lot ? `, ton lot à ${Math.floor((lot.progress / Math.max(1, lot.target)) * 100)} %` : ""}` : "chantier achevé",
     ].filter(Boolean);
     messages.set(id, { title: "📜 Ta journée à Beffroi", body: `Dernières 24 h : ${parts.join(", ")}.`, tag: "daily" });
   }
@@ -749,7 +751,7 @@ async function giveToLots(admin: SupabaseClient, seasonId: number, me: Entity, s
     if (members.length) {
       notify(admin, members, {
         title: r.master ? "👑 Maître d'œuvre !" : "🏗️ Lot fini",
-        body: r.master ? `Votre lot de « ${STAGES[st]?.name} » est le premier fini. Choisissez votre bonus dans l'onglet du chantier.` : `Votre lot de « ${STAGES[st]?.name} » est fini.`,
+        body: r.master ? `Votre lot de « ${stageDef(st).name} » est le premier fini. Choisissez votre bonus dans l'onglet du chantier.` : `Votre lot de « ${stageDef(st).name} » est fini.`,
         tag: "lot",
       });
     }
@@ -792,7 +794,7 @@ function attackerSizeOf(id: string, state: PlayerState, entities: Map<string, En
 }
 
 /** Taille des étapes passée au chantier : seule compte celle de l'étape qui s'ouvre (audit A9). */
-let stageSizes: number[] = STAGES.map(() => STAGE_MIN_SIZE);
+let stageSizes: number[] = Array.from({ length: TOTAL_STAGES }, () => STAGE_MIN_SIZE);
 
 function activeHumans(entities: Map<string, Entity>, now: number): Entity[] {
   return [...entities.values()].filter((e) => !e.isLord && now - e.lastSeen < ACTIVE_WINDOW_DAYS * 86_400_000);
@@ -803,13 +805,31 @@ function lordRates(entities: Map<string, Entity>, world: WorldState, now: number
   // Joueurs actifs : vus dans la fenêtre d'activité du chantier.
   const rates = activeHumans(entities, now).map((e) => productionPerSecond(e.state, world, stagesDoneAt(world, now))).sort((a, b) => a - b);
   // Au passage, on retient la taille d'une étape qui s'ouvrirait maintenant.
-  stageSizes = STAGES.map((_, i) => stageSize(rates, stageHours(i)));
+  stageSizes = Array.from({ length: TOTAL_STAGES }, (_, i) => stageSize(rates, stageHours(i)));
   const mid = median(rates);
   // Les seigneurs faciles suivent le quart le plus faible des joueurs, pour que les petits aient une cible.
   const low = rates.length === 0 ? 0 : rates[Math.floor((rates.length - 1) * 0.25)];
+  // G2 : les difficiles suivent le troisième quartile, les redoutables le premier joueur.
+  const high = rates.length === 0 ? 0 : rates[Math.floor((rates.length - 1) * 0.75)];
+  const top = rates.length === 0 ? 0 : rates[rates.length - 1];
+  const ref: Record<number, number> = { 1: low, 2: mid, 3: high, 4: top };
   const out = new Map<string, number>();
-  for (const l of LORDS) out.set(l.id, Math.max(LORD_MIN_RATE, l.difficulty === 1 ? low : mid) * l.rateFactor * LORD_RATE_SCALE);
+  for (const l of LORDS) {
+    const r = Math.max(LORD_MIN_RATE, ref[l.difficulty] ?? mid);
+    lordRefs.set(l.id, r);
+    out.set(l.id, r * l.rateFactor * LORD_RATE_SCALE);
+  }
   return out;
+}
+
+/** G2 : production de référence de chaque seigneur (avant son facteur), relevée avec lordRates. */
+const lordRefs = new Map<string, number>();
+
+/** G2 : équité sur le butin d'un seigneur : min(1, 2 × sa référence / production de l'attaquant). */
+function lordFairness(lordId: string, attackerRate: number): number {
+  const ref = lordRefs.get(lordId);
+  if (!ref || !(attackerRate > 0)) return 1;
+  return Math.min(1, (2 * ref) / attackerRate);
 }
 
 function median(values: number[]): number {
@@ -917,7 +937,7 @@ async function tickLords(admin: SupabaseClient, season: SeasonView, entities: Ma
     // Don au chantier (Prieure d'Aubeval).
     if (lord.contribution && me.nextContribAt !== null && me.nextContribAt <= now) {
       // Jamais plus d'un quart de l'étape en cours, et rien une fois le beffroi achevé.
-      const room = worksite.stage < STAGES.length ? worksite.target * LORD_GIFT_MAX_SHARE : 0;
+      const room = worksite.stage < TOTAL_STAGES ? worksite.target * LORD_GIFT_MAX_SHARE : 0;
       const amount = Math.floor(Math.min(state.stone * lord.contribution.share, room));
       const r = amount >= 1 ? contribute(state, amount) : null;
       const next = r?.ok ? r.value : state;
@@ -1965,7 +1985,7 @@ function rivalsFor(
       const shown = noisy ? (Object.fromEntries(Object.entries(rumored).map(([id, n]) => [id, jitter(n ?? 0, id)])) as Army) : rumored;
       const seen = seesArmy ? shown : {};
       const stone = jitter(s.stone, "stone");
-      const fair = e.isLord ? 1 : fairness(ctx.relativeSize, revenge);
+      const fair = e.isLord ? lordFairness(e.id, myRate) : fairness(ctx.relativeSize, revenge);
       const loot = lootOf(stone, rate, revenge, { lord: e.isLord, cap: e.isLord ? undefined : myRate * PVP_LOOT_CAP_SECONDS, factor: fair, stagesDone: stagesDoneAt(world, now), extraSecured: extraSecured(s, now), securedFactor: (s.granaryCutUntil ?? 0) > now ? 0.5 : 1 });
       // Rançon attendue en cas de victoire : la défense, abattue.
       const ransom = e.isLord || !seesStock ? 0 : ransomOf(fight.defense as Army, fair);
@@ -2981,6 +3001,7 @@ async function settleMarches(
     relativeSize: victim.isLord || owner.isLord ? undefined : relativeSize(sizeOf(vState, vRate), attackerSizeOf(owner.id, aState, entities, aRate)),
     attackerArmy: m.troops,
     allyArmies: m.allies,
+    lordFairness: victim.isLord && !owner.isLord ? lordFairness(victim.id, aRate) : undefined,
     attackerIsLord: owner.isLord,
     marching: true,
     allowRepeat: true,
@@ -3137,7 +3158,7 @@ async function resolveGroupEvent(
   }
   const r = await write([...byEntity.values()], { ...ev.data, resolved: true, outcome });
   if (r !== "changed") return r;
-  if (ev.kind === "siege" && outcome === "lost") await admin.rpc("siege_damage", { p_season: seasonId, p_share: SIEGE_STAGE_LOSS, p_stages: STAGES.length });
+  if (ev.kind === "siege" && outcome === "lost") await admin.rpc("siege_damage", { p_season: seasonId, p_share: SIEGE_STAGE_LOSS, p_stages: TOTAL_STAGES });
   const ids = [...byEntity.keys()];
   if (fight && ids.length > 0) {
     await addChronicle(admin, seasonId, { kind: "event", actor_id: ids[0], details: { phase: "group", event: ev.kind, eventId: ev.id, success: won, members: ids, attackerLost: fight.attackerLost, defenderLost: fight.defenderLost, log: fight.log, attackerStart: fight.attackerStart, defenderStart: fight.defenderStart } });
@@ -3409,7 +3430,7 @@ function levelSum(state: PlayerState): number {
 
 function dailyContextOf(me: Entity, state: PlayerState, entities: Map<string, Entity>, stage: number): DailyContext {
   return {
-    shareSize: stage < STAGES.length && state.share?.stage === stage ? state.share.size : null,
+    shareSize: stage < TOTAL_STAGES && state.share?.stage === stage ? state.share.size : null,
     troops: armySize(attackArmy(state)),
     allies: me.allianceId === null ? 0 : [...entities.values()].filter((e) => !e.isLord && e.id !== me.id && e.allianceId === me.allianceId).length,
     upgradesLeft: UPGRADES.filter((u) => !state.upgrades.includes(u.id)).length,

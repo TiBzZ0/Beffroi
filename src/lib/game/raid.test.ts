@@ -472,3 +472,13 @@ describe("R3 : renforts emmenés en raid", () => {
     expect(Math.abs(allyLost - lost / 2)).toBeLessThanOrEqual(1);
   });
 });
+
+describe("G2 : équité sur les seigneurs", () => {
+  it("le butin pris à un seigneur suit le coefficient d'équité", () => {
+    const lord = player({ troops: {}, stone: 1_000_000 });
+    const full = resolveRaid(player(), lord, ctx({ defenderArmy: {}, marching: true, attackerArmy: { chevalier: 20 } }));
+    const half = resolveRaid(player(), lord, ctx({ defenderArmy: {}, marching: true, attackerArmy: { chevalier: 20 }, lordFairness: 0.5 }));
+    if (!full.ok || !half.ok) throw new Error("raid refusé");
+    expect(half.value.report.stolen).toBe(Math.floor(full.value.report.stolen / 2));
+  });
+});

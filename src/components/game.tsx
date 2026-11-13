@@ -29,6 +29,9 @@ import {
   DEFENSES,
   GENERATORS,
   STAGES,
+  TOTAL_STAGES,
+  stageDef,
+  embellishmentOf,
   UNITS,
   UPGRADES,
   SPY_LEVEL_MAX,
@@ -322,7 +325,7 @@ function AwayModal({ away, event, onClose }: { away: AwaySummary; event: EventVi
   if (away.raidsRepelled.length) lines.push(`🛡️ Raid${away.raidsRepelled.length > 1 ? "s" : ""} repoussé${away.raidsRepelled.length > 1 ? "s" : ""} : ${away.raidsRepelled.join(", ")}.`);
   for (const sb of away.sabotages) lines.push(sb.success ? `🧨 ${sb.by} a saboté ton académie.` : `🧨 Un saboteur de ${sb.by} a été arrêté.`);
   for (const r of away.research) lines.push(`🔬 Recherche terminée : ${COMBATANTS.get(r.id)?.name ?? r.id}${r.levels > 1 ? ` (+${r.levels} niveaux)` : ""}.`);
-  for (const i of away.stages) lines.push(`🏗️ Étape franchie : ${STAGES[i]?.name ?? i + 1}.`);
+  for (const i of away.stages) lines.push(`🏗️ Étape franchie : ${stageDef(i).name}.`);
   if (event) lines.push(event.kind === "colosse" ? "🗿 Un colosse est en cours, va le frapper dans Raids." : "🐫 Une caravane passe, va la piller dans Raids.");
   return (
     <div className="modal-backdrop" role="dialog" aria-modal="true" aria-label="Pendant ton absence">
@@ -642,7 +645,8 @@ function Hero({ snap, rate, clickGain, game }: { snap: GameSnapshot; rate: numbe
 
   const paused = snap.state.clickPausedUntil > game.serverNow();
   const w = snap.worksite;
-  const finished = w.stage >= STAGES.length;
+  const finished = w.stage >= TOTAL_STAGES;
+  const embellish = embellishmentOf(w.stage);
   const pct = finished ? 100 : Math.min(100, (w.progress / Math.max(1, w.target)) * 100);
 
   return (
@@ -703,13 +707,13 @@ function Hero({ snap, rate, clickGain, game }: { snap: GameSnapshot; rate: numbe
       <Status state={snap.state} now={game.serverNow()} />
       <div className="mini-site">
         <Belfry done={Math.min(w.stage, STAGES.length)} pct={pct} />
-        <h3>{finished ? "Le beffroi est achevé !" : `Chantier : ${STAGES[w.stage].name}`}</h3>
+        <h3>{finished ? "Le beffroi est achevé !" : embellish > 0 ? `Embellissement : ${stageDef(w.stage).name}` : `Chantier : ${stageDef(w.stage).name}`}</h3>
         <div className="bar" role="progressbar" aria-valuenow={Math.round(pct)} aria-valuemin={0} aria-valuemax={100}>
           <span style={{ width: `${pct}%` }} />
         </div>
         <div className="bar-caption num">
           <span>{finished ? `${formatNumber(w.total)} pierres versées` : `${formatNumber(w.progress)} / ${formatNumber(w.target)}`}</span>
-          <span>{finished ? `${STAGES.length}/${STAGES.length}` : `étape ${w.stage + 1}/${STAGES.length}`}</span>
+          <span>{finished ? `${STAGES.length}/${STAGES.length}` : embellish > 0 ? `embellissement ${embellish}` : `étape ${w.stage + 1}/${STAGES.length}`}</span>
         </div>
       </div>
       <QuestCard snap={snap} />
@@ -905,12 +909,14 @@ function Worksite({ snap, live, run }: { snap: GameSnapshot; live: PlayerState; 
     await run({ type: "contribute", amount });
     setBusy(false);
   };
-  const finished = w.stage >= STAGES.length;
+  const finished = w.stage >= TOTAL_STAGES;
+  // G1 : les huit étapes du beffroi, puis les embellissements finis et celui en cours.
+  const shown = Array.from({ length: Math.max(STAGES.length, Math.min(w.stage + 1, TOTAL_STAGES)) }, (_, i) => stageDef(i));
 
   return (
     <>
       <div className="stages">
-        {STAGES.map((s, i) => {
+        {shown.map((s, i) => {
           const done = i < w.stage;
           const current = i === w.stage;
           const pct = done ? 100 : current ? Math.min(100, (w.progress / Math.max(1, w.target)) * 100) : 0;
@@ -919,7 +925,8 @@ function Worksite({ snap, live, run }: { snap: GameSnapshot; live: PlayerState; 
             <div key={s.name} className={`stage${done ? " done" : current ? "" : " upcoming"}`}>
               <div className="stage-head">
                 <span className="stage-name">
-                  {i + 1}. {s.name}
+                  {i < STAGES.length ? `${i + 1}. ` : "✨ "}
+                  {s.name}
                 </span>
                 <span className="stage-status">
                   {done ? `✓ achevé${at ? ` le ${new Date(at).toLocaleDateString("fr-FR", { day: "numeric", month: "short" })}` : ""}` : current ? `${Math.floor(pct)} %` : "à venir"}
@@ -963,7 +970,7 @@ function Worksite({ snap, live, run }: { snap: GameSnapshot; live: PlayerState; 
       {!finished && <ShareLine snap={snap} detailed />}
       {!finished && <TitheSlider state={snap.state} run={run} />}
       <p className="note num">
-        Tu as versé {formatNumber(snap.state.totalContributed)} pierres. {w.activePlayers} bâtisseur{w.activePlayers > 1 ? "s" : ""} actif{w.activePlayers > 1 ? "s" : ""} cette semaine. Chaque étape vaut 4 heures de leur production, fixée à son ouverture.
+        Tu as versé {formatNumber(snap.state.totalContributed)} pierres. {w.activePlayers} bâtisseur{w.activePlayers > 1 ? "s" : ""} actif{w.activePlayers > 1 ? "s" : ""} cette semaine. Chaque étape vaut plusieurs heures de leur production (24 h pour un embellissement), fixée à son ouverture.
       </p>
     </>
   );
@@ -1565,7 +1572,9 @@ function RivalRow({
             [
               r.stoneKnown === false ? "Butin inconnu (il faut un espion plus fort que sa garde)" : loot > 0 ? `Butin estimé : ${formatNumber(loot)} pierres` : "Rien à piller pour l'instant",
               (r.ransom ?? 0) > 0 ? `rançon ≈ ${formatNumber(r.ransom ?? 0)}` : null,
-              (r.fairness ?? 1) < 1 ? `équité ×${(r.fairness ?? 1).toLocaleString("fr-FR", { maximumFractionDigits: 2 })} (cible plus petite)` : null,
+              (r.fairness ?? 1) < 1
+                ? `équité ×${(r.fairness ?? 1).toLocaleString("fr-FR", { maximumFractionDigits: 2 })} (${r.isLord ? ((r.fairness ?? 1) < 0.5 ? "trop petit pour toi" : "seigneur plus petit que toi") : "cible plus petite"})`
+                : null,
             ]
               .filter(Boolean)
               .join(" · ")}
@@ -2951,7 +2960,7 @@ function Chronicle({ entries: all, me, now, rivals, alliances = [], myAlliance =
             : `${mole ? "🐀" : "🕵️"} ${e.actorId ? who(e.actorId, e.actorName, true) : mole ? "Une taupe inconnue" : "Un espion inconnu"} ${mole ? "a été démasqué avec sa taupe chez" : "a été surpris à espionner"} ${where}.`;
         } else if (e.kind === "lot") {
           const d = e.details as { stage?: number; name?: string; master?: boolean };
-          const stageName = STAGES[d.stage ?? 0]?.name ?? "l'étape";
+          const stageName = stageDef(d.stage ?? 0).name;
           text = d.master
             ? `👑 ${d.name} finit son lot de « ${stageName} » le premier et devient maître d'œuvre !`
             : `🏗️ ${d.name} finit son lot de « ${stageName} ».`;

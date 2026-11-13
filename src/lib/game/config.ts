@@ -187,12 +187,39 @@ export const STAGES: readonly StageDef[] = [
 /** Un seigneur bâtisseur ne verse jamais plus que cette part de l'étape en cours d'un coup. */
 export const LORD_GIFT_MAX_SHARE = 0.25;
 
+/** G1 : après le beffroi, des embellissements sans fin (24 h de production chacun, +5 % de production cumulés, 10 écus aux donateurs). */
+export const EMBELLISH_NAMES: readonly string[] = ["Les vitraux", "Le carillon", "Les dorures", "Les statues des bâtisseurs", "Le parvis"];
+export const EMBELLISH_HOURS = 24;
+export const EMBELLISH_PRODUCTION = 0.05;
+export const EMBELLISH_ECUS = 10;
+/** Nombre d'étapes envoyé à la base : les huit du beffroi puis assez d'embellissements pour ne jamais s'arrêter. */
+export const TOTAL_STAGES = STAGES.length + 200;
+
+/** G1 : définition de l'étape n (0 pour la première), étape du beffroi ou embellissement. */
+export function stageDef(n: number): StageDef {
+  if (n < STAGES.length) return STAGES[n];
+  const k = n - STAGES.length;
+  return {
+    name: EMBELLISH_NAMES[k] ?? `Embellissement ${k + 1}`,
+    description: "Embellir le beffroi achevé, pour la gloire du royaume.",
+    basePerPlayer: STAGES[STAGES.length - 1].basePerPlayer,
+    bonusLabel: `Production +${Math.round(EMBELLISH_PRODUCTION * 100)} % pour tous, et ${EMBELLISH_ECUS} écus à chaque joueur qui a atteint un palier de don`,
+    bonus: { donorEcus: EMBELLISH_ECUS },
+  };
+}
+
+/** G1 : numéro d'embellissement (1, 2…) de l'étape n, ou 0 pour une étape du beffroi. */
+export function embellishmentOf(n: number): number {
+  return n < STAGES.length ? 0 : n - STAGES.length + 1;
+}
+
 export const STAGE_BASES = STAGES.map((s) => s.basePerPlayer);
 /** Taille d'une étape à son ouverture : tant d'heures de la production cumulée des joueurs actifs. */
 export const STAGE_SIZE_HOURS = 4;
 /** Durée de chaque étape en heures de production (taille, parts de chantier, lots et paliers) : on ralentit la fin du beffroi. */
 export const STAGE_HOURS_BY_STAGE: readonly number[] = [4, 4, 4, 4, 4, 4, 12, 24];
 export function stageHours(stage: number): number {
+  if (stage >= STAGE_HOURS_BY_STAGE.length && stage >= 8) return EMBELLISH_HOURS;
   return STAGE_HOURS_BY_STAGE[stage] ?? STAGE_SIZE_HOURS;
 }
 /** Dîme automatique : au plus 20 % de la production passive, 5 % pour un nouveau compte, 10 % conseillés. */

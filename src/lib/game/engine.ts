@@ -103,6 +103,8 @@ import {
   CATCH_UP_PER_DECADE,
   LORD_SHIELD_MS,
   STAGES,
+  TOTAL_STAGES,
+  EMBELLISH_PRODUCTION,
   UNITS,
   UPGRADE_BY_ID,
   type CombatantId,
@@ -554,6 +556,8 @@ function stageMultiplier(stagesDone: number, key: "production" | "click"): numbe
   for (let i = 0; i < Math.min(stagesDone, STAGES.length); i++) {
     m *= STAGES[i].bonus[key] ?? 1;
   }
+  // G1 : chaque embellissement achevé ajoute +5 % de production, cumulés par addition.
+  if (key === "production" && stagesDone > STAGES.length) m *= 1 + EMBELLISH_PRODUCTION * (stagesDone - STAGES.length);
   return m;
 }
 
@@ -709,7 +713,7 @@ export function advance(state: PlayerState, now: number, world: WorldState, opts
     const part = (rateAt(state, world, cursor, opts) * (t - cursor)) / 1000;
     gain += part;
     // La dîme ne s'applique que tant qu'une étape du chantier est ouverte.
-    if (tithe > 0 && stagesDoneAt(world, cursor) < STAGES.length) tithed += part * tithe;
+    if (tithe > 0 && stagesDoneAt(world, cursor) < TOTAL_STAGES) tithed += part * tithe;
     cursor = t;
   }
   return {
@@ -954,7 +958,7 @@ export function payTithe(state: PlayerState): { state: PlayerState; paid: number
  * mesurée la première fois qu'on le voit pendant cette étape.
  */
 export function openShare(state: PlayerState, stage: number, world: WorldState, now: number, fixed?: number): PlayerState {
-  if (stage >= STAGES.length || state.share?.stage === stage) return state;
+  if (stage >= TOTAL_STAGES || state.share?.stage === stage) return state;
   const size = fixed && fixed > 0 ? Math.ceil(fixed) : shareSize(state, world, now, stage);
   return { ...state, share: { stage, size, given: 0, tiers: 0 } };
 }
@@ -1238,6 +1242,8 @@ export interface RaidContext {
   marching?: boolean;
   /** R3 : renforts d'alliés partis avec l'armée, par propriétaire. */
   allyArmies?: Record<string, Army>;
+  /** G2 : équité sur le butin pris à un seigneur (1 sans réduction). */
+  lordFairness?: number;
   /** Tirages aléatoires entre 0 et 1 (fournis pour des tests reproductibles). */
   rng: () => number;
 }
@@ -1411,7 +1417,7 @@ export function resolveRaid(
   if (!fight.success) return { ok: true, value: { attacker: attackerAfter, victim: victimArmyAfter, report: base } };
 
   const playerVsPlayer = !ctx.attackerIsLord && !ctx.defenderArmy;
-  const factor = playerVsPlayer ? fairness(ctx.relativeSize, revenge) : 1;
+  const factor = playerVsPlayer ? fairness(ctx.relativeSize, revenge) : ctx.defenderArmy ? (ctx.lordFairness ?? 1) : 1;
   const lootBonus = masterActive(attacker, "loot", now) ? 1 + MASTER_BONUSES.loot.value : 1;
   const stolen = lootOf(victim.stone, ctx.victimRate, revenge, {
     extraSecured: extraSecured(victim, now),

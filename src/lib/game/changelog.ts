@@ -422,4 +422,12 @@ export const CHANGELOG: ChangeEntry[] = [
       "🌙 Entre 23 h et 7 h, seuls les événements qu'on peut jouer seul sont tirés : foire, fête des bâtisseurs, pluie d'étoiles, trêve, marchand, filon et camps de bandits. Trésor, convoi, siège, tournoi, lune rouge, brouillard, caravane et Colosse attendent la journée.",
     ],
   },
+  {
+    id: 50,
+    date: "13 novembre",
+    items: [
+      "✨ Le chantier ne s'arrête plus au beffroi légendaire. Viennent ensuite des embellissements sans fin : les vitraux, le carillon, les dorures, les statues des bâtisseurs, le parvis, puis d'autres. Chacun vaut 24 h de production des joueurs actifs et donne +5 % de production pour tous (cumulés), plus 10 écus à chaque joueur qui a atteint un palier de don. Dîme, parts, lots, maître d'œuvre, fête et siège continuent comme pour une étape.",
+      "🏰 Les seigneurs retrouvent de l'intérêt à tous les niveaux : les difficiles suivent le troisième quartile des joueurs et les redoutables le premier, au lieu de la médiane. En échange, le butin pris à un seigneur trop petit pour toi est réduit (équité affichée sur sa fiche).",
+    ],
+  },
 ];

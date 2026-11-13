@@ -231,10 +231,10 @@ describe("dîme automatique", () => {
     expect(paid.state.totalContributed).toBe(10);
   });
 
-  it("ne prélève rien une fois le beffroi achevé", () => {
+  it("continue après le beffroi achevé, pour les embellissements (G1)", () => {
     const s = { ...withGenerators({ tailleur: 10 }), tithe: 0.2 };
     const done: WorldState = { stageCompletedAt: Array.from({ length: 8 }, () => T0 - 1) };
-    expect(advance(s, T0 + 10_000, done).titheOwed).toBe(0);
+    expect(advance(s, T0 + 10_000, done).titheOwed).toBeGreaterThan(0);
   });
 
   it("se règle de 0 à 20 % par pas de 1 %", () => {
@@ -438,5 +438,20 @@ describe("R6 : bonus de maître d'œuvre", () => {
       { kind: "production", from: 0, until: 48 * H },
       { kind: "loot", from: 5 * H, until: 29 * H },
     ]);
+  });
+});
+
+describe("G1 : embellissements", () => {
+  it("le chantier continue après le beffroi, +5 % de production par embellissement", async () => {
+    const { stageDef, embellishmentOf, stageHours, STAGES, TOTAL_STAGES } = await import("./config");
+    expect(stageDef(8).name).toBe("Les vitraux");
+    expect(stageDef(13).name).toBe("Embellissement 6");
+    expect(embellishmentOf(7)).toBe(0);
+    expect(embellishmentOf(9)).toBe(2);
+    expect(stageHours(10)).toBe(24);
+    expect(TOTAL_STAGES).toBeGreaterThan(STAGES.length + 50);
+    const s = withGenerators({ tailleur: 10 });
+    const at = (n: number) => productionPerSecond(s, { stageCompletedAt: Array.from({ length: n }, () => 0) }, n);
+    expect(at(11) / at(8)).toBeCloseTo(1.15);
   });
 });
