@@ -53,7 +53,7 @@ export function useGame() {
   const receive = useCallback((s: GameSnapshot) => {
     offset.current = s.serverNow - Date.now();
     // La chronique n'est renvoyée qu'aux synchronisations : on garde la précédente sinon.
-    let next = s.chronicle ? s : { ...s, chronicle: snapRef.current?.chronicle ?? [] };
+    let next = s.chronicle ? s : { ...s, chronicle: snapRef.current?.chronicle ?? [], seasonRewards: s.seasonRewards ?? snapRef.current?.seasonRewards };
     // Achats encore en route : on les remet par-dessus l'état reçu pour éviter un retour en arrière.
     if (optimisticOps.current.length > 0) {
       const state = optimisticOps.current.reduce<PlayerState>((st, op) => applyLocal(st, op) ?? st, advance(next.state, s.serverNow, worldFrom(next.worksite)));

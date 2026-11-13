@@ -581,12 +581,12 @@ export const ONLINE_MS = 2.5 * 60 * 1000;
 export type HallUnit = "stone" | "time" | "count" | "percent" | "ratio";
 export const HALL: readonly { id: "generous" | "plunderer" | "progress" | "colossus" | "defender" | "fortress" | "war"; icon: string; label: string; title: string; unit: HallUnit; alliance: boolean; ecus?: readonly number[] }[] = [
   { id: "generous", icon: "🏗️", label: "Les plus généreux (part de sa production versée)", title: "Grand bâtisseur", unit: "percent", alliance: false, ecus: [30, 20, 10] },
-  { id: "plunderer", icon: "⚔️", label: "Pillards", title: "Fléau du royaume", unit: "stone", alliance: false },
+  { id: "plunderer", icon: "⚔️", label: "Pillards", title: "Fléau du royaume", unit: "stone", alliance: false, ecus: [30, 20, 10] },
   { id: "progress", icon: "📈", label: "Meilleure progression (production multipliée sur 7 jours)", title: "Étoile montante", unit: "ratio", alliance: false, ecus: [30, 20, 10] },
-  { id: "colossus", icon: "🗿", label: "Chasseurs de colosses (dégâts)", title: "Tueur de colosses", unit: "stone", alliance: false },
+  { id: "colossus", icon: "🗿", label: "Chasseurs de colosses (dégâts)", title: "Tueur de colosses", unit: "stone", alliance: false, ecus: [30, 20, 10] },
   { id: "defender", icon: "🛡️", label: "Meilleurs défenseurs (raids repoussés)", title: "Rempart du royaume", unit: "count", alliance: false, ecus: [30, 20, 10] },
-  { id: "fortress", icon: "🏰", label: "Gardiens de Pierre-Haute (temps tenu)", title: "Gardiens de Pierre-Haute", unit: "time", alliance: true },
-  { id: "war", icon: "🏆", label: "Guerres gagnées", title: "Seigneurs de guerre", unit: "count", alliance: true },
+  { id: "fortress", icon: "🏰", label: "Gardiens de Pierre-Haute (temps tenu)", title: "Gardiens de Pierre-Haute", unit: "time", alliance: true, ecus: [30, 20, 10] },
+  { id: "war", icon: "🏆", label: "Guerres gagnées", title: "Seigneurs de guerre", unit: "count", alliance: true, ecus: [30, 20, 10] },
 ];
 /** Joueurs qui n'ont presque rien produit : exclus des classements relatifs (B12). */
 export const HALL_MIN_PRODUCED = 1_000_000;
@@ -872,3 +872,21 @@ export const RUMOR_FACTOR = 2;
 /** Sabotage du grenier (stock à l'abri ÷ 2 pendant 2 h) et du guet (aucune alerte d'approche pendant 1 h). */
 export const GRANARY_CUT_MS = 2 * 3_600_000;
 export const BLIND_MS = 3_600_000;
+
+/** H2 : héritage, bonus permanents achetés en écus et gardés d'une saison à l'autre. Le niveau n coûte base × n écus. */
+export const LEGACY = [
+  { id: "carrier", icon: "⛏️", name: "Carrier", effect: "+2 % de production par niveau", max: 10, base: 20 },
+  { id: "depart", icon: "🚀", name: "Départ lancé", effect: "+50 % de production par niveau pendant les 24 premières heures de la saison", max: 3, base: 40 },
+  { id: "cave", icon: "🍷", name: "Cave", effect: "+15 minutes de stock à l'abri par niveau", max: 4, base: 25 },
+  { id: "garde", icon: "🛡️", name: "Garde renforcée", effect: "+1 garde du château par niveau", max: 5, base: 15 },
+] as const;
+export type LegacyId = (typeof LEGACY)[number]["id"];
+export const LEGACY_CARRIER = 0.02;
+export const LEGACY_START = 0.5;
+export const LEGACY_START_MS = 24 * 3_600_000;
+export const LEGACY_CAVE_SECONDS = 15 * 60;
+/** H1 : écus de clôture : 10 par étape du beffroi achevée (donateurs), podium 30/20/10 partout, 5 pour 3 jours de connexion. */
+export const CLOSE_STAGE_ECUS = 10;
+export const CLOSE_PODIUM_ECUS: readonly number[] = [30, 20, 10];
+export const CLOSE_LOGIN_ECUS = 5;
+export const CLOSE_LOGIN_DAYS = 3;

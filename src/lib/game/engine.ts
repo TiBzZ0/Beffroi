@@ -103,6 +103,12 @@ import {
   CATCH_UP_PER_DECADE,
   LORD_SHIELD_MS,
   STAGES,
+  LEGACY,
+  LEGACY_CARRIER,
+  LEGACY_START,
+  LEGACY_START_MS,
+  LEGACY_CAVE_SECONDS,
+  type LegacyId,
   TOTAL_STAGES,
   EMBELLISH_PRODUCTION,
   UNITS,
@@ -241,6 +247,9 @@ export interface PlayerState {
   /** Prime de lot (D2) : +10 % de production tant que moins de ce nombre d'étapes sont finies. Fixé par le serveur. */
   lotBonusUntilStage?: number;
   /** Bonus du maître d'œuvre (D3) pour les membres du premier lot fini. Fixé par le serveur. */
+  /** H2 : niveaux d'héritage du profil (permanents) et début de la saison (pour le départ lancé). */
+  legacy?: Partial<Record<LegacyId, number>>;
+  seasonStart?: number;
   /** R6 : bonus de maître d'œuvre, un par genre au plus à la fois ; un second du même genre allonge le premier. */
   masterBonuses?: { kind: MasterBonusKind; from: number; until: number }[];
   /** Coup de pouce aux joueurs distancés (0.3 = +30 % de production et de défense). Fixé par le serveur, jamais enregistré. */
@@ -337,7 +346,7 @@ export function spyRisk(gap: number, distance: number): number {
 
 /** V15 : secondes de stock à l'abri achetées au marchand. */
 export function extraSecured(state: PlayerState, t: number): number {
-  return (t < (state.boostSafeUntil ?? 0) ? MERCHANT_SAFE_SECONDS : 0) + WING_SAFE_SECONDS[wingLevel(state.hall, "grenier")];
+  return (t < (state.boostSafeUntil ?? 0) ? MERCHANT_SAFE_SECONDS : 0) + WING_SAFE_SECONDS[wingLevel(state.hall, "grenier")] + LEGACY_CAVE_SECONDS * legacyLevel(state, "cave");
 }
 
 /** V15 : prix du marchand, 30 minutes de sa production. */
@@ -625,7 +634,18 @@ export function productionMultiplier(state: PlayerState, world: WorldState, stag
   for (const u of ownedUpgrades(state)) {
     if (u.effect.kind === "production") m *= u.effect.multiplier;
   }
-  return m * (1 + masteryBonus(state)) * (1 + WING_PRODUCTION[wingLevel(state.hall, "loge")]) * stageMultiplier(stagesDone, "production");
+  return m * (1 + masteryBonus(state)) * (1 + WING_PRODUCTION[wingLevel(state.hall, "loge")]) * stageMultiplier(stagesDone, "production") * (1 + LEGACY_CARRIER * legacyLevel(state, "carrier"));
+}
+
+/** H2 : niveau d'héritage, borné. */
+export function legacyLevel(state: PlayerState, id: LegacyId): number {
+  const max = LEGACY.find((l) => l.id === id)?.max ?? 0;
+  return Math.min(max, Math.max(0, Math.floor(state.legacy?.[id] ?? 0)));
+}
+
+/** H2 : fin du départ lancé (0 sans ce bonus). */
+export function legacyStartUntil(state: PlayerState): number {
+  return legacyLevel(state, "depart") > 0 && state.seasonStart ? state.seasonStart + LEGACY_START_MS : 0;
 }
 
 /** Production de pierre par seconde pour un nombre d'étapes terminées donné. */
@@ -691,7 +711,8 @@ export function rateAt(state: PlayerState, world: WorldState, t: number, opts: A
   const truce = eventActive(state, "treve", t) ? 1 + TRUCE_PRODUCTION : 1;
   const boost = !opts.flatRate && t < (state.boostProdUntil ?? 0) ? 1 + MERCHANT_PRODUCTION : 1;
   const chest = !opts.flatRate && t < (state.dailyBoostUntil ?? 0) ? 1 + (state.dailyBoost ?? 0) : 1;
-  return (t < state.burnedUntil ? base * BURN_PRODUCTION_FACTOR : base) * elan * frenzy * master * truce * boost * chest;
+  const start = !opts.flatRate && t < legacyStartUntil(state) ? 1 + LEGACY_START * legacyLevel(state, "depart") : 1;
+  return (t < state.burnedUntil ? base * BURN_PRODUCTION_FACTOR : base) * elan * frenzy * master * truce * boost * chest * start;
 }
 
 /**
@@ -703,7 +724,7 @@ export function advance(state: PlayerState, now: number, world: WorldState, opts
   state = settleWounded(settleCurfew(settleResearch(state, now), now), now);
   if (now <= state.lastUpdate) return state;
   const start = Math.max(state.lastUpdate, now - OFFLINE_CAP_MS);
-  const events = [...world.stageCompletedAt, state.burnedUntil, state.elanUntil ?? 0, state.frenzyUntil ?? 0, ...(state.masterBonuses ?? []).flatMap((m) => [m.from, m.until]), state.boostProdUntil ?? 0, state.dailyBoostUntil ?? 0, ...(state.eventMods ?? []).flatMap((e) => [e.from, e.until])];
+  const events = [...world.stageCompletedAt, state.burnedUntil, state.elanUntil ?? 0, state.frenzyUntil ?? 0, ...(state.masterBonuses ?? []).flatMap((m) => [m.from, m.until]), state.boostProdUntil ?? 0, state.dailyBoostUntil ?? 0, legacyStartUntil(state), ...(state.eventMods ?? []).flatMap((e) => [e.from, e.until])];
   const breakpoints = events.filter((t) => t > start && t < now).sort((a, b) => a - b);
   let gain = 0;
   let tithed = 0;
@@ -1048,7 +1069,7 @@ export function attackArmy(state: PlayerState): Army {
 
 /** Armée qui défend le domaine : troupes (renforts compris), fortifications et gardes du château. */
 export function defenseArmy(state: PlayerState): Army {
-  return cleanArmy({ ...troopsHere(state), ...state.defenses, garde: GUARDS_PER_DOMAIN });
+  return cleanArmy({ ...troopsHere(state), ...state.defenses, garde: GUARDS_PER_DOMAIN + legacyLevel(state, "garde") });
 }
 
 /**

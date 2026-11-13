@@ -430,4 +430,14 @@ export const CHANGELOG: ChangeEntry[] = [
       "🏰 Les seigneurs retrouvent de l'intérêt à tous les niveaux : les difficiles suivent le troisième quartile des joueurs et les redoutables le premier, au lieu de la médiane. En échange, le butin pris à un seigneur trop petit pour toi est réduit (équité affichée sur sa fiche).",
     ],
   },
+  {
+    id: 51,
+    date: "13 novembre",
+    items: [
+      "🏁 La saison 0 se termine le 23 novembre vers 15 h 26 (heure de Paris). Une nouvelle saison s'ouvre aussitôt : ateliers, armées, halles, alliances, carte et chantier repartent de zéro. Ton compte, tes écus, le panthéon et ton héritage restent.",
+      "🪙 Écus de clôture, versés une fois à la fin : 10 écus par étape du beffroi achevée si tu as atteint au moins un palier de don, 30, 20 et 10 écus pour le podium de chaque catégorie du panthéon (alliances comprises), et 5 écus si tu t'es connecté au moins 3 jours. Un écran de fin de saison en donne le détail.",
+      "🏛️ Nouvel onglet Héritage : des bonus permanents achetés en écus, gardés d'une saison à l'autre, effet immédiat. Carrier (+2 % de production, 10 niveaux, 20 écus × niveau), Départ lancé (+50 % de production les 24 premières heures de la saison, 3 niveaux, 40 écus × niveau), Cave (+15 min de stock à l'abri, 4 niveaux, 25 écus × niveau) et Garde renforcée (+1 garde du château, 5 niveaux, 15 écus × niveau).",
+      "⏳ Le dernier jour, un bandeau en jeu rappelle l'heure de la fin.",
+    ],
+  },
 ];

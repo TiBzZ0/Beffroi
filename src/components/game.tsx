@@ -29,6 +29,7 @@ import {
   DEFENSES,
   GENERATORS,
   STAGES,
+  LEGACY,
   TOTAL_STAGES,
   stageDef,
   embellishmentOf,
@@ -96,7 +97,7 @@ import { MapBoard, type BoardMarch, type BoardPlace } from "./kingdom-map";
 import { CHAT_MAX_LENGTH, CHAT_REACTIONS, type ChatChannel } from "@/lib/game/chat-config";
 import { CHANGELOG } from "@/lib/game/changelog";
 
-type Tab = "ateliers" | "ameliorations" | "chantier" | "armee" | "carte" | "raids" | "alliance" | "messages" | "classement";
+type Tab = "ateliers" | "ameliorations" | "chantier" | "armee" | "carte" | "raids" | "alliance" | "messages" | "classement" | "heritage";
 type Qty = 1 | 10 | "max";
 const DAY_MS = 86_400_000;
 
@@ -154,6 +155,8 @@ export function Game({ userId }: { userId: string }) {
       <WhatsNew />
       {game.away && <AwayModal away={game.away} event={snap.event} onClose={game.dismissAway} />}
       <TopBar snap={snap} now={now} />
+      <LastDayBanner snap={snap} now={now} />
+      <SeasonEndCard snap={snap} />
       <PushPrompt raided={(snap.chronicle ?? []).some((c) => c.kind === "raid" && c.targetId === snap.userId) || (game.away?.raidsLost.length ?? 0) > 0} />
       <div className="layout">
         <Hero snap={snap} rate={rate} clickGain={clickValue(live, world, stagesDone)} game={game} />
@@ -168,6 +171,7 @@ export function Game({ userId }: { userId: string }) {
             <TabButton id="alliance" tab={tab} setTab={selectTab} label="Alliance" dot={snap.invites.length > 0} />
             <TabButton id="messages" tab={tab} setTab={selectTab} label="Messages" />
             <TabButton id="classement" tab={tab} setTab={selectTab} label="Rangs" />
+            <TabButton id="heritage" tab={tab} setTab={selectTab} label="Héritage" />
           </div>
           <div className="tab-body" role="tabpanel">
             {tab === "ateliers" && <Generators live={live} stagesDone={stagesDone} snap={snap} run={game.run} />}
@@ -179,6 +183,7 @@ export function Game({ userId }: { userId: string }) {
             {tab === "alliance" && <AllianceTab snap={snap} live={live} now={now} run={game.run} />}
             {tab === "messages" && <Chat userId={userId} hasAlliance={!!snap.alliance} now={now} />}
             {tab === "classement" && <Ranking boards={leaderboard} userId={userId} />}
+            {tab === "heritage" && <Heritage snap={snap} run={game.run} />}
           </div>
         </section>
       </div>
@@ -526,6 +531,108 @@ function TopBar({ snap, now }: { snap: GameSnapshot; now: number }) {
         </form>
       </div>
     </header>
+  );
+}
+
+/** H3 : bandeau du dernier jour de la saison, avec le compte à rebours. */
+function LastDayBanner({ snap, now }: { snap: GameSnapshot; now: number }) {
+  const left = snap.season.endsAt - now;
+  if (left <= 0 || left > DAY_MS) return null;
+  const h = Math.floor(left / 3_600_000);
+  const m = Math.floor((left % 3_600_000) / 60_000);
+  return (
+    <div className="notice notice-info">
+      <strong>⏳ Dernier jour de la saison {snap.season.number} : fin dans {h} h {String(m).padStart(2, "0")}.</strong> Ensuite, ateliers, armées, halles, alliances
+      et chantier repartent de zéro. Tes écus, les écus de clôture et ton héritage te suivent : passe à l&apos;onglet Héritage.
+    </div>
+  );
+}
+
+/** H1 : écran de fin de saison, le détail des écus de clôture (une fois, puis on peut le fermer). */
+function SeasonEndCard({ snap }: { snap: GameSnapshot }) {
+  const r = snap.seasonRewards;
+  const key = r ? `beffroi-rewards-${r.season}` : "";
+  const [hidden, setHidden] = useState(() => {
+    try {
+      return !!key && localStorage.getItem(key) === "1";
+    } catch {
+      return false;
+    }
+  });
+  if (!r || hidden) return null;
+  const label = (id: string) => HALL.find((h) => h.id === id)?.title ?? id;
+  const close = () => {
+    try {
+      localStorage.setItem(key, "1");
+    } catch {
+      /* rien */
+    }
+    setHidden(true);
+  };
+  return (
+    <div className="notice notice-info">
+      <strong>🏁 Fin de la saison {r.season} : {r.total} écus pour toi.</strong>
+      <ul>
+        {r.details.stageEcus > 0 && <li>🏗️ {r.details.stages} étapes du beffroi achevées, avec au moins un palier de don : {r.details.stageEcus} écus</li>}
+        {r.details.podium.map((p) => (
+          <li key={`${p.category}-${p.rank}`}>
+            🏆 {label(p.category)}, {p.rank === 1 ? "1re" : `${p.rank}e`} place : {p.ecus} écus
+          </li>
+        ))}
+        {r.details.loginEcus > 0 && <li>📅 {r.details.days} jours de présence : {r.details.loginEcus} écus</li>}
+      </ul>
+      <p className="note">Dépense-les dans l&apos;onglet Héritage : les bonus achetés te suivent de saison en saison.</p>
+      <button className="btn" onClick={close}>
+        Fermer
+      </button>
+    </div>
+  );
+}
+
+/** H2 : boutique d'héritage, bonus permanents payés en écus. */
+function Heritage({ snap, run }: { snap: GameSnapshot; run: ReturnType<typeof useGame>["run"] }) {
+  const [busy, setBusy] = useState(false);
+  const ecus = snap.ecus ?? 0;
+  const buy = async (kind: string) => {
+    setBusy(true);
+    await run({ type: "legacy_buy", kind });
+    setBusy(false);
+  };
+  return (
+    <>
+      <p className="note raid-intro">
+        Les écus se gagnent pendant la saison (paliers de don, lots, quêtes, panthéon) et à sa clôture. Ici, ils achètent des bonus permanents, gardés
+        d&apos;une saison à l&apos;autre quand tout le reste repart de zéro. Le niveau n coûte n fois le prix de base, et l&apos;effet est immédiat.
+      </p>
+      <div className="garrison-head">
+        <h3 className="section-title">🏛️ Héritage</h3>
+        <span className="num">🪙 {ecus} écus</span>
+      </div>
+      <div className="list">
+        {LEGACY.map((l) => {
+          const level = Math.min(l.max, snap.state.legacy?.[l.id] ?? 0);
+          const cost = l.base * (level + 1);
+          const maxed = level >= l.max;
+          return (
+            <div key={l.id} className="row">
+              <div className="row-icon" aria-hidden>
+                {l.icon}
+              </div>
+              <div>
+                <div className="row-title">
+                  {l.name} <span className="badge">niv. {level}/{l.max}</span>
+                </div>
+                <div className="row-desc">{l.effect}</div>
+              </div>
+              <button className="btn btn-primary" disabled={busy || maxed || cost > ecus} onClick={() => void buy(l.id)}>
+                {maxed ? "Au plus haut" : `Niveau ${level + 1}`}
+                {!maxed && <span className="cost num">{cost} 🪙</span>}
+              </button>
+            </div>
+          );
+        })}
+      </div>
+    </>
   );
 }
 
@@ -1063,7 +1170,7 @@ function ShareLine({ snap, detailed = false }: { snap: GameSnapshot; detailed?: 
       {detailed && (
         <p className="note">
           Ta part de chantier vaut 4 heures de ta production, mesurée au début de l&apos;étape. À 25 %, 50 % et 100 % versés, tu gagnes +{DONOR_TIER_BONUS * 100} % de production jusqu&apos;à la fin de la saison et {DONOR_TIER_ECUS.join(", ")} écus.
-          {bonus > 0 ? ` Tes paliers te rapportent déjà +${bonus} %.` : ""} Tes écus serviront dès la saison 1.
+          {bonus > 0 ? ` Tes paliers te rapportent déjà +${bonus} %.` : ""} Tes écus achètent des bonus permanents dans l&apos;onglet Héritage.
         </p>
       )}
     </div>

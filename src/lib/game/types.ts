@@ -278,6 +278,8 @@ export interface GameSnapshot {
   away?: AwaySummary;
   /** Écus du joueur (monnaie de profil, dépensable dès la saison 1). */
   ecus: number;
+  /** H1 : écus de clôture de la dernière saison terminée. */
+  seasonRewards?: { season: number; total: number; details: { stages: number; stageEcus: number; podium: { category: string; rank: number; ecus: number }[]; days: number; loginEcus: number } };
   /** Fournie lors des synchronisations et des raids ; sinon le client garde la précédente. */
   chronicle?: ChronicleEntry[];
   map?: MapView;
@@ -340,6 +342,7 @@ export type GameAction =
   | { type: "event_attack"; troops?: Record<string, number>; camp?: string }
   | { type: "research"; id: string }
   | { type: "research_cancel"; endsAt: number }
+  | { type: "legacy_buy"; kind: string }
   | { type: "merchant"; choice: MerchantChoice }
   | { type: "march_recall"; id: string }
   | { type: "tournament_join"; troops: Record<string, number> }

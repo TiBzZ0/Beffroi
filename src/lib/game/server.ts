@@ -95,6 +95,8 @@ import {
   WOUNDED_WINNER,
   WOUNDED_ATTACKER_BEATEN,
   STAGES,
+  LEGACY,
+  CLOSE_PODIUM_ECUS,
   TOTAL_STAGES,
   stageDef,
   DEFENSE_IDS,
@@ -126,6 +128,7 @@ import {
 } from "./config";
 import { banditSpot, caravanPath, caravanPos, colossusPos, fixedPlaces, pickSpawn } from "./map";
 import { drawNextEvent, tourneyPodium } from "./events";
+import { seasonRewards, type SeasonRewardDetails } from "./legacy";
 import { cleanWings, hallSpots, maxStages, placedLevels, wingBlocker, wingLevel, type Wings } from "./hall";
 import { chestBonus, claimDaily, dailyDay, dailyProgress, dailyStart, openChest, rollDaily, seedOf, swapDaily, type DailyContext, type DailyCounts, type DailyState } from "./daily";
 import {
@@ -282,7 +285,7 @@ interface PlayerRow {
   next_raid_at: string | null;
   next_contrib_at: string | null;
   version: number;
-  profiles: { username: string; display_name: string | null; is_bot: boolean; ecus?: number | null } | null;
+  profiles: { username: string; display_name: string | null; is_bot: boolean; ecus?: number | null; legacy?: Record<string, unknown> | null } | null;
 }
 
 interface WorksiteRow {
@@ -386,6 +389,7 @@ function toEntity(row: PlayerRow): Entity {
       research: [row.military?.research ?? []].flat().map((r) => ({ id: r.id as ResearchId, endsAt: Number(r.endsAt), ...(Number.isFinite(Number((r as { cost?: unknown }).cost)) && (r as { cost?: unknown }).cost !== undefined ? { cost: Number((r as { cost?: unknown }).cost) } : {}) })),
       spyLevel: Math.max(0, Math.floor(Number(row.military?.spyLevel ?? 0) || 0)),
       spies: cleanSpies(row.military?.spies),
+      ...(lord || row.profiles?.is_bot ? {} : { legacy: cleanLegacy(row.profiles?.legacy), seasonStart: currentSeasonStart }),
       moles: cleanMoles(row.military?.moles),
       counterUntil: Number(row.military?.counterUntil ?? 0) || 0,
       rumor: row.military?.rumor && (row.military.rumor.mode === "fort" || row.military.rumor.mode === "faible") ? { mode: row.military.rumor.mode, until: Number(row.military.rumor.until) || 0 } : null,
@@ -458,6 +462,20 @@ function toSeason(row: { id: number; number: number; starts_at: string; ends_at:
   return { id: row.id, number: row.number, startsAt: Date.parse(row.starts_at), endsAt: Date.parse(row.ends_at) };
 }
 
+/** H2 : début de la saison en cours (départ lancé de l'héritage). */
+let currentSeasonStart = 0;
+
+/** H2 : niveaux d'héritage lus dans le profil. */
+function cleanLegacy(raw: unknown): PlayerState["legacy"] {
+  const out: Record<string, number> = {};
+  if (!raw || typeof raw !== "object") return out;
+  for (const l of LEGACY) {
+    const n = Math.floor(Number((raw as Record<string, unknown>)[l.id] ?? 0));
+    if (n > 0) out[l.id] = Math.min(l.max, n);
+  }
+  return out as PlayerState["legacy"];
+}
+
 /** Saison en cours, gardée en mémoire 30 s (tant qu'elle n'est pas finie) pour économiser un aller-retour par action. */
 let seasonCache: { season: SeasonView; until: number } | null = null;
 
@@ -467,6 +485,7 @@ export async function getActiveSeason(admin: SupabaseClient): Promise<SeasonView
   const { data, error } = await admin.rpc("ensure_active_season", { p_days: SEASON_DAYS, p_first_stage_base: STAGE_MIN_SIZE });
   if (error || !data) throw new Error(`Saison introuvable : ${error?.message}`);
   const season = toSeason(Array.isArray(data) ? data[0] : data);
+  currentSeasonStart = season.startsAt;
   seasonCache = { season, until: Math.min(now + 30_000, season.endsAt) };
   return season;
 }
@@ -480,7 +499,7 @@ async function loadWorksite(admin: SupabaseClient, seasonId: number): Promise<Wo
 /** Charge tous les participants de la saison (au plus une dizaine de joueurs et 3 seigneurs). */
 async function loadEntities(admin: SupabaseClient, seasonId: number, userId: string): Promise<Map<string, Entity>> {
   const select = () =>
-    admin.from("player_states").select("*, profiles(username, display_name, is_bot, ecus)").eq("season_id", seasonId);
+    admin.from("player_states").select("*, profiles(username, display_name, is_bot, ecus, legacy)").eq("season_id", seasonId);
   const fortP = admin.from("fortresses").select("holder").eq("season_id", seasonId).maybeSingle();
   const lotsP = admin.from("stage_lots").select("*").eq("season_id", seasonId);
   const guildsP = loadGuilds(admin, seasonId);
@@ -2379,6 +2398,23 @@ export async function runAction(admin: SupabaseClient, userId: string, action: G
       message = r.message;
       if (r.state) finalState = r.state;
       entities = await loadEntities(admin, season.id, userId);
+    } else if (action.type === "legacy_buy") {
+      // H2 : un niveau d'héritage, payé en écus, gardé d'une saison à l'autre.
+      const def = LEGACY.find((l) => l.id === String(action.kind));
+      if (!def) error = "Bonus inconnu.";
+      else {
+        const { data, error: rpcError } = await admin.rpc("buy_legacy", { p_user: userId, p_kind: def.id, p_max: def.max, p_base: def.base });
+        const r = data as { ok?: boolean; error?: string; ecus?: number; legacy?: unknown; cost?: number } | null;
+        if (rpcError || !r?.ok) error = r?.error ?? "Achat impossible.";
+        else {
+          ecus = Number(r.ecus ?? ecus);
+          const legacy = cleanLegacy(r.legacy);
+          finalState = { ...finalState, legacy };
+          const e = entities.get(userId);
+          if (e) e.state = { ...e.state, legacy };
+          message = `🏛️ ${def.icon} ${def.name} niveau ${legacy?.[def.id] ?? 1} acquis pour ${r.cost} écus. Il te suivra de saison en saison.`;
+        }
+      }
     } else if (action.type === "master_choice") {
       const choice = String(action.choice);
       const lot = (lotsOf.get(entities) ?? []).find((l) => l.master && l.members[userId] && l.masterChoice === null && l.finishedAt !== null && now < l.finishedAt + MASTER_CHOICE_MS);
@@ -2655,6 +2691,10 @@ export async function runAction(admin: SupabaseClient, userId: string, action: G
       loadDailyCounts(admin, season.id, userId, now),
       meNow.allianceId !== null ? loadChiefs(admin, season.id) : Promise.resolve(new Map<number, string | null>()),
     ]);
+    // H1 : écus de clôture de la dernière saison terminée, pour l'écran de fin de saison.
+    const lastRewards = wantsChronicle
+      ? ((await admin.from("season_rewards").select("total, details, seasons(number)").eq("user_id", userId).order("season_id", { ascending: false }).limit(1).maybeSingle()).data as { total: number; details: SeasonRewardDetails; seasons: { number: number } | null } | null)
+      : null;
     const titles = titlesFrom(hall);
     allianceNames = names;
     const snapshot: GameSnapshot = {
@@ -2667,6 +2707,7 @@ export async function runAction(admin: SupabaseClient, userId: string, action: G
       rivals: rivalsFor(meNow, finalState, entities, worldFrom(worksite), flat, now, intel, allianceNames, conflicts.wars).map((r) => (titles.has(r.id) ? { ...r, titles: titles.get(r.id) } : r)),
       myTitles: titles.get(userId) ?? [],
       ecus,
+      ...(lastRewards ? { seasonRewards: { season: lastRewards.seasons?.number ?? 0, total: Number(lastRewards.total), details: lastRewards.details } } : {}),
       ...(away ? { away } : {}),
       lots: lotsView(lotsOf.get(entities) ?? [], meNow, entities, allianceNames, worksite.stage, now),
       masters: mastersView(lotsOf.get(entities) ?? [], entities, allianceNames),
@@ -3336,7 +3377,7 @@ async function seasonStandings(admin: SupabaseClient, seasonId: number, until: n
 
 /** Fige le podium des saisons terminées qui ne l'ont pas encore été. */
 async function closeEndedSeasons(admin: SupabaseClient, now: number): Promise<void> {
-  const { data: ended } = await admin.from("seasons").select("id, ends_at").eq("hall_closed", false).lte("ends_at", iso(now));
+  const { data: ended } = await admin.from("seasons").select("id, starts_at, ends_at").eq("hall_closed", false).lte("ends_at", iso(now));
   for (const season of ended ?? []) {
     const standings = await seasonStandings(admin, Number(season.id), ms(season.ends_at as string));
     const rows = standings.flatMap((st) =>
@@ -3353,11 +3394,26 @@ async function closeEndedSeasons(admin: SupabaseClient, now: number): Promise<vo
     // Seul l'appel qui ferme la saison paie le podium, pour ne jamais payer deux fois.
     const { data: claimed } = await admin.from("seasons").update({ hall_closed: true }).eq("id", season.id).eq("hall_closed", false).select("id");
     if (!claimed?.length) continue;
-    for (const r of rows) {
-      const prize = HALL.find((h) => h.id === r.category)?.ecus?.[r.rank - 1];
-      if (prize && r.user_id) await admin.rpc("add_ecus", { p_user: r.user_id, p_amount: prize });
-    }
+    await payClosingEcus(admin, Number(season.id), standings, ms(season.starts_at as string), ms(season.ends_at as string));
   }
+}
+
+/** H1 : écus de clôture (étapes du beffroi pour les donateurs, podium dans toutes les catégories, fidélité), une seule fois. */
+async function payClosingEcus(admin: SupabaseClient, seasonId: number, standings: Standing[], startsAt: number, endsAt: number) {
+  const [{ data: players }, { data: site }, { data: days }] = await Promise.all([
+    admin.from("player_states").select("user_id, alliance_id, military, profiles(is_bot)").eq("season_id", seasonId),
+    admin.from("worksites").select("stage").eq("season_id", seasonId).maybeSingle(),
+    admin.rpc("season_login_days", { p_season: seasonId, p_since: iso(startsAt), p_until: iso(endsAt) }),
+  ]);
+  type Row = { user_id: string; alliance_id: number | null; military: { donorTiers?: number } | null; profiles: { is_bot: boolean } | null };
+  const humans = ((players ?? []) as unknown as Row[]).filter((r) => r.profiles && !r.profiles.is_bot && !LORD_BY_ID.has(r.user_id));
+  const rows = seasonRewards({
+    players: humans.map((r) => ({ id: r.user_id, donor: Number(r.military?.donorTiers ?? 0) > 0, allianceId: r.alliance_id ?? null })),
+    stagesDone: Number(site?.stage ?? 0),
+    podiums: standings.map((st) => ({ category: st.category, alliance: !!HALL.find((h) => h.id === st.category)?.alliance, ids: st.rows.slice(0, CLOSE_PODIUM_ECUS.length).map((r) => r.id) })),
+    days: new Map(((days ?? []) as { user_id: string; days: number }[]).map((d) => [d.user_id, Number(d.days)])),
+  });
+  if (rows.length > 0) await admin.rpc("pay_season_rewards", { p_season: seasonId, p_rows: rows });
 }
 
 /** Panthéon, gardé en mémoire une minute (il ne change qu'en fin de saison). */
