@@ -47,9 +47,27 @@ export function tourneyPodium(entries: Record<string, Army>, seed: number): stri
   return [round[0], finalLoser, ...semis.slice(0, 1)].filter(Boolean);
 }
 
-/** Tirage qui saute les événements de groupe quand trop peu de joueurs sont en ligne. */
-export function drawNextEvent(lastKind: string, seed: number, online: number): EventKind {
+/** G4 : événements qui se jouent seul ou sans rien faire, les seuls tirés la nuit. */
+export const NIGHT_EVENTS: readonly EventKind[] = ["foire", "fete", "etoiles", "treve", "marchand", "filon", "bandits"];
+
+/** Heure de Paris (0 à 23) à l'instant `t`. */
+export function parisHour(t: number): number {
+  const part = new Intl.DateTimeFormat("en-GB", { hour: "numeric", hourCycle: "h23", timeZone: "Europe/Paris" }).formatToParts(new Date(t)).find((p) => p.type === "hour");
+  return Number(part?.value ?? 12) % 24;
+}
+
+/** G4 : de 23 h à 7 h, heure de Paris. */
+export function isNight(t: number): boolean {
+  const h = parisHour(t);
+  return h >= 23 || h < 7;
+}
+
+/** Tirage qui saute les événements de groupe quand trop peu de joueurs sont en ligne, et les événements de combat la nuit (G4). */
+export function drawNextEvent(lastKind: string, seed: number, online: number, startAt?: number): EventKind {
+  const night = startAt !== undefined && isNight(startAt);
+  const ok = (k: EventKind) => (EVENT_MIN_ONLINE[k] ?? 0) <= online && (!night || NIGHT_EVENTS.includes(k));
   let kind = pickNextEvent(lastKind, seed);
-  for (let i = 1; (EVENT_MIN_ONLINE[kind] ?? 0) > online && i < 50; i++) kind = pickNextEvent(kind, seed + i);
+  for (let i = 1; !ok(kind) && i < 80; i++) kind = pickNextEvent(kind, seed + i);
+  if (!ok(kind)) kind = night ? "foire" : kind;
   return kind;
 }

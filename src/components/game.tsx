@@ -1215,9 +1215,9 @@ function duration(msLeft: number): string {
 function ElanGauge({ left, bonus }: { left: number; bonus: number }) {
   const pct = Math.round((left / ELAN_MAX_MS) * 100);
   return (
-    <div className="elan" title="Chaque coup ajoute 1 s d'élan (30 s au plus). Tant qu'il en reste, ta production est augmentée.">
+    <div className="elan" title="Chaque coup ajoute 3 s d'élan (10 minutes au plus). Tant qu'il en reste, ta production est augmentée.">
       <span>
-        ⚡ Élan {left > 0 ? `+${Math.round(bonus * 100)} % · ${Math.ceil(left / 1000)} s` : "vide : frappe pour l'allumer"}
+        ⚡ Élan {left > 0 ? `+${Math.round(bonus * 100)} % · ${left >= 60_000 ? `${Math.floor(left / 60_000)} min ${String(Math.floor((left % 60_000) / 1000)).padStart(2, "0")}` : `${Math.ceil(left / 1000)} s`}` : "vide : frappe pour l'allumer"}
       </span>
       <div className="bar">
         <span style={{ width: `${pct}%` }} />

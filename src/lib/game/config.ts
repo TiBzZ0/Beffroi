@@ -141,7 +141,7 @@ function generatorUpgrades(): UpgradeDef[] {
 export const UPGRADES: readonly UpgradeDef[] = [
   { id: "gants_cuir", name: "Gants de cuir", description: "Chaque coup de marteau rapporte ×2.", cost: 200, effect: { kind: "click", multiplier: 2 } },
   { id: "masse_bronze", name: "Masse de bronze", description: "Chaque coup de marteau rapporte ×3.", cost: 15_000, effect: { kind: "click", multiplier: 3 }, requires: { generator: "tailleur", count: 5 } },
-  { id: "marteau_maitre", name: "Marteau de maître", description: "Frapper donne de l'élan (1 s par coup, 30 s au plus) : tant qu'il dure, +20 % de production.", cost: 60_000, effect: { kind: "elan", bonus: 0.2 }, requires: { generator: "charrette", count: 5 } },
+  { id: "marteau_maitre", name: "Marteau de maître", description: "Frapper donne de l'élan (3 s par coup, 10 min au plus) : tant qu'il dure, +20 % de production.", cost: 60_000, effect: { kind: "elan", bonus: 0.2 }, requires: { generator: "charrette", count: 5 } },
   { id: "benediction", name: "Bénédiction de l'évêque", description: "Toute la production +10 %.", cost: 2_000_000, effect: { kind: "production", multiplier: 1.1 }, requires: { generator: "four", count: 5 } },
   { id: "corvee_royale", name: "Corvée royale", description: "Toute la production +25 %.", cost: 80_000_000, effect: { kind: "production", multiplier: 1.25 }, requires: { generator: "grue", count: 10 } },
   { id: "foire", name: "Foire de la Saint-Jean", description: "Toute la production +25 %.", cost: 2_000_000_000, effect: { kind: "production", multiplier: 1.25 }, requires: { generator: "guilde", count: 10 } },
@@ -631,9 +631,9 @@ export const LORD_COFFER_SECONDS = 12 * 60 * 60;
 export const LORD_DEFENSE_SHARE: Record<1 | 2 | 3 | 4, number> = { 1: 0.1, 2: 0.2, 3: 0.3, 4: 0.4 };
 export const LORD_DEFENSE_FLOOR_SECONDS = 2 * 60 * 60;
 
-/** A2 : chaque coup accepté ajoute 1 s d'élan, réserve de 30 s au plus. */
-export const ELAN_PER_CLICK_MS = 1000;
-export const ELAN_MAX_MS = 30_000;
+/** A2, G3 : chaque coup accepté ajoute 3 s d'élan, réserve de 10 minutes au plus. */
+export const ELAN_PER_CLICK_MS = 3000;
+export const ELAN_MAX_MS = 600_000;
 
 // T1 : carte du royaume. Grille de 15 × 15 cases, numérotées de 1 à 15.
 export const MAP_SIZE = 15;

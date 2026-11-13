@@ -1447,7 +1447,7 @@ async function loadEventInner(admin: SupabaseClient, seasonId: number, now: numb
     const e = eventRow(raw);
     // V10 à V12 : l'événement reste ouvert tant que le combat commun n'est pas réglé.
     const finished = (ms(e.ends_at) <= now || (e.kind === "colosse" && armySize(e.army) === 0)) && !(GROUP_EVENTS.includes(e.kind) && !e.data.resolved);
-    const next = drawNextEvent(e.kind, e.id * 7919 + seasonId, online);
+    const next = drawNextEvent(e.kind, e.id * 7919 + seasonId, online, ms(e.ends_at) + EVENT_GAP_MS);
     if (!finished) return { active: e, levels: medianLevels(entities), nextAt: ms(e.ends_at) + EVENT_GAP_MS, nextKind: next };
     if (COMBAT_EVENTS.includes(e.kind)) await admin.rpc("settle_event_v2", { p_event: e.id, p_bonus: killBonus(e, entities, now, world, flat) });
     else await admin.from("events").update({ settled: true }).eq("id", e.id).eq("settled", false);
@@ -1456,7 +1456,7 @@ async function loadEventInner(admin: SupabaseClient, seasonId: number, now: numb
   const nextAt = last ? ms(last.ends_at as string) + EVENT_GAP_MS : now;
   // Le tirage est figé à l'annonce : ce qui a été annoncé est ce qui arrive.
   const { data: notice } = last && now >= nextAt - EVENT_NOTICE_MS ? await admin.from("event_notices").select("kind").eq("season_id", seasonId).eq("after_event", Number(last.id)).maybeSingle() : { data: null };
-  const nextKind: EventKind = notice ? (notice.kind as EventKind) : last ? drawNextEvent(last.kind as string, Number(last.id) * 7919 + seasonId, online) : "caravane";
+  const nextKind: EventKind = notice ? (notice.kind as EventKind) : last ? drawNextEvent(last.kind as string, Number(last.id) * 7919 + seasonId, online, nextAt) : "caravane";
   const humans = [...entities.values()].filter((e) => !e.isLord);
   if (last && !notice && now >= nextAt - EVENT_NOTICE_MS && now < nextAt) void announceNext(admin, seasonId, Number(last.id), nextKind);
   if (now < nextAt || humans.length === 0) return { active: null, levels: {}, nextAt, nextKind };
@@ -1516,7 +1516,7 @@ async function loadEventInner(admin: SupabaseClient, seasonId: number, now: numb
   const { data: created } = await admin.from("events").select("*").eq("season_id", seasonId).eq("settled", false).maybeSingle();
   if (!created) return { active: null, levels: {}, nextAt: now + EVENT_GAP_MS, nextKind };
   const e = eventRow(created);
-  return { active: e, levels: medianLevels(entities), nextAt: ms(e.ends_at) + EVENT_GAP_MS, nextKind: drawNextEvent(e.kind, e.id * 7919 + seasonId, online) };
+  return { active: e, levels: medianLevels(entities), nextAt: ms(e.ends_at) + EVENT_GAP_MS, nextKind: drawNextEvent(e.kind, e.id * 7919 + seasonId, online, ms(e.ends_at) + EVENT_GAP_MS) };
 }
 
 /** Défenseurs qu'affronte un assaut : l'escorte entière de la caravane, ou ce qu'il reste du colosse. */

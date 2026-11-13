@@ -189,13 +189,13 @@ describe("clics", () => {
     expect(clickValue(s, noWorld, 2)).toBeCloseTo(4);
   });
 
-  it("frapper donne de l'élan : +20 % de production pendant 1 s par coup, 30 s au plus", () => {
+  it("frapper donne de l'élan : +20 % de production pendant 3 s par coup, 10 min au plus", () => {
     const s = { ...withGenerators({ tailleur: 10 }), upgrades: ["marteau_maitre"] };
     const hit = applyClicks(s, 100, T0 + 10_000, noWorld).state;
-    expect(hit.elanUntil).toBe(T0 + 10_000 + 30_000);
-    const base = advance({ ...s, lastUpdate: T0 + 10_000 }, T0 + 70_000, noWorld).stone - s.stone;
-    const boosted = advance({ ...hit, lastUpdate: T0 + 10_000 }, T0 + 70_000, noWorld).stone - hit.stone;
-    // 30 s à +20 % sur 60 s : +10 %.
+    expect(hit.elanUntil).toBe(T0 + 10_000 + 300_000);
+    const base = advance({ ...s, lastUpdate: T0 + 10_000 }, T0 + 610_000, noWorld).stone - s.stone;
+    const boosted = advance({ ...hit, lastUpdate: T0 + 10_000 }, T0 + 610_000, noWorld).stone - hit.stone;
+    // 5 min à +20 % sur 10 min : +10 %.
     expect(boosted / base).toBeCloseTo(1.1);
   });
 });

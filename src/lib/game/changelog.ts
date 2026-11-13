@@ -414,4 +414,12 @@ export const CHANGELOG: ChangeEntry[] = [
       "🔎 Chronique : un bouton « Ce qui me concerne » ne garde que tes combats, ceux de ton alliance, les espions et sabotages chez toi, et les événements où tu étais.",
     ],
   },
+  {
+    id: 49,
+    date: "13 novembre",
+    items: [
+      "⚡ L'élan récompense la présence plutôt que le clic sans fin : chaque coup donne 3 secondes d'élan, et la réserve monte à 10 minutes. Une quarantaine de secondes de frappe la remplit.",
+      "🌙 Entre 23 h et 7 h, seuls les événements qu'on peut jouer seul sont tirés : foire, fête des bâtisseurs, pluie d'étoiles, trêve, marchand, filon et camps de bandits. Trésor, convoi, siège, tournoi, lune rouge, brouillard, caravane et Colosse attendent la journée.",
+    ],
+  },
 ];

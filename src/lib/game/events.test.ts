@@ -84,3 +84,16 @@ describe("drawNextEvent", () => {
     expect(seeds.some((s) => drawNextEvent("foire", s, 3) === "siege")).toBe(true);
   });
 });
+
+describe("G4 : la nuit", () => {
+  it("de 23 h à 7 h (Paris), seuls les événements qui se jouent seul sont tirés", async () => {
+    const { drawNextEvent, NIGHT_EVENTS, isNight } = await import("./events");
+    const night = Date.UTC(2026, 10, 13, 2, 0); // 3 h à Paris
+    const day = Date.UTC(2026, 10, 13, 13, 0);
+    expect(isNight(night)).toBe(true);
+    expect(isNight(day)).toBe(false);
+    for (let seed = 0; seed < 300; seed++) expect(NIGHT_EVENTS).toContain(drawNextEvent("foire", seed, 10, night));
+    const daily = new Set(Array.from({ length: 300 }, (_, seed) => drawNextEvent("foire", seed, 10, day)));
+    expect([...daily].some((k) => !NIGHT_EVENTS.includes(k))).toBe(true);
+  });
+});
