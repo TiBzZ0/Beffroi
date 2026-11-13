@@ -715,10 +715,12 @@ function lotsView(lots: Lot[], me: Entity, entities: Map<string, Entity>, allian
 }
 
 /** B6 : récompenses versées une fois quand une étape s'achève (écus du beffroi légendaire). */
-async function stageRewards(admin: SupabaseClient, seasonId: number, before: number, after: number) {
+async function stageRewards(admin: SupabaseClient, seasonId: number, before: number, after: number, actorId?: string) {
   for (let i = before; i < Math.min(after, TOTAL_STAGES); i++) {
     const ecus = stageDef(i).bonus.donorEcus ?? 0;
     if (ecus > 0) await admin.rpc("reward_donors", { p_season: seasonId, p_amount: ecus });
+    // U2 : la fin d'étape entre dans les rapports « Chantier » de tous.
+    if (actorId) await addChronicle(admin, seasonId, { kind: "stage", actor_id: actorId, details: { stage: i, name: stageDef(i).name, ecus } });
   }
 }
 
@@ -990,7 +992,7 @@ async function tickLords(admin: SupabaseClient, season: SeasonView, entities: Ma
       if ((data as { ok?: boolean } | null)?.ok && r?.ok) {
         await addChronicle(admin, season.id, { kind: "gift", actor_id: lord.id, details: { amount } });
         const after = (data as { worksite?: WorksiteRow }).worksite;
-        if (after) await stageRewards(admin, season.id, worksite.stage, Number(after.stage));
+        if (after) await stageRewards(admin, season.id, worksite.stage, Number(after.stage), lord.id);
       }
       changed = true;
       continue; // une action par visite
@@ -1074,6 +1076,7 @@ async function loadChronicle(admin: SupabaseClient, seasonId: number, entities: 
     .select("id, kind, actor_id, target_id, details, created_at")
     .eq("season_id", seasonId)
     .gt("created_at", iso(Date.now() - CHRONICLE_KEEP_MS))
+    .not("kind", "in", "(quest,chest,ecus)")
     .order("created_at", { ascending: false })
     .limit(80);
   // R10, U2 : tout ce qui concerne le joueur sur 7 jours (150 lignes au plus), même hors des 80 dernières lignes.
@@ -2262,7 +2265,7 @@ export type ActionResult = { ok: true; snapshot: GameSnapshot; message?: string 
 /** Exécute une intention du joueur et renvoie l'état qui fait foi. */
 export async function runAction(admin: SupabaseClient, userId: string, action: GameAction): Promise<ActionResult> {
   const season = await getActiveSeason(admin);
-  const wantsChronicle = ["sync", "raid", "spy", "event_attack", "sabotage"].includes(action.type);
+  const wantsChronicle = ["sync", "raid", "spy", "event_attack", "sabotage", "daily"].includes(action.type);
 
   for (let attempt = 0; attempt < MAX_ATTEMPTS; attempt++) {
     let [worksite, entities] = await Promise.all([loadWorksite(admin, season.id), loadEntities(admin, season.id, userId)]);
@@ -2375,6 +2378,12 @@ export async function runAction(admin: SupabaseClient, userId: string, action: G
         if (op === "swap") message = "🔄 Quête échangée.";
         const { data } = await admin.rpc("commit_state", { p_season: season.id, p_state: toJson(me, finalState, {}), p_touch: true, p_contribution: 0, p_stage_bases: stageSizes, p_active_window_days: ACTIVE_WINDOW_DAYS, p_action: `daily_${op}`, p_details: { index } });
         if ((data as { conflict?: boolean } | null)?.conflict) continue;
+        // U2 : quête réclamée et coffre ouvert vont dans les rapports « Chantier ».
+        if (op === "claim" && "reward" in r.value) {
+          const q = DAILY_QUESTS.find((x) => x.id === current.daily?.quests[index]?.id);
+          await addChronicle(admin, season.id, { kind: "quest", actor_id: me.id, details: { label: q?.label ?? "Quête du jour", icon: q?.icon ?? "📜", amount: Math.floor(r.value.reward) } });
+        }
+        if (op === "chest" && "bonus" in r.value) await addChronicle(admin, season.id, { kind: "chest", actor_id: me.id, details: { bonus: r.value.bonus } });
       }
     } else if (action.type === "tournament_join") {
       // V12 : l'armée du tournoi est fictive ; mes troupes ne bougent pas.
@@ -2682,7 +2691,7 @@ export async function runAction(admin: SupabaseClient, userId: string, action: G
       const result = data as { ok: boolean; conflict?: boolean; worksite?: WorksiteRow };
       if (!result.ok && result.conflict) continue;
       if (result.worksite) worksite = worksiteFromRow(result.worksite);
-      await stageRewards(admin, season.id, stageAtLoad, worksite.stage);
+      await stageRewards(admin, season.id, stageAtLoad, worksite.stage, userId);
       if (contribution > 0) await recordContribution(season.id, userId, finalState.totalContributed);
       if (toHall > 0 && myGuild) await giveToGuild(admin, myGuild, userId, toHall, guildRate(myGuild.allianceId, me, entities, world, now), entities);
       if (action.type === "sync" && (await absorbLodge(admin, me, entities, world, now))) message = "🏛️ Ta loge est versée dans la halle de ton alliance (la moitié de ce que tu lui avais donné).";
@@ -2697,11 +2706,13 @@ export async function runAction(admin: SupabaseClient, userId: string, action: G
           ecus = Number(total ?? ecus + questDone.ecus);
         }
         message = `📜 Quête accomplie : ${QUESTS[questDone.done].label}. Récompense : 5 minutes de production${questDone.ecus ? ` et ${questDone.ecus} écus` : ""}.`;
+        await addChronicle(admin, season.id, { kind: "quest", actor_id: me.id, details: { label: QUESTS[questDone.done].label, icon: "📜", ecus: questDone.ecus } });
       }
       if (gift.tiers > 0) {
         const { data: total } = await admin.rpc("add_ecus", { p_user: userId, p_amount: gift.ecus });
         ecus = Number(total ?? ecus + gift.ecus);
         message = `🎖️ Palier de don atteint : +${gift.tiers * DONOR_TIER_BONUS * 100} % de production jusqu'à la fin de la saison et ${gift.ecus} écus.`;
+        await addChronicle(admin, season.id, { kind: "ecus", actor_id: me.id, details: { ecus: gift.ecus, tiers: gift.tiers, stage: finalState.share?.stage } });
       }
     }
 

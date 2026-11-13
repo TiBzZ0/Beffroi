@@ -131,7 +131,7 @@ export interface AwaySummary {
 export interface ChronicleEntry {
   id: number;
   at: number;
-  kind: "raid" | "gift" | "spy" | "war" | "fortress" | "event" | "sabotage" | "lot" | "hall" | "hall_siege";
+  kind: "raid" | "gift" | "spy" | "war" | "fortress" | "event" | "sabotage" | "lot" | "hall" | "hall_siege" | "stage" | "quest" | "chest" | "ecus";
   actorId: string | null;
   actorName: string;
   targetId: string | null;
@@ -177,6 +177,11 @@ export interface ChronicleEntry {
     /** Colosse : pertes infligées, en valeur de pierre. */
     dealt?: number;
     shares?: Record<string, number>;
+    /** U2 : quête, coffre et écus. */
+    label?: string;
+    icon?: string;
+    ecus?: number;
+    tiers?: number;
   };
 }
 

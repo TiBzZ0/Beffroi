@@ -308,7 +308,10 @@ export function useGame() {
             showToast(repelled ? `🛡️ Tu as repoussé le raid de ${attacker} !` : `⚔️ ${attacker} vient de piller tes greniers !`);
           }
           // On ne se resynchronise que si ça me concerne ; le reste attend la prochaine synchro.
-          if (s && (payload.new.target_id === s.userId || payload.new.actor_id === s.userId)) void run({ type: "sync" });
+          // U2 : quêtes, coffre, écus et fins d'étape sont écrits par ma propre action ; inutile de resynchroniser.
+          const quiet = ["quest", "chest", "ecus", "stage"].includes(String(payload.new.kind));
+          if (s && !quiet && (payload.new.target_id === s.userId || payload.new.actor_id === s.userId)) void run({ type: "sync" });
+          else if (quiet && payload.new.actor_id === s?.userId) return;
           else scheduleLiveSync();
         },
       )

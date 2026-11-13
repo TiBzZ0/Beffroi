@@ -492,4 +492,12 @@ export const CHANGELOG: ChangeEntry[] = [
       "⏱️ Durée exacte, heure d'arrivée et heure de retour aussi pour la forteresse, les halles, les renforts et les événements.",
     ],
   },
+  {
+    id: 58,
+    date: "13 novembre",
+    items: [
+      "⛪ La catégorie Chantier des rapports reçoit les étapes et embellissements achevés, tes quêtes accomplies, ton coffre du jour et tes paliers de don avec leurs écus.",
+      "⚔️ Dans le détail d'un rapport : Carte (la cible sur la carte), Revanche, Renvoyer (la même armée, prête à partir) et Espionner. Les pertes s'affichent en valeur.",
+    ],
+  },
 ];

@@ -125,6 +125,7 @@ export function Game({ userId }: { userId: string }) {
   const game = useGame();
   const [tab, setTab] = useState<Tab>("ateliers");
   const [lastSub, setLastSub] = useState<Partial<Record<Group, Tab>>>({});
+  const [focus, setFocus] = useState<Focus | null>(null);
   useTick(250);
 
   const snap = game.snap;
@@ -175,7 +176,10 @@ export function Game({ userId }: { userId: string }) {
   const affordableUpgrades = UPGRADES.filter((u) => !live.upgrades.includes(u.id) && upgradeUnlocked(live, u) && upgradeCost(live, u) <= live.stone).length;
 
   return (
-    <SnapContext.Provider value={{ snap, live, now }}>
+    <SnapContext.Provider value={{ snap, live, now, go: (where, id, army) => {
+      setFocus({ id, army, at: now });
+      selectTab(where);
+    } }}>
     <div className="game">
       <WhatsNew />
       {game.away && <AwayModal away={game.away} event={snap.event} onClose={game.dismissAway} />}
@@ -211,8 +215,8 @@ export function Game({ userId }: { userId: string }) {
             {tab === "ameliorations" && <Upgrades live={live} run={game.run} />}
             {tab === "chantier" && <Worksite snap={snap} live={live} run={game.run} />}
             {tab === "armee" && <Army snap={snap} live={live} now={now} run={game.run} />}
-            {tab === "carte" && <KingdomMap snap={snap} live={live} now={now} run={game.run} />}
-            {tab === "raids" && <Raids snap={snap} live={live} now={now} run={game.run} />}
+            {tab === "carte" && <KingdomMap snap={snap} live={live} now={now} run={game.run} focus={focus} />}
+            {tab === "raids" && <Raids snap={snap} live={live} now={now} run={game.run} focus={focus} />}
             {tab === "alliance" && <AllianceTab snap={snap} live={live} now={now} run={game.run} />}
             {tab === "messages" && <Inbox snap={snap} live={live} now={now} run={game.run} userId={userId} />}
             {tab === "classement" && <Ranking boards={leaderboard} userId={userId} />}
@@ -1466,8 +1470,9 @@ function Army({ snap, live, now, run }: { snap: GameSnapshot; live: PlayerState;
   );
 }
 
-function Raids({ snap, live, now, run }: { snap: GameSnapshot; live: PlayerState; now: number; run: ReturnType<typeof useGame>["run"] }) {
-  const [view, setView] = useState<RaidView>("seigneurs");
+function Raids({ snap, live, now, run, focus }: { snap: GameSnapshot; live: PlayerState; now: number; run: ReturnType<typeof useGame>["run"]; focus?: Focus | null }) {
+  const fresh = focus && now - focus.at < 5000 ? focus : null;
+  const [view, setView] = useState<RaidView>(() => (fresh && snap.rivals.find((r) => r.id === fresh.id && !r.isLord) ? "joueurs" : "seigneurs"));
   const [level, setLevel] = useState<number | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
   const spyPrice = spyCost(live, worldFrom(snap.worksite), now);
@@ -1485,7 +1490,7 @@ function Raids({ snap, live, now, run }: { snap: GameSnapshot; live: PlayerState
   const sabotage = (target: string, aim: SabotageAim) => act(target, { type: "sabotage", target, aim });
   const mole = (target: string) => act(target, { type: "mole", target });
   const row = (r: RivalView) => (
-    <RivalRow key={r.id} r={r} now={now} busy={busy} onRaid={raid} onSpy={spy} spyPrice={spyPrice} stone={live.stone} onSabotage={sabotage} onMole={mole} stagesDone={stagesDoneAt(worldFrom(snap.worksite), now)} me={live} distance={distanceTo(r.id)} />
+    <RivalRow key={r.id} focus={fresh?.id === r.id ? fresh : undefined} r={r} now={now} busy={busy} onRaid={raid} onSpy={spy} spyPrice={spyPrice} stone={live.stone} onSabotage={sabotage} onMole={mole} stagesDone={stagesDoneAt(worldFrom(snap.worksite), now)} me={live} distance={distanceTo(r.id)} />
   );
   const views: [RaidView, string][] = [
     ["seigneurs", `Seigneurs (${snap.rivals.filter((r) => r.isLord).length})`],
@@ -1655,7 +1660,9 @@ function RivalRow({
   stagesDone = 0,
   me,
   distance,
+  focus,
 }: {
+  focus?: Focus;
   r: RivalView;
   now: number;
   busy: string | null;
@@ -1670,9 +1677,13 @@ function RivalRow({
   distance?: number;
 }) {
   const [sim, setSim] = useState<number | null>(null);
-  const [composing, setComposing] = useState(false);
-  const [chosen, setChosen] = useState<Record<string, number> | null>(null);
+  const [composing, setComposing] = useState(!!focus);
+  const [chosen, setChosen] = useState<Record<string, number> | null>(focus?.army ?? null);
   const [aiming, setAiming] = useState(false);
+  const rowRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (focus) rowRef.current?.scrollIntoView({ block: "center", behavior: "smooth" });
+  }, [focus]);
   const sabotagePrice = r.sabotageCost ?? 0;
   const intel = r.intelUntil > now;
   // La pierre du rival progresse en direct entre deux nouvelles du serveur.
@@ -1683,7 +1694,7 @@ function RivalRow({
   const blocked = r.blocker !== null;
   const pct = Math.round(r.chance * 100);
   return (
-    <div className="row">
+    <div className="row" ref={rowRef}>
       <div className="row-icon" aria-hidden>
         {r.isLord ? r.blazon : "🛡️"}
       </div>
@@ -1910,7 +1921,14 @@ function SendArmy({
 }
 
 /** U1 : l'état du jeu à portée des cartes qui n'en reçoivent qu'une partie (temps de trajet). */
-const SnapContext = createContext<{ snap: GameSnapshot; live: PlayerState; now: number } | null>(null);
+const SnapContext = createContext<{ snap: GameSnapshot; live: PlayerState; now: number; go?: (where: "carte" | "raids", id: string, army?: Record<string, number>) => void } | null>(null);
+
+/** U2 : cible à ouvrir après un bouton de rapport (carte, ou fiche avec l'armée prête). */
+interface Focus {
+  id: string;
+  army?: Record<string, number>;
+  at: number;
+}
 
 /** U1 : temps de trajet exact vers un lieu (« fortress », « hall:<id> », un joueur) ou une position. */
 function TravelTo({ place, pos, army, reinforce = false }: { place?: string; pos?: readonly [number, number]; army: Record<string, number>; reinforce?: boolean }) {
@@ -3210,6 +3228,16 @@ function chronicleText(e: ChronicleEntry, me: string, rivals: RivalView[], allia
       : `🏛️ ${who(e.actorId, e.actorName, true)} ${e.actorId === me ? "t'es brisé" : "s'est brisé"} sur les murs de la halle de ${allianceName(d.target)}.`;
   } else if (e.kind === "hall") {
     text = `🏛️ ${who(e.actorId, e.actorName, true)} ${e.actorId === me ? "as fondé" : "a fondé"} la halle de ${allianceName(e.details.alliance)}.`;
+  } else if (e.kind === "stage") {
+    const d = e.details;
+    text = `⛪ « ${d.name ?? stageDef(d.stage ?? 0).name} » est achevé${(d.ecus ?? 0) > 0 ? ` : ${d.ecus} écus pour chaque donateur` : ""}.`;
+  } else if (e.kind === "quest") {
+    const d = e.details;
+    text = `${d.icon ?? "📜"} Quête accomplie : ${d.label ?? ""}${(d.amount ?? 0) > 0 ? `, +${formatNumber(d.amount ?? 0)} pierres` : ""}${(d.ecus ?? 0) > 0 ? `, +${d.ecus} écus` : ""}.`;
+  } else if (e.kind === "chest") {
+    text = `🎁 Coffre du jour ouvert : +${Math.round(((e.details as { bonus?: number }).bonus ?? 0) * 100)} % de production pendant 4 heures.`;
+  } else if (e.kind === "ecus") {
+    text = `🎖️ Palier de don : +${e.details.ecus ?? 0} écus et +${(e.details.tiers ?? 1) * DONOR_TIER_BONUS * 100} % de production.`;
   } else if (e.kind === "gift") {
     text = `${e.actorName} a offert ${formatNumber(e.details.amount ?? 0)} pierres au chantier.`;
   } else {
@@ -3342,6 +3370,27 @@ function reportOf(e: ChronicleEntry, me: string, myAlliance: number | null, riva
     icon = "🏛️";
     cat = myAlliance !== null && d.alliance === myAlliance ? "alliance" : "royaume";
     title = `Halle fondée : ${aName(d.alliance)}`;
+  } else if (e.kind === "stage") {
+    icon = "⛪";
+    cat = "chantier";
+    title = `${d.name ?? stageDef(d.stage ?? 0).name} achevé`;
+    if ((d.ecus ?? 0) > 0) chips.push({ t: `🪙 ${d.ecus}`, tone: "gain" });
+  } else if (e.kind === "quest" || e.kind === "chest" || e.kind === "ecus") {
+    if (!attacker) return { key: `c${e.id}`, cat: "royaume", icon: "", title: "", chips: [], at: 0 };
+    cat = "chantier";
+    if (e.kind === "quest") {
+      icon = d.icon ?? "📜";
+      title = "Quête accomplie";
+      if ((d.amount ?? 0) > 0) chips.push({ t: `+${short(d.amount ?? 0)} 🪨`, tone: "gain" });
+    } else if (e.kind === "chest") {
+      icon = "🎁";
+      title = "Coffre du jour ouvert";
+      chips.push({ t: `+${Math.round(((d as { bonus?: number }).bonus ?? 0) * 100)} % 4 h`, tone: "gain" });
+    } else {
+      icon = "🎖️";
+      title = "Palier de don atteint";
+    }
+    if ((d.ecus ?? 0) > 0) chips.push({ t: `🪙 +${d.ecus}`, tone: "gain" });
   } else {
     icon = "🎁";
     cat = attacker ? "chantier" : "royaume";
@@ -3392,6 +3441,7 @@ export function Inbox({ snap, live, now, run, userId }: { snap: GameSnapshot; li
   const [cat, setCat] = useState<InboxCategory>("combats");
   const [open, setOpen] = useState<string | null>(null);
   const [local, setLocal] = useState(readLocal);
+  const go = useContext(SnapContext)?.go;
   const reports = buildReports(snap, live, now);
   const unread = (c: InboxCategory) => reports.filter((r) => r.cat === c && isUnread(r, live, local)).length;
   const list = reports.filter((r) => r.cat === cat);
@@ -3467,11 +3517,28 @@ export function Inbox({ snap, live, now, run, userId }: { snap: GameSnapshot; li
                         {r.text && <p>{r.text}</p>}
                         {e?.details.log && e.details.log.length > 0 && <RoundsReport log={e.details.log} details={e.details} open />}
                         {!e && r.rival && <SpyReport r={r.rival} now={now} />}
-                        {r.target && r.rival && !r.rival.allied && (
+                        {r.target && r.rival && (
                           <div className="row-actions">
-                            <button className="btn btn-small" onClick={() => void run({ type: "spy", target: r.target! })}>
-                              🕵️ Espionner
-                            </button>
+                            {go && (
+                              <button className="btn btn-small" onClick={() => go("carte", r.target!)}>
+                                🗺️ Carte
+                              </button>
+                            )}
+                            {go && !r.rival.allied && e?.kind === "raid" && e.targetId === snap.userId && r.rival.revenge && (
+                              <button className="btn btn-small btn-primary" onClick={() => go("raids", r.target!)}>
+                                ⚔️ Revanche
+                              </button>
+                            )}
+                            {go && !r.rival.allied && e?.kind === "raid" && e.actorId === snap.userId && e.details.attackerStart && (
+                              <button className="btn btn-small" onClick={() => go("raids", r.target!, e.details.attackerStart)}>
+                                🔁 Renvoyer
+                              </button>
+                            )}
+                            {!r.rival.allied && (
+                              <button className="btn btn-small" onClick={() => void run({ type: "spy", target: r.target! })}>
+                                🕵️ Espionner
+                              </button>
+                            )}
                           </div>
                         )}
                       </div>
@@ -3517,8 +3584,8 @@ function readMapNames(): boolean {
   }
 }
 
-function KingdomMap({ snap, live, now, run }: { snap: GameSnapshot; live: PlayerState; now: number; run: ReturnType<typeof useGame>["run"] }) {
-  const [picked, setPicked] = useState<string | null>(null);
+function KingdomMap({ snap, live, now, run, focus }: { snap: GameSnapshot; live: PlayerState; now: number; run: ReturnType<typeof useGame>["run"]; focus?: Focus | null }) {
+  const [picked, setPicked] = useState<string | null>(() => (focus && now - focus.at < 5000 ? focus.id : null));
   const [busy, setBusy] = useState<string | null>(null);
   const [zoomed, setZoomed] = useState(false);
   const [names, setNames] = useState(readMapNames);
