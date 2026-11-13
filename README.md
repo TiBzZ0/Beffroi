@@ -4,7 +4,7 @@ Un idle médiéval pour 3 à 10 amis, jouable dans le navigateur (mobile compris
 
 Ce dépôt contient le **MVP (saison 0)** du document de conception :
 
-- connexion par e-mail, pseudo et mot de passe (connexion possible avec l'e-mail ou le pseudo), sans confirmation d'e-mail, avec « Mot de passe oublié » ;
+- connexion par e-mail, pseudo et mot de passe (connexion possible avec l'e-mail ou le pseudo), sans confirmation d'e-mail (mot de passe oublié : l'admin le réinitialise, faute de serveur d'e-mail) ;
 - une ressource (la pierre), 7 bâtiments et 19 améliorations (« savoirs ») ;
 - des gains hors ligne plafonnés à 8 h ;
 - des clics regroupés par lots et plafonnés à 15 par seconde côté serveur ;
@@ -17,11 +17,11 @@ Les raids, le prestige, les écus de gloire, les seigneurs voisins et les équip
 
 | Brique | Rôle |
 | --- | --- |
-| Next.js 16 (App Router) sur Vercel | Interface React, API (Route Handlers), connexion (Server Actions) |
-| Supabase Postgres | État des joueurs, saisons, chantier commun, journal des actions |
+| Next.js 16 (App Router), conteneur Docker sur le PC-serveur | Interface React, API (Route Handlers), connexion (Server Actions) |
+| Supabase auto-hébergé : Postgres | État des joueurs, saisons, chantier commun, journal des actions |
 | Supabase Auth | Comptes e-mail + mot de passe, pseudo dans `profiles` |
 | Supabase Realtime | Diffusion en direct de la barre du chantier |
-| Upstash Redis | Classement (sorted set) et limitation de débit (optionnel en local) |
+| Redis local (API compatible Upstash via serverless-redis-http) | Classement (sorted set) et limitation de débit (optionnel en local) |
 
 ## Comment ça marche
 
@@ -49,32 +49,56 @@ src/
 supabase/migrations/                       schéma SQL, RLS et fonctions
 ```
 
-## Mise en ligne (tout en offres gratuites)
+## Mise en ligne (PC-serveur auto-hébergé)
 
-### 1. Supabase (base de données et comptes)
+Depuis le 12 novembre 2026, le jeu ne tourne plus sur Vercel + Supabase cloud + Upstash, mais sur le PC-serveur de l'admin (Debian, Docker, allumé 24 h/24), publié sur Internet par **Tailscale Funnel** :
 
-1. Crée un compte sur [supabase.com](https://supabase.com) puis un projet (plan Free, région Europe de préférence). Garde le mot de passe de la base dans un coin.
-2. Dans **SQL Editor**, colle tout le contenu de `supabase/migrations/20261109000000_init.sql` et clique sur **Run**.
-3. Dans **Project Settings → API Keys**, récupère la **Publishable key** et la **Secret key**, et dans **Project Settings → Data API** l'**URL du projet**.
-4. Dans **Authentication → URL Configuration** (à faire après l'étape Vercel, quand tu connais l'adresse du site) :
-   - **Site URL** : `https://<ton-projet>.vercel.app`
-   - **Redirect URLs** : ajoute `https://<ton-projet>.vercel.app/auth/callback` et `http://localhost:3000/auth/callback`.
-5. Désactive la confirmation d'e-mail : **Authentication → Sign In / Providers → Email**, décoche **Confirm email** et enregistre. On entre ainsi dans le jeu dès l'inscription. L'e-mail ne sert plus qu'au lien « Mot de passe oublié », envoyé par le service intégré de Supabase (quelques messages par heure, largement assez pour un groupe d'amis).
+**https://machine-serveur.tail6d5d9d.ts.net**
 
-### 2. Vercel (hébergement)
+```
+Joueurs ─▶ Tailscale Funnel (HTTPS) ─▶ Caddy
+             ├─ /auth/v1/*, /rest/v1/*, /realtime/v1/* ─▶ Supabase auto-hébergé (pile Docker officielle)
+             └─ tout le reste ─▶ beffroi-app (Next.js, `npm run build` puis `next start`, Node 22)
+                                   └─ Redis local (serverless-redis-http, API compatible Upstash)
+```
 
-1. Sur [vercel.com](https://vercel.com), connecte-toi avec GitHub, puis **Add New → Project** et importe le dépôt `Beffroi`.
-2. Avant de déployer, ajoute les variables d'environnement :
-   - `NEXT_PUBLIC_SUPABASE_URL`
-   - `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY`
-   - `SUPABASE_SECRET_KEY`
-3. Clique sur **Deploy**, puis reviens à l'étape 1.4 avec l'adresse obtenue.
+La pile (`compose.yaml`, `Caddyfile`, `Dockerfile`, `.env`, scripts) vit sur le PC dans `/srv/docker/beffroi/`, avec le clone du dépôt dans `source/`. Elle n'est pas dans ce dépôt. Le clone suit la **branche par défaut du dépôt**.
 
-### 3. Upstash Redis (classement et anti-spam)
+### Livrer une nouvelle version
 
-Le plus simple : dans le projet Vercel, onglet **Storage → Create Database → Upstash for Redis** (plan Free), et relie-le au projet. Vercel ajoute tout seul `KV_REST_API_URL` et `KV_REST_API_TOKEN`, que le code reconnaît. Redéploie ensuite.
+1. **D'abord les migrations SQL, s'il y en a.** Il n'y a plus de déploiement automatique des migrations : chaque nouveau fichier de `supabase/migrations/` se colle à la main dans **Studio → SQL Editor** (`http://machine-serveur:8000`, via Tailscale), dans l'ordre des noms de fichiers, **avant** l'étape 2. Chaque livraison doit dire clairement si elle contient une migration et laquelle.
+2. Sur le PC-serveur :
+   ```bash
+   bash /srv/docker/beffroi/mettre-a-jour.sh   # git pull --ff-only, reconstruction, redémarrage (quelques secondes de coupure)
+   ```
 
-Sans Redis, le jeu fonctionne quand même : le classement est lu dans Postgres et la limitation de débit est désactivée.
+### Variables d'environnement
+
+| Variable | Valeur |
+| --- | --- |
+| `NEXT_PUBLIC_SUPABASE_URL` | l'adresse publique du site (Caddy aiguille par chemin vers Supabase) |
+| `NEXT_PUBLIC_SITE_URL` | l'adresse publique du site |
+| `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY`, `SUPABASE_SECRET_KEY` | clés du Supabase auto-hébergé |
+| `UPSTASH_REDIS_REST_URL`, `UPSTASH_REDIS_REST_TOKEN` | `http://srh:80` et le jeton local |
+| `NEXT_PUBLIC_PASSWORD_RESET` | `1` seulement quand un SMTP est configuré dans Supabase (voir plus bas) |
+
+Les `NEXT_PUBLIC_*` sont **figées à la construction** de l'image (`--build-arg`). Si l'adresse change (vrai domaine, par exemple), il faut reconstruire l'image et changer `SITE_URL` et `API_EXTERNAL_URL` dans le `.env` de Supabase.
+
+### Mot de passe oublié
+
+Le Supabase auto-hébergé n'a pas de serveur d'e-mail : le lien « Mot de passe oublié » est remplacé par « demande à l'admin ». Pour remettre un mot de passe à zéro, dans **Studio → SQL Editor** :
+
+```sql
+update auth.users
+set encrypted_password = crypt('nouveau-mot-de-passe', gen_salt('bf'))
+where email = 'joueur@exemple.fr';
+```
+
+Pour rétablir l'envoi par e-mail : configurer `SMTP_*` dans le `.env` de Supabase (Brevo, Resend, Gmail…), puis reconstruire l'image du jeu avec `NEXT_PUBLIC_PASSWORD_RESET=1`.
+
+### Sans Redis
+
+Le jeu fonctionne quand même : le classement est lu dans Postgres et la limitation de débit est désactivée.
 
 ## Développement local
 

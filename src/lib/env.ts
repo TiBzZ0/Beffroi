@@ -10,6 +10,12 @@ export const SUPABASE_URL = first(process.env.NEXT_PUBLIC_SUPABASE_URL) ?? "";
 export const SUPABASE_PUBLIC_KEY =
   first(process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY, process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY) ?? "";
 
+/**
+ * « Mot de passe oublié » par e-mail : seulement si le Supabase utilisé sait envoyer des e-mails (SMTP).
+ * Le Supabase auto-hébergé n'en a pas : sans `NEXT_PUBLIC_PASSWORD_RESET=1`, on renvoie vers l'admin.
+ */
+export const PASSWORD_RESET_ENABLED = process.env.NEXT_PUBLIC_PASSWORD_RESET === "1";
+
 export function supabaseConfigured(): boolean {
   return SUPABASE_URL !== "" && SUPABASE_PUBLIC_KEY !== "";
 }
