@@ -2140,3 +2140,57 @@ use.g-enemy {
   .move-troops { grid-area: troops; font-size: 0.82em; }
   .move-action { grid-area: action; justify-self: end; }
 }
+
+/* U2 : boîte de réception */
+.inbox-cats { display: flex; flex-wrap: wrap; gap: 6px; margin: 6px 0; }
+.inbox-count {
+  margin-left: 6px;
+  padding: 0 6px;
+  border-radius: 999px;
+  background: var(--accent);
+  color: var(--accent-ink);
+  font-size: 0.8em;
+}
+.inbox-tools { display: flex; justify-content: flex-end; margin-bottom: 4px; }
+.reports { list-style: none; margin: 0; padding: 0; display: grid; gap: 4px; }
+.report { border: 1px solid var(--line); border-radius: 8px; background: var(--panel-2); }
+.report-line {
+  display: grid;
+  grid-template-columns: 26px minmax(0, 1fr) auto auto;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 6px 8px;
+  background: none;
+  border: 0;
+  color: var(--ink);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+.report.unread .report-title { font-weight: 700; }
+.report.unread { border-left: 4px solid var(--accent); }
+.report-icon { text-align: center; }
+.report-title { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.report-chips { display: flex; flex-wrap: wrap; gap: 4px; justify-content: flex-end; }
+.chip {
+  padding: 1px 7px;
+  border-radius: 999px;
+  border: 1px solid var(--line);
+  background: var(--panel);
+  font-size: 0.82em;
+  white-space: nowrap;
+}
+.chip-gain { color: var(--ok); border-color: var(--ok); }
+.chip-loss { color: var(--accent); border-color: var(--accent); }
+.report-time { color: var(--ink-soft); font-size: 0.82em; white-space: nowrap; }
+.report-body { padding: 4px 10px 10px 42px; font-size: 0.92em; }
+.report-body p { margin: 4px 0; }
+@media (max-width: 720px) {
+  .report-line { grid-template-columns: 22px minmax(0, 1fr) auto; grid-template-areas: "icon title time" "icon chips chips"; }
+  .report-icon { grid-area: icon; }
+  .report-title { grid-area: title; }
+  .report-time { grid-area: time; }
+  .report-chips { grid-area: chips; justify-content: flex-start; }
+  .report-body { padding-left: 12px; }
+}

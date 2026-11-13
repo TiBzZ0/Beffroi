@@ -343,6 +343,7 @@ export type GameAction =
   | { type: "research"; id: string }
   | { type: "research_cancel"; endsAt: number }
   | { type: "legacy_buy"; kind: string }
+  | { type: "inbox_read"; category: string }
   | { type: "merchant"; choice: MerchantChoice }
   | { type: "march_recall"; id: string }
   | { type: "tournament_join"; troops: Record<string, number> }

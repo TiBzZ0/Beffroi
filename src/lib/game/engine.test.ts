@@ -466,3 +466,15 @@ describe("G1 : embellissements", () => {
     expect(at(11) / at(8)).toBeCloseTo(1.15);
   });
 });
+
+describe("U2 : boîte de réception", () => {
+  it("marque lue une catégorie ou toutes, refuse une catégorie inconnue", async () => {
+    const { markInboxRead, newPlayerState: fresh } = await import("./engine");
+    const s = fresh(0);
+    const one = markInboxRead(s, "combats", 10);
+    expect(one.ok && one.value.inboxRead).toEqual({ combats: 10 });
+    const all = markInboxRead(s, "all", 20);
+    expect(all.ok && Object.keys(all.value.inboxRead ?? {}).length).toBe(5);
+    expect(markInboxRead(s, "rien", 1).ok).toBe(false);
+  });
+});

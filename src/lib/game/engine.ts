@@ -215,6 +215,8 @@ export interface PlayerState {
   granaryCutUntil?: number;
   /** G5 : réserve « Tribut des seigneurs » (secondes de production au moment `at`) ; absente = pleine. */
   tribute?: { seconds: number; at: number };
+  /** U2 : dernière lecture de chaque catégorie de rapports (suivie d'un appareil à l'autre). */
+  inboxRead?: Record<string, number>;
   blindUntil?: number;
   spyLog?: { at: number; text: string }[];
   academy: number;
@@ -1217,6 +1219,19 @@ export function lootOf(stone: number, rate: number, revenge: boolean, opts: { lo
   const secured = opts.lord ? 0 : Math.min(rate * securedSeconds, stone * (1 - MIN_EXPOSED_SHARE));
   const loot = Math.floor(Math.max(0, stone - secured) * (revenge ? REVENGE_LOOT_RATE : RAID_LOOT_RATE) * (opts.factor ?? 1));
   return opts.cap !== undefined ? Math.min(loot, Math.floor(opts.cap)) : loot;
+}
+
+/** U2 : catégories de la boîte de réception. */
+export const INBOX_CATEGORIES = ["combats", "espionnage", "alliance", "chantier", "royaume"] as const;
+export type InboxCategory = (typeof INBOX_CATEGORIES)[number];
+
+/** U2 : marque lue une catégorie (ou toutes). */
+export function markInboxRead(state: PlayerState, category: string, now: number): Result<PlayerState> {
+  const all = category === "all";
+  if (!all && !(INBOX_CATEGORIES as readonly string[]).includes(category)) return { ok: false, error: "Catégorie inconnue." };
+  const read = { ...(state.inboxRead ?? {}) };
+  for (const c of all ? INBOX_CATEGORIES : [category]) read[c] = now;
+  return { ok: true, value: { ...state, inboxRead: read } };
 }
 
 /** G5 : secondes de production restant dans le « Tribut des seigneurs » (pleine si jamais entamée). */

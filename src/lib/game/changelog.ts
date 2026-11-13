@@ -467,4 +467,12 @@ export const CHANGELOG: ChangeEntry[] = [
       "⏱️ En composant une armée, tu vois la durée exacte de l'aller, l'heure d'arrivée, l'heure de retour et ce qui fixe la vitesse.",
     ],
   },
+  {
+    id: 55,
+    date: "13 novembre",
+    items: [
+      "✉️ L'onglet Messages devient une boîte de réception : Rapports et Discussion. Les rapports sont rangés en cinq catégories (Combats, Espionnage, Alliance, Chantier, Royaume) avec leurs compteurs de non lus, une ligne par rapport avec les chiffres qui comptent. Touche une ligne pour le détail, round par round pour un combat.",
+      "📜 La chronique disparaît : ce qui ne te concerne pas est dans la catégorie Royaume. Les rapports se gardent 7 jours.",
+    ],
+  },
 ];

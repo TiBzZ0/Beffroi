@@ -214,6 +214,8 @@ import {
   type WorldState,
   armySpeedBonus,
   baseRate,
+  INBOX_CATEGORIES,
+  markInboxRead,
   lordLootCapOf,
   spendTribute,
 } from "./engine";
@@ -265,7 +267,7 @@ interface PlayerRow {
   upgrades: string[];
   total_produced: number;
   total_contributed: number;
-  military?: { levels?: Record<string, number>; research?: { id: string; endsAt: number; cost?: number }[] | { id: string; endsAt: number } | null; academy?: number; sabotageImmuneUntil?: number; ruinImmuneUntil?: number; elanUntil?: number; tithe?: number; titheOwed?: number; titheSet?: boolean; share?: StageShare | null; donorTiers?: number; curfew?: Curfew | null; seen?: PlayerState["seen"] | null; veinAt?: number; frenzyUntil?: number; quest?: number | null; questFlags?: string[]; wounded?: Record<string, number>; healAt?: number; marches?: unknown; boostProdUntil?: number; boostSafeUntil?: number; merchantEvent?: number; daily?: unknown; dailyBoostUntil?: number; dailyBoost?: number; hallTithe?: number; spyLevel?: number; spies?: unknown; moles?: unknown; counterUntil?: number; rumor?: { mode?: string; until?: number } | null; granaryCutUntil?: number; blindUntil?: number; spyLog?: unknown; tribute?: { seconds?: number; at?: number } | null } | null;
+  military?: { levels?: Record<string, number>; research?: { id: string; endsAt: number; cost?: number }[] | { id: string; endsAt: number } | null; academy?: number; sabotageImmuneUntil?: number; ruinImmuneUntil?: number; elanUntil?: number; tithe?: number; titheOwed?: number; titheSet?: boolean; share?: StageShare | null; donorTiers?: number; curfew?: Curfew | null; seen?: PlayerState["seen"] | null; veinAt?: number; frenzyUntil?: number; quest?: number | null; questFlags?: string[]; wounded?: Record<string, number>; healAt?: number; marches?: unknown; boostProdUntil?: number; boostSafeUntil?: number; merchantEvent?: number; daily?: unknown; dailyBoostUntil?: number; dailyBoost?: number; hallTithe?: number; spyLevel?: number; spies?: unknown; moles?: unknown; counterUntil?: number; rumor?: { mode?: string; until?: number } | null; granaryCutUntil?: number; blindUntil?: number; spyLog?: unknown; tribute?: { seconds?: number; at?: number } | null; inboxRead?: Record<string, unknown> | null } | null;
   total_clicks: number;
   last_update: string;
   last_click_at: string;
@@ -396,6 +398,7 @@ function toEntity(row: PlayerRow): Entity {
       counterUntil: Number(row.military?.counterUntil ?? 0) || 0,
       rumor: row.military?.rumor && (row.military.rumor.mode === "fort" || row.military.rumor.mode === "faible") ? { mode: row.military.rumor.mode, until: Number(row.military.rumor.until) || 0 } : null,
       granaryCutUntil: Number(row.military?.granaryCutUntil ?? 0) || 0,
+      inboxRead: cleanInboxRead(row.military?.inboxRead),
       tribute: row.military?.tribute && Number.isFinite(Number(row.military.tribute.seconds)) && Number.isFinite(Number(row.military.tribute.at)) ? { seconds: Number(row.military.tribute.seconds), at: Number(row.military.tribute.at) } : undefined,
       blindUntil: Number(row.military?.blindUntil ?? 0) || 0,
       spyLog: Array.isArray(row.military?.spyLog) ? (row.military.spyLog as { at?: unknown; text?: unknown }[]).filter((x) => x && typeof x.text === "string").slice(-SPY_LOG_MAX).map((x) => ({ at: Number(x.at) || 0, text: String(x.text) })) : [],
@@ -454,7 +457,7 @@ function toJson(e: Entity, state: PlayerState, extra: Record<string, unknown> = 
     troops: state.troops,
     defenses: state.defenses,
     stationed: state.stationed,
-    military: { levels: state.levels, research: state.research, academy: state.academy, sabotageImmuneUntil: state.sabotageImmuneUntil, ruinImmuneUntil: state.ruinImmuneUntil, elanUntil: state.elanUntil, tithe: state.tithe, titheOwed: state.titheOwed, titheSet: state.titheSet, share: state.share, donorTiers: state.donorTiers, curfew: state.curfew, seen: state.seen ?? null, veinAt: state.veinAt, frenzyUntil: state.frenzyUntil, quest: state.quest, questFlags: state.questFlags, wounded: state.wounded, healAt: state.healAt, marches: state.marches ?? [], boostProdUntil: state.boostProdUntil, boostSafeUntil: state.boostSafeUntil, merchantEvent: state.merchantEvent, daily: state.daily ?? null, dailyBoostUntil: state.dailyBoostUntil, dailyBoost: state.dailyBoost, hallTithe: state.hallTithe, spyLevel: state.spyLevel ?? 0, spies: state.spies ?? [], moles: state.moles ?? [], counterUntil: state.counterUntil ?? 0, rumor: state.rumor ?? null, granaryCutUntil: state.granaryCutUntil ?? 0, blindUntil: state.blindUntil ?? 0, spyLog: (state.spyLog ?? []).slice(-SPY_LOG_MAX), tribute: state.tribute ?? null },
+    military: { levels: state.levels, research: state.research, academy: state.academy, sabotageImmuneUntil: state.sabotageImmuneUntil, ruinImmuneUntil: state.ruinImmuneUntil, elanUntil: state.elanUntil, tithe: state.tithe, titheOwed: state.titheOwed, titheSet: state.titheSet, share: state.share, donorTiers: state.donorTiers, curfew: state.curfew, seen: state.seen ?? null, veinAt: state.veinAt, frenzyUntil: state.frenzyUntil, quest: state.quest, questFlags: state.questFlags, wounded: state.wounded, healAt: state.healAt, marches: state.marches ?? [], boostProdUntil: state.boostProdUntil, boostSafeUntil: state.boostSafeUntil, merchantEvent: state.merchantEvent, daily: state.daily ?? null, dailyBoostUntil: state.dailyBoostUntil, dailyBoost: state.dailyBoost, hallTithe: state.hallTithe, spyLevel: state.spyLevel ?? 0, spies: state.spies ?? [], moles: state.moles ?? [], counterUntil: state.counterUntil ?? 0, rumor: state.rumor ?? null, granaryCutUntil: state.granaryCutUntil ?? 0, blindUntil: state.blindUntil ?? 0, spyLog: (state.spyLog ?? []).slice(-SPY_LOG_MAX), tribute: state.tribute ?? null, inboxRead: state.inboxRead ?? {} },
     click_strikes: state.clickStrikes,
     click_paused_until: iso(state.clickPausedUntil),
     ...extra,
@@ -469,6 +472,16 @@ function toSeason(row: { id: number; number: number; starts_at: string; ends_at:
 let currentSeasonStart = 0;
 
 /** H2 : niveaux d'héritage lus dans le profil. */
+function cleanInboxRead(raw: unknown): Record<string, number> | undefined {
+  if (!raw || typeof raw !== "object") return undefined;
+  const out: Record<string, number> = {};
+  for (const c of INBOX_CATEGORIES) {
+    const v = Number((raw as Record<string, unknown>)[c]);
+    if (Number.isFinite(v) && v > 0) out[c] = v;
+  }
+  return out;
+}
+
 function cleanLegacy(raw: unknown): PlayerState["legacy"] {
   const out: Record<string, number> = {};
   if (!raw || typeof raw !== "object") return out;
@@ -1051,24 +1064,28 @@ async function recentAttackers(admin: SupabaseClient, seasonId: number, lordId: 
   return new Set((data ?? []).map((r) => r.actor_id as string));
 }
 
+/** U2 : les rapports se gardent 7 jours. */
+const CHRONICLE_KEEP_MS = 7 * 24 * 3_600_000;
+
 async function loadChronicle(admin: SupabaseClient, seasonId: number, entities: Map<string, Entity>, viewer = ""): Promise<ChronicleEntry[]> {
   const { data } = await admin
     .from("chronicle")
     .select("id, kind, actor_id, target_id, details, created_at")
     .eq("season_id", seasonId)
+    .gt("created_at", iso(Date.now() - CHRONICLE_KEEP_MS))
     .order("created_at", { ascending: false })
-    .limit(40);
-  // R10 : les 20 derniers combats du joueur restent visibles, même tombés hors des 40 dernières lignes.
+    .limit(80);
+  // R10, U2 : tout ce qui concerne le joueur sur 7 jours (150 lignes au plus), même hors des 80 dernières lignes.
   const fights = viewer
     ? (
         await admin
           .from("chronicle")
           .select("id, kind, actor_id, target_id, details, created_at")
           .eq("season_id", seasonId)
-          .in("kind", ["raid", "fortress", "hall_siege", "event"])
+          .gt("created_at", iso(Date.now() - CHRONICLE_KEEP_MS))
           .or(`actor_id.eq.${viewer},target_id.eq.${viewer}`)
           .order("created_at", { ascending: false })
-          .limit(20)
+          .limit(150)
       ).data ?? []
     : [];
   const seenIds = new Set((data ?? []).map((r) => Number(r.id)));
@@ -2223,6 +2240,10 @@ function applySimpleAction(state: PlayerState, action: GameAction, now: number, 
     case "upgrade": {
       const r = buyUpgrade(state, String(action.upgrade));
       return r.ok ? { ok: true, value: { state: r.value, log: { action: "upgrade", details: { upgrade: action.upgrade } } } } : r;
+    }
+    case "inbox_read": {
+      const r = markInboxRead(state, String(action.category), now);
+      return r.ok ? { ok: true, value: { state: r.value } } : r;
     }
     case "contribute": {
       const r = contribute(state, Number(action.amount));

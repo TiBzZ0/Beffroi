@@ -12,6 +12,7 @@ import {
   LEVEL_BONUS,
   ELAN_MAX_MS,
   UNIT_SPEED,
+  SPY_INTEL_MS,
   TRIBUTE_MAX_SECONDS,
   TRIBUTE_RECHARGE,
   ELAN_PER_CLICK_MS,
@@ -92,9 +93,11 @@ import {
   rumorCost,
   type SabotageAim,
   type PlayerState,
+  INBOX_CATEGORIES,
+  type InboxCategory,
 } from "@/lib/game/engine";
 import { formatNumber, formatRate } from "@/lib/game/format";
-import { armySize, battle, cleanArmy, estimateChance, seededRng, type Army } from "@/lib/game/battle";
+import { armySize, armyValue, battle, cleanArmy, estimateChance, seededRng, type Army } from "@/lib/game/battle";
 import { worldFrom, type AwaySummary, type LotView, type AllianceSummary, type ChronicleEntry, type EventView, type GameSnapshot, type RivalView } from "@/lib/game/types";
 import { useChat, useGame, useLeaderboard, usePush, useTick } from "./use-game";
 import { MapBoard, type BoardMarch, type BoardPlace } from "./kingdom-map";
@@ -174,7 +177,7 @@ export function Game({ userId }: { userId: string }) {
             <TabButton id="carte" tab={tab} setTab={selectTab} label="Carte" />
             <TabButton id="raids" tab={tab} setTab={selectTab} label={eventLive ? "Raids ⚡" : "Raids"} dot={eventLive || snap.rivals.some((r) => r.revenge && !r.blocker)} />
             <TabButton id="alliance" tab={tab} setTab={selectTab} label="Alliance" dot={snap.invites.length > 0} />
-            <TabButton id="messages" tab={tab} setTab={selectTab} label="Messages" />
+            <TabButton id="messages" tab={tab} setTab={selectTab} label="Messages" dot={tab !== "messages" && unreadCount(snap, live, now) > 0} />
             <TabButton id="classement" tab={tab} setTab={selectTab} label="Rangs" />
             <TabButton id="heritage" tab={tab} setTab={selectTab} label="Héritage" />
           </div>
@@ -186,7 +189,7 @@ export function Game({ userId }: { userId: string }) {
             {tab === "carte" && <KingdomMap snap={snap} live={live} now={now} run={game.run} />}
             {tab === "raids" && <Raids snap={snap} live={live} now={now} run={game.run} />}
             {tab === "alliance" && <AllianceTab snap={snap} live={live} now={now} run={game.run} />}
-            {tab === "messages" && <Chat userId={userId} hasAlliance={!!snap.alliance} now={now} />}
+            {tab === "messages" && <Inbox snap={snap} live={live} now={now} run={game.run} userId={userId} />}
             {tab === "classement" && <Ranking boards={leaderboard} userId={userId} />}
             {tab === "heritage" && <Heritage snap={snap} run={game.run} />}
           </div>
@@ -1401,7 +1404,7 @@ function Status({ state, now }: { state: PlayerState; now: number }) {
   );
 }
 
-type RaidView = "seigneurs" | "joueurs" | "chronique";
+type RaidView = "seigneurs" | "joueurs";
 type ArmyView = "garnison" | "forge";
 
 /** B8 : onglet Armée, avec la garnison et la Forge, sorties de l'onglet Raids. */
@@ -1462,7 +1465,6 @@ function Raids({ snap, live, now, run }: { snap: GameSnapshot; live: PlayerState
   const views: [RaidView, string][] = [
     ["seigneurs", `Seigneurs (${snap.rivals.filter((r) => r.isLord).length})`],
     ["joueurs", `Joueurs (${players.length})`],
-    ["chronique", "Chronique"],
   ];
 
   return (
@@ -1515,7 +1517,6 @@ function Raids({ snap, live, now, run }: { snap: GameSnapshot; live: PlayerState
           {players.map(row)}
         </div>
       )}
-      {view === "chronique" && <Chronicle entries={snap.chronicle ?? []} me={snap.userId} now={now} rivals={snap.rivals} alliances={snap.alliances} myAlliance={snap.alliance?.id ?? null} />}
     </>
   );
 }
@@ -2045,8 +2046,6 @@ function Movements({ snap, live, now, run }: { snap: GameSnapshot; live: PlayerS
 function Spies({ snap, live, now, run }: { snap: GameSnapshot; live: PlayerState; now: number; run: ReturnType<typeof useGame>["run"] }) {
   const [busy, setBusy] = useState(false);
   const moles = (live.moles ?? []).filter((m) => m.until > now);
-  const log = [...(live.spyLog ?? [])].reverse().slice(0, 8);
-  const caught = (snap.chronicle ?? []).filter((e) => e.kind === "spy" && e.targetId === snap.userId).slice(0, 5);
   const nameOf = (key: string) => (key === "fortress" ? snap.fortress.name : key.startsWith("hall:") ? "une halle" : (snap.rivals.find((r) => r.id === key)?.name ?? "?"));
   const base = baseRate(live, worldFrom(snap.worksite), now);
   const counter = (live.counterUntil ?? 0) > now;
@@ -2069,15 +2068,6 @@ function Spies({ snap, live, now, run }: { snap: GameSnapshot; live: PlayerState
             </li>
           ))}
         </ul>
-      )}
-      {log.length > 0 && (
-        <div className="note">
-          {log.map((l, i) => (
-            <div key={`${l.at}-${i}`}>
-              <span className="num">{new Date(l.at).toLocaleTimeString("fr-FR", { hour: "2-digit", minute: "2-digit" })}</span> {l.text}
-            </div>
-          ))}
-        </div>
       )}
       <div className="row-actions">
         <button
@@ -2106,11 +2096,6 @@ function Spies({ snap, live, now, run }: { snap: GameSnapshot; live: PlayerState
         <p className="note num">
           {(live.granaryCutUntil ?? 0) > now ? `🧨 Ton grenier est saboté : moitié du stock à l'abri encore ${duration((live.granaryCutUntil ?? 0) - now)}. ` : ""}
           {(live.blindUntil ?? 0) > now ? `🧨 Ton guet est aveugle encore ${duration((live.blindUntil ?? 0) - now)}.` : ""}
-        </p>
-      )}
-      {caught.length > 0 && (
-        <p className="note">
-          Surpris chez toi : {caught.map((e) => `${(e.details as { named?: boolean }).named === false ? "un espion inconnu" : e.actorName}${(e.details as { mole?: boolean }).mole ? " (taupe)" : ""}`).join(", ")}.
         </p>
       )}
     </div>
@@ -3078,142 +3063,367 @@ function concernsMe(e: ChronicleEntry, me: string, myAlliance: number | null): b
   return d.alliance === myAlliance || d.target === myAlliance || d.a === myAlliance || d.b === myAlliance || d.winner === myAlliance;
 }
 
-function Chronicle({ entries: all, me, now, rivals, alliances = [], myAlliance = null }: { entries: ChronicleEntry[]; me: string; now: number; rivals: RivalView[]; alliances?: AllianceSummary[]; myAlliance?: number | null }) {
-  const [mineOnly, setMineOnly] = useState(false);
+/** Récit d'une ligne de chronique, en une phrase (détail d'un rapport). */
+function chronicleText(e: ChronicleEntry, me: string, rivals: RivalView[], alliances: AllianceSummary[]): string {
   const allianceName = (id: number | null | undefined) => alliances.find((a) => a.id === id)?.name ?? "une alliance disparue";
   const nameOf = (id: string) => (id === me ? "toi" : (rivals.find((r) => r.id === id)?.name ?? "un allié"));
-  const entries = mineOnly ? all.filter((e) => concernsMe(e, me, myAlliance)) : all;
-  const toggle = (
-    <div className="subtabs" role="group" aria-label="Filtre de la chronique">
-      <button className="btn" aria-pressed={!mineOnly} onClick={() => setMineOnly(false)}>
-        Tout le royaume
-      </button>
-      <button className="btn" aria-pressed={mineOnly} onClick={() => setMineOnly(true)}>
-        Ce qui me concerne
-      </button>
-    </div>
-  );
-  if (entries.length === 0)
-    return (
-      <>
-        {toggle}
-        <p className="empty">{mineOnly ? "Rien qui te concerne pour l'instant." : "Le royaume est calme. Pour l'instant…"}</p>
-      </>
-    );
-  const ago = (t: number) => agoText(t, now);
   const who = (id: string | null, name: string, cap = false) => (id === me ? (cap ? "Tu" : "toi") : name);
+  let text: string;
+  if (e.kind === "war") {
+    const d = e.details;
+    if (d.phase === "start") text = `⚔️ ${allianceName(d.a)} déclare la guerre à ${allianceName(d.b)} pour 24 h !`;
+    else
+      text =
+        d.winner != null
+          ? `🏆 ${allianceName(d.winner)} remporte la guerre ${allianceName(d.a)} – ${allianceName(d.b)} (${formatNumber(d.scoreA ?? 0)} contre ${formatNumber(d.scoreB ?? 0)}) et partage ${formatNumber(d.bounty ?? 0)} pierres de prime.`
+          : `🤝 La guerre ${allianceName(d.a)} – ${allianceName(d.b)} se termine sur une égalité.`;
+  } else if (e.kind === "event") {
+    const d = e.details;
+    const shares = Object.entries(d.shares ?? {})
+      .filter(([, v]) => v > 0)
+      .sort((a, b) => b[1] - a[1])
+      .map(([id]) => nameOf(id))
+      .slice(0, 4)
+      .join(", ");
+    const you = e.actorId === me;
+    if (d.phase === "attack") text = eventAttackText(e, me);
+    else if (d.phase === "camp")
+      text = d.success
+        ? `🏕️ ${who(e.actorId, e.actorName, true)} ${you ? "as vidé" : "a vidé"} un camp de bandits : ${formatNumber(d.stolen ?? 0)} pierres.`
+        : `🏕️ Les bandits ont repoussé ${you ? "ton armée" : `l'armée de ${e.actorName}`}.`;
+    else if (d.phase === "treasure")
+      text = d.success
+        ? `💰 ${who(e.actorId, e.actorName, true)} ${you ? "as chassé" : "a chassé"} ${e.targetId === me ? "ton armée" : `l'armée de ${e.targetName}`} du trésor.`
+        : `💰 ${e.targetId === me ? "Ton armée a" : `L'armée de ${e.targetName} a`} tenu le trésor face à ${you ? "toi" : e.actorName}.`;
+    else if (d.phase === "group")
+      text = d.event === "convoi"
+        ? d.success
+          ? `👑 L'escorte du convoi a repoussé l'embuscade (${(d.members ?? []).map(nameOf).slice(0, 4).join(", ")}).`
+          : `👑 L'embuscade a eu raison de l'escorte du convoi.`
+        : d.success
+          ? `🏰 Les défenseurs du beffroi ont tenu le siège (${(d.members ?? []).map(nameOf).slice(0, 4).join(", ")}).`
+          : "🏰 Les défenseurs du beffroi ont cédé au siège.";
+    else if (d.event === "caravane")
+      text = (d.stolen ?? 0) > 0 ? `🐪 La caravane marchande est repartie, allégée de ${formatNumber(d.stolen ?? 0)} pierres (${shares}).` : "🐪 La caravane marchande est repartie intacte.";
+    else text = d.success ? `🗿 Le Colosse est tombé ! ${formatNumber(d.bounty ?? 0)} pierres versées à ceux qui l'ont touché (${shares}).` : "🗿 Le Colosse s'en va invaincu.";
+  } else if (e.kind === "fortress") {
+    text = e.details.success
+      ? `🏰 ${who(e.actorId, e.actorName, true)} ${e.actorId === me ? "as pris" : "a pris"} la forteresse pour ${allianceName(e.details.alliance)} !`
+      : `🏰 ${who(e.actorId, e.actorName, true)} ${e.actorId === me ? "t'es brisé" : "s'est brisé"} sur les murs de la forteresse.`;
+  } else if (e.kind === "sabotage") {
+    const d = e.details as { success?: boolean; aim?: string; named?: boolean; spotted?: boolean };
+    const part = d.aim === "grenier" ? "grenier" : d.aim === "guet" ? "guet" : "académie";
+    const target = e.targetId === me ? `ton ${part === "académie" ? "académie" : part}` : `${part === "académie" ? "l'académie" : `le ${part}`} de ${e.targetName}`;
+    const hidden = e.actorId !== me && d.named === false;
+    text = d.success
+      ? e.actorId === me
+        ? `🧨 Tu as saboté ${target}.`
+        : `🧨 ${hidden || d.named === undefined ? "Un saboteur" : `Un saboteur de ${e.actorName}`} a frappé ${target}.`
+      : hidden
+        ? `🧨 Un saboteur inconnu a été pris en train de saboter ${target}.`
+        : `🧨 ${who(e.actorId, e.actorName, true)} ${e.actorId === me ? "as été pris" : "a été pris"} en train de saboter ${target}.`;
+  } else if (e.kind === "spy") {
+    const d = e.details as { fortress?: boolean; hall?: string };
+    const where = d.fortress ? "la forteresse" : d.hall ? d.hall : e.targetId === me ? "ton domaine" : e.targetName || "un seigneur";
+    const mole = (e.details as { mole?: boolean }).mole;
+    text = e.actorId === me
+      ? `${mole ? "🐀 Ta taupe a été démasquée" : "🕵️ Ton espion a été surpris"} chez ${where}.`
+      : `${mole ? "🐀" : "🕵️"} ${e.actorId ? who(e.actorId, e.actorName, true) : mole ? "Une taupe inconnue" : "Un espion inconnu"} ${mole ? "a été démasqué avec sa taupe chez" : "a été surpris à espionner"} ${where}.`;
+  } else if (e.kind === "lot") {
+    const d = e.details as { stage?: number; name?: string; master?: boolean };
+    const stageName = stageDef(d.stage ?? 0).name;
+    text = d.master
+      ? `👑 ${d.name} finit son lot de « ${stageName} » le premier et devient maître d'œuvre !`
+      : `🏗️ ${d.name} finit son lot de « ${stageName} ».`;
+  } else if (e.kind === "hall_siege") {
+    const d = e.details as { success?: boolean; target?: number; wing?: string | null };
+    const wing = WINGS.find((w) => w.id === d.wing)?.name;
+    text = d.success
+      ? `🏛️ ${who(e.actorId, e.actorName, true)} ${e.actorId === me ? "as pris" : "a pris"} d'assaut la halle de ${allianceName(d.target)}${wing ? ` : aile « ${wing} » hors service 24 h` : ""}.`
+      : `🏛️ ${who(e.actorId, e.actorName, true)} ${e.actorId === me ? "t'es brisé" : "s'est brisé"} sur les murs de la halle de ${allianceName(d.target)}.`;
+  } else if (e.kind === "hall") {
+    text = `🏛️ ${who(e.actorId, e.actorName, true)} ${e.actorId === me ? "as fondé" : "a fondé"} la halle de ${allianceName(e.details.alliance)}.`;
+  } else if (e.kind === "gift") {
+    text = `${e.actorName} a offert ${formatNumber(e.details.amount ?? 0)} pierres au chantier.`;
+  } else {
+    const ruined = Object.values(e.details.destroyed ?? {}).reduce((a, b) => a + b, 0);
+    const actor = who(e.actorId, e.actorName, true);
+    const targetName = e.targetId === me ? "toi" : e.targetName;
+    if (e.details.success === false) {
+      const repel = e.targetId === me ? "Tu as repoussé" : `${e.targetName} a repoussé`;
+      text = `${repel} le raid de ${e.actorId === me ? "toi" : e.actorName}${e.details.revenge ? " (revanche)" : ""}.`;
+      if (e.details.attackerLost) text += ` Pertes de l'assaillant : ${armyIcons(e.details.attackerLost, "aucune")}.`;
+    } else {
+      const verb = e.actorId === me ? "as pillé" : "a pillé";
+      const target = e.targetId === me ? "tes greniers" : targetName;
+      text = `${actor} ${verb} ${target}${e.details.revenge ? " (revanche)" : ""} : ${formatNumber(e.details.stolen ?? 0)} pierres${ruined ? `, ${ruined} bâtiment${ruined > 1 ? "s" : ""} en ruine` : ""}.`;
+      const shares = Object.entries(e.details.allyShares ?? {});
+      if (shares.length) text += ` Butin partagé : ${shares.map(([id, n]) => `${formatNumber(n)} pour ${nameOf(id)}`).join(", ")}.`;
+      if (e.details.defenderLost) text += ` Pertes du défenseur : ${armyIcons(e.details.defenderLost, "aucune")}.`;
+    }
+  }
+  return text;
+}
+
+/** U2 : date à partir de laquelle les rapports comptent comme non lus (mise en ligne de la boîte). */
+const INBOX_EPOCH = Date.parse("2026-11-13T15:00:00Z");
+const INBOX_KEEP_MS = 7 * 24 * 3_600_000;
+const INBOX_MAX = 100;
+const INBOX_LABELS: Record<InboxCategory, string> = { combats: "⚔️ Combats", espionnage: "🕵️ Espionnage", alliance: "🤝 Alliance", chantier: "⛪ Chantier", royaume: "👑 Royaume" };
+
+interface Chip {
+  t: string;
+  tone?: "gain" | "loss";
+}
+interface Report {
+  key: string;
+  cat: InboxCategory;
+  icon: string;
+  title: string;
+  chips: Chip[];
+  at: number;
+  entry?: ChronicleEntry;
+  text?: string;
+  rival?: RivalView;
+  /** Cible à espionner ou à regarder sur la carte. */
+  target?: string;
+}
+
+const short = (n: number) => formatNumber(Math.floor(n));
+const worth = (a?: Record<string, number>) => (a ? armyValue(cleanArmy(a as Army)) : 0);
+
+/** U2 : un rapport en une ligne : icône, titre court, pastilles chiffrées. */
+function reportOf(e: ChronicleEntry, me: string, myAlliance: number | null, rivals: RivalView[], alliances: AllianceSummary[]): Report {
+  const d = e.details;
+  const mine = concernsMe(e, me, myAlliance);
+  const personal = e.actorId === me || e.targetId === me || !!d.members?.includes(me) || !!(d.shares && me in d.shares) || !!(d.allyShares && me in d.allyShares);
+  const allyOf = (id: string | null) => !!id && rivals.some((r) => r.id === id && r.allied);
+  const aName = (id: number | null | undefined) => alliances.find((a) => a.id === id)?.name ?? "?";
+  const chips: Chip[] = [];
+  let cat: InboxCategory = "royaume";
+  let icon = "📜";
+  let title = "";
+  const attacker = e.actorId === me;
+  const lossChip = (lost?: Record<string, number>) => {
+    const v = worth(lost);
+    if (v > 0) chips.push({ t: `−${short(v)} pertes`, tone: "loss" });
+  };
+  if (e.kind === "raid") {
+    icon = "⚔️";
+    cat = personal ? "combats" : allyOf(e.actorId) || allyOf(e.targetId) ? "alliance" : "royaume";
+    const won = d.success !== false;
+    if (attacker) title = won ? `Victoire sur ${e.targetName}` : `Défaite contre ${e.targetName}`;
+    else if (e.targetId === me) title = won ? `Pillé par ${e.actorName}` : `Raid de ${e.actorName} repoussé`;
+    else title = won ? `${e.actorName} pille ${e.targetName}` : `${e.targetName} repousse ${e.actorName}`;
+    if (won && (d.stolen ?? 0) > 0) chips.push({ t: `${attacker ? "+" : e.targetId === me ? "−" : ""}${short(d.stolen ?? 0)} 🪨`, tone: attacker ? "gain" : e.targetId === me ? "loss" : undefined });
+    if ((d.ransom ?? 0) > 0) chips.push({ t: `rançon ${short(d.ransom ?? 0)}`, tone: attacker ? "gain" : undefined });
+    if (personal) lossChip(attacker ? d.attackerLost : d.defenderLost);
+    const ruined = Object.values(d.destroyed ?? {}).reduce((a, b) => a + b, 0);
+    if (ruined > 0) chips.push({ t: `🏚️ ${ruined}`, tone: e.targetId === me ? "loss" : undefined });
+    if (d.revenge) chips.push({ t: "revanche" });
+  } else if (e.kind === "fortress" || e.kind === "hall_siege") {
+    icon = e.kind === "fortress" ? "🏰" : "🏛️";
+    const ours = myAlliance !== null && (d.alliance === myAlliance || d.target === myAlliance);
+    cat = personal ? "combats" : ours ? "alliance" : "royaume";
+    const place = e.kind === "fortress" ? "la forteresse" : `halle de ${aName(d.target)}`;
+    title = d.success ? `${attacker ? "Tu prends" : `${e.actorName} prend`} ${place}` : `Assaut brisé sur ${place}`;
+    if (personal) lossChip(attacker ? d.attackerLost : d.defenderLost);
+  } else if (e.kind === "event") {
+    const share = d.shares?.[me] ?? 0;
+    if (d.phase === "attack" || d.phase === "camp" || d.phase === "treasure" || d.phase === "group") {
+      icon = d.phase === "camp" ? "🏕️" : d.phase === "treasure" ? "💰" : d.event === "convoi" ? "👑" : d.event === "siege" ? "🏰" : d.event === "colosse" ? "🗿" : "🐪";
+      cat = personal ? "combats" : "royaume";
+      const what = d.phase === "camp" ? "camp de bandits" : d.phase === "treasure" ? "trésor" : d.event === "convoi" ? "convoi" : d.event === "siege" ? "beffroi assiégé" : d.event === "colosse" ? "Colosse" : "caravane";
+      title = `${d.success ? "Succès" : "Échec"} : ${what}`;
+      if ((d.stolen ?? 0) > 0) chips.push({ t: `+${short(d.stolen ?? 0)} 🪨`, tone: attacker ? "gain" : undefined });
+      if ((d.dealt ?? 0) > 0) chips.push({ t: `${short(d.dealt ?? 0)} dégâts` });
+      if (personal) lossChip(attacker ? d.attackerLost : d.defenderLost);
+    } else {
+      icon = d.event === "colosse" ? "🗿" : "🐪";
+      cat = share > 0 ? "chantier" : "royaume";
+      title = d.event === "colosse" ? (d.success ? "Le Colosse est tombé" : "Le Colosse repart") : "La caravane repart";
+      if (share > 0) chips.push({ t: `ta part ${short(share)}`, tone: "gain" });
+      if ((d.bounty ?? 0) > 0) chips.push({ t: `prime ${short(d.bounty ?? 0)}` });
+      if ((d.stolen ?? 0) > 0) chips.push({ t: `${short(d.stolen ?? 0)} pris` });
+    }
+  } else if (e.kind === "spy" || e.kind === "sabotage") {
+    const mole = (d as { mole?: boolean }).mole;
+    icon = e.kind === "sabotage" ? "🧨" : mole ? "🐀" : "🕵️";
+    cat = personal ? "espionnage" : "royaume";
+    if (e.kind === "sabotage") {
+      const aim = (d as { aim?: string }).aim;
+      const part = aim === "grenier" ? "grenier" : aim === "guet" ? "guet" : "académie";
+      title = attacker ? `Sabotage : ${part} de ${e.targetName}` : e.targetId === me ? `Sabotage de ton ${part}` : `Sabotage chez ${e.targetName}`;
+      chips.push({ t: d.success ? "réussi" : "pris", tone: (d.success ? attacker : !attacker) ? "gain" : "loss" });
+    } else {
+      title = attacker ? (mole ? "Ta taupe démasquée" : "Ton espion surpris") : e.targetId === me ? (mole ? "Taupe démasquée chez toi" : "Espion surpris chez toi") : `Espion surpris chez ${e.targetName || "un seigneur"}`;
+      if (e.targetId === me && e.actorId) chips.push({ t: e.actorName });
+    }
+  } else if (e.kind === "war") {
+    icon = d.phase === "start" ? "⚔️" : "🏆";
+    const ours = myAlliance !== null && (d.a === myAlliance || d.b === myAlliance);
+    cat = ours ? "alliance" : "royaume";
+    title = d.phase === "start" ? `Guerre : ${aName(d.a)} – ${aName(d.b)}` : d.winner != null ? `${aName(d.winner)} gagne la guerre` : "Guerre sans vainqueur";
+    if (d.phase !== "start") chips.push({ t: `${short(d.scoreA ?? 0)} – ${short(d.scoreB ?? 0)}` });
+    if ((d.bounty ?? 0) > 0) chips.push({ t: `prime ${short(d.bounty ?? 0)}`, tone: ours && d.winner === myAlliance ? "gain" : undefined });
+  } else if (e.kind === "lot") {
+    const l = d as { name?: string; master?: boolean };
+    icon = l.master ? "👑" : "🏗️";
+    cat = attacker ? "chantier" : allyOf(e.actorId) ? "alliance" : "royaume";
+    title = l.master ? `${attacker ? "Tu deviens" : `${l.name} devient`} maître d'œuvre` : `${attacker ? "Ton" : `${l.name} :`} lot fini`;
+  } else if (e.kind === "hall") {
+    icon = "🏛️";
+    cat = myAlliance !== null && d.alliance === myAlliance ? "alliance" : "royaume";
+    title = `Halle fondée : ${aName(d.alliance)}`;
+  } else {
+    icon = "🎁";
+    cat = attacker ? "chantier" : "royaume";
+    title = `Don de ${attacker ? "toi" : e.actorName}`;
+    chips.push({ t: `${short(d.amount ?? 0)} 🪨`, tone: attacker ? "gain" : undefined });
+  }
+  void mine;
+  const other = attacker ? e.targetId : e.actorId;
+  const rival = other ? rivals.find((r) => r.id === other) : undefined;
+  return { key: `c${e.id}`, cat, icon, title, chips, at: e.at, entry: e, rival, target: rival?.id };
+}
+
+function readLocal(): Set<string> {
+  try {
+    return new Set(JSON.parse(localStorage.getItem("beffroi.readReports") ?? "[]") as string[]);
+  } catch {
+    return new Set();
+  }
+}
+
+/** U2 : tous les rapports du joueur, rangés par catégorie et du plus récent au plus ancien. */
+function buildReports(snap: GameSnapshot, live: PlayerState, now: number): Report[] {
+  const me = snap.userId;
+  const myAlliance = snap.alliance?.id ?? null;
+  const out: Report[] = (snap.chronicle ?? []).map((e) => reportOf(e, me, myAlliance, snap.rivals, snap.alliances));
+  for (const [i, l] of (live.spyLog ?? []).entries()) out.push({ key: `log${l.at}-${i}`, cat: "espionnage", icon: "🐀", title: l.text.length > 48 ? `${l.text.slice(0, 46)}…` : l.text, chips: [], at: l.at, text: l.text });
+  for (const r of snap.rivals) {
+    if (!(r.intelUntil > now)) continue;
+    out.push({ key: `intel-${r.id}-${r.intelUntil}`, cat: "espionnage", icon: "📜", title: `Rapport sur ${r.name}`, chips: [{ t: `valable ${countdown(r.intelUntil - now)}` }], at: r.intelUntil - SPY_INTEL_MS, rival: r, target: r.id });
+  }
+  const recent = out.filter((r) => r.at > now - INBOX_KEEP_MS).sort((a, b) => b.at - a.at);
+  return INBOX_CATEGORIES.flatMap((c) => recent.filter((r) => r.cat === c).slice(0, INBOX_MAX));
+}
+
+function isUnread(r: Report, live: PlayerState, local: Set<string>): boolean {
+  return r.at > Math.max(INBOX_EPOCH, live.inboxRead?.[r.cat] ?? 0) && !local.has(r.key);
+}
+
+/** U2 : nombre de rapports non lus, Royaume excepté, pour la pastille de l'onglet. */
+function unreadCount(snap: GameSnapshot, live: PlayerState, now: number): number {
+  const local = readLocal();
+  return buildReports(snap, live, now).filter((r) => r.cat !== "royaume" && isUnread(r, live, local)).length;
+}
+
+/** U2 : l'onglet Messages, boîte de réception (Rapports) et Discussion. */
+function Inbox({ snap, live, now, run, userId }: { snap: GameSnapshot; live: PlayerState; now: number; run: ReturnType<typeof useGame>["run"]; userId: string }) {
+  const [part, setPart] = useState<"rapports" | "discussion">("rapports");
+  const [cat, setCat] = useState<InboxCategory>("combats");
+  const [open, setOpen] = useState<string | null>(null);
+  const [local, setLocal] = useState(readLocal);
+  const reports = buildReports(snap, live, now);
+  const unread = (c: InboxCategory) => reports.filter((r) => r.cat === c && isUnread(r, live, local)).length;
+  const list = reports.filter((r) => r.cat === cat);
+  const markRead = (key: string) => {
+    if (local.has(key)) return;
+    const next = new Set(local).add(key);
+    setLocal(next);
+    try {
+      localStorage.setItem("beffroi.readReports", JSON.stringify([...next].slice(-400)));
+    } catch {}
+  };
+  const toggle = (r: Report) => {
+    markRead(r.key);
+    setOpen(open === r.key ? null : r.key);
+  };
   return (
     <>
-    {toggle}
-    <ul className="chronicle">
-      {entries.map((e) => {
-        let text: string;
-        if (e.kind === "war") {
-          const d = e.details;
-          if (d.phase === "start") text = `⚔️ ${allianceName(d.a)} déclare la guerre à ${allianceName(d.b)} pour 24 h !`;
-          else
-            text =
-              d.winner != null
-                ? `🏆 ${allianceName(d.winner)} remporte la guerre ${allianceName(d.a)} – ${allianceName(d.b)} (${formatNumber(d.scoreA ?? 0)} contre ${formatNumber(d.scoreB ?? 0)}) et partage ${formatNumber(d.bounty ?? 0)} pierres de prime.`
-                : `🤝 La guerre ${allianceName(d.a)} – ${allianceName(d.b)} se termine sur une égalité.`;
-        } else if (e.kind === "event") {
-          const d = e.details;
-          const shares = Object.entries(d.shares ?? {})
-            .filter(([, v]) => v > 0)
-            .sort((a, b) => b[1] - a[1])
-            .map(([id]) => nameOf(id))
-            .slice(0, 4)
-            .join(", ");
-          const you = e.actorId === me;
-          if (d.phase === "attack") text = eventAttackText(e, me);
-          else if (d.phase === "camp")
-            text = d.success
-              ? `🏕️ ${who(e.actorId, e.actorName, true)} ${you ? "as vidé" : "a vidé"} un camp de bandits : ${formatNumber(d.stolen ?? 0)} pierres.`
-              : `🏕️ Les bandits ont repoussé ${you ? "ton armée" : `l'armée de ${e.actorName}`}.`;
-          else if (d.phase === "treasure")
-            text = d.success
-              ? `💰 ${who(e.actorId, e.actorName, true)} ${you ? "as chassé" : "a chassé"} ${e.targetId === me ? "ton armée" : `l'armée de ${e.targetName}`} du trésor.`
-              : `💰 ${e.targetId === me ? "Ton armée a" : `L'armée de ${e.targetName} a`} tenu le trésor face à ${you ? "toi" : e.actorName}.`;
-          else if (d.phase === "group")
-            text = d.event === "convoi"
-              ? d.success
-                ? `👑 L'escorte du convoi a repoussé l'embuscade (${(d.members ?? []).map(nameOf).slice(0, 4).join(", ")}).`
-                : `👑 L'embuscade a eu raison de l'escorte du convoi.`
-              : d.success
-                ? `🏰 Les défenseurs du beffroi ont tenu le siège (${(d.members ?? []).map(nameOf).slice(0, 4).join(", ")}).`
-                : "🏰 Les défenseurs du beffroi ont cédé au siège.";
-          else if (d.event === "caravane")
-            text = (d.stolen ?? 0) > 0 ? `🐪 La caravane marchande est repartie, allégée de ${formatNumber(d.stolen ?? 0)} pierres (${shares}).` : "🐪 La caravane marchande est repartie intacte.";
-          else text = d.success ? `🗿 Le Colosse est tombé ! ${formatNumber(d.bounty ?? 0)} pierres versées à ceux qui l'ont touché (${shares}).` : "🗿 Le Colosse s'en va invaincu.";
-        } else if (e.kind === "fortress") {
-          text = e.details.success
-            ? `🏰 ${who(e.actorId, e.actorName, true)} ${e.actorId === me ? "as pris" : "a pris"} la forteresse pour ${allianceName(e.details.alliance)} !`
-            : `🏰 ${who(e.actorId, e.actorName, true)} ${e.actorId === me ? "t'es brisé" : "s'est brisé"} sur les murs de la forteresse.`;
-        } else if (e.kind === "sabotage") {
-          const d = e.details as { success?: boolean; aim?: string; named?: boolean; spotted?: boolean };
-          const part = d.aim === "grenier" ? "grenier" : d.aim === "guet" ? "guet" : "académie";
-          const target = e.targetId === me ? `ton ${part === "académie" ? "académie" : part}` : `${part === "académie" ? "l'académie" : `le ${part}`} de ${e.targetName}`;
-          const hidden = e.actorId !== me && d.named === false;
-          text = d.success
-            ? e.actorId === me
-              ? `🧨 Tu as saboté ${target}.`
-              : `🧨 ${hidden || d.named === undefined ? "Un saboteur" : `Un saboteur de ${e.actorName}`} a frappé ${target}.`
-            : hidden
-              ? `🧨 Un saboteur inconnu a été pris en train de saboter ${target}.`
-              : `🧨 ${who(e.actorId, e.actorName, true)} ${e.actorId === me ? "as été pris" : "a été pris"} en train de saboter ${target}.`;
-        } else if (e.kind === "spy") {
-          const d = e.details as { fortress?: boolean; hall?: string };
-          const where = d.fortress ? "la forteresse" : d.hall ? d.hall : e.targetId === me ? "ton domaine" : e.targetName || "un seigneur";
-          const mole = (e.details as { mole?: boolean }).mole;
-          text = e.actorId === me
-            ? `${mole ? "🐀 Ta taupe a été démasquée" : "🕵️ Ton espion a été surpris"} chez ${where}.`
-            : `${mole ? "🐀" : "🕵️"} ${e.actorId ? who(e.actorId, e.actorName, true) : mole ? "Une taupe inconnue" : "Un espion inconnu"} ${mole ? "a été démasqué avec sa taupe chez" : "a été surpris à espionner"} ${where}.`;
-        } else if (e.kind === "lot") {
-          const d = e.details as { stage?: number; name?: string; master?: boolean };
-          const stageName = stageDef(d.stage ?? 0).name;
-          text = d.master
-            ? `👑 ${d.name} finit son lot de « ${stageName} » le premier et devient maître d'œuvre !`
-            : `🏗️ ${d.name} finit son lot de « ${stageName} ».`;
-        } else if (e.kind === "hall_siege") {
-          const d = e.details as { success?: boolean; target?: number; wing?: string | null };
-          const wing = WINGS.find((w) => w.id === d.wing)?.name;
-          text = d.success
-            ? `🏛️ ${who(e.actorId, e.actorName, true)} ${e.actorId === me ? "as pris" : "a pris"} d'assaut la halle de ${allianceName(d.target)}${wing ? ` : aile « ${wing} » hors service 24 h` : ""}.`
-            : `🏛️ ${who(e.actorId, e.actorName, true)} ${e.actorId === me ? "t'es brisé" : "s'est brisé"} sur les murs de la halle de ${allianceName(d.target)}.`;
-        } else if (e.kind === "hall") {
-          text = `🏛️ ${who(e.actorId, e.actorName, true)} ${e.actorId === me ? "as fondé" : "a fondé"} la halle de ${allianceName(e.details.alliance)}.`;
-        } else if (e.kind === "gift") {
-          text = `${e.actorName} a offert ${formatNumber(e.details.amount ?? 0)} pierres au chantier.`;
-        } else {
-          const ruined = Object.values(e.details.destroyed ?? {}).reduce((a, b) => a + b, 0);
-          const actor = who(e.actorId, e.actorName, true);
-          const targetName = e.targetId === me ? "toi" : e.targetName;
-          if (e.details.success === false) {
-            const repel = e.targetId === me ? "Tu as repoussé" : `${e.targetName} a repoussé`;
-            text = `${repel} le raid de ${e.actorId === me ? "toi" : e.actorName}${e.details.revenge ? " (revanche)" : ""}.`;
-            if (e.details.attackerLost) text += ` Pertes de l'assaillant : ${armyIcons(e.details.attackerLost, "aucune")}.`;
-          } else {
-            const verb = e.actorId === me ? "as pillé" : "a pillé";
-            const target = e.targetId === me ? "tes greniers" : targetName;
-            text = `${actor} ${verb} ${target}${e.details.revenge ? " (revanche)" : ""} : ${formatNumber(e.details.stolen ?? 0)} pierres${ruined ? `, ${ruined} bâtiment${ruined > 1 ? "s" : ""} en ruine` : ""}.`;
-            const shares = Object.entries(e.details.allyShares ?? {});
-            if (shares.length) text += ` Butin partagé : ${shares.map(([id, n]) => `${formatNumber(n)} pour ${nameOf(id)}`).join(", ")}.`;
-            if (e.details.defenderLost) text += ` Pertes du défenseur : ${armyIcons(e.details.defenderLost, "aucune")}.`;
-          }
-        }
-        return (
-          <li key={e.id} className={e.targetId === me ? "hit" : undefined}>
-            <span>
-              {text}
-              {e.details.log && e.details.log.length > 0 && (e.kind === "raid" || e.kind === "fortress" || e.kind === "hall_siege" || e.kind === "event") && <RoundsReport log={e.details.log} details={e.details} />}
-            </span>
-            <span className="when">{ago(e.at)}</span>
-          </li>
-        );
-      })}
-    </ul>
+      <div className="subtabs" role="group" aria-label="Messages">
+        <button className="btn" aria-pressed={part === "rapports"} onClick={() => setPart("rapports")}>
+          📜 Rapports
+        </button>
+        <button className="btn" aria-pressed={part === "discussion"} onClick={() => setPart("discussion")}>
+          💬 Discussion
+        </button>
+      </div>
+      {part === "discussion" ? (
+        <Chat userId={userId} hasAlliance={!!snap.alliance} now={now} />
+      ) : (
+        <>
+          <div className="inbox-cats" role="group" aria-label="Catégories">
+            {INBOX_CATEGORIES.map((c) => {
+              const n = unread(c);
+              return (
+                <button key={c} className="btn btn-small" aria-pressed={cat === c} onClick={() => setCat(c)}>
+                  {INBOX_LABELS[c]}
+                  {n > 0 && <span className="inbox-count num">{n}</span>}
+                </button>
+              );
+            })}
+          </div>
+          <div className="inbox-tools">
+            <button className="btn btn-ghost btn-small" disabled={unread(cat) === 0} onClick={() => void run({ type: "inbox_read", category: cat })}>
+              Tout marquer lu
+            </button>
+          </div>
+          {list.length === 0 ? (
+            <p className="empty">Rien ici pour l&apos;instant.</p>
+          ) : (
+            <ul className="reports">
+              {list.map((r) => {
+                const fresh = isUnread(r, live, local);
+                const e = r.entry;
+                return (
+                  <li key={r.key} className={`report${fresh ? " unread" : ""}`}>
+                    <button className="report-line" aria-expanded={open === r.key} onClick={() => toggle(r)}>
+                      <span className="report-icon" aria-hidden>
+                        {r.icon}
+                      </span>
+                      <span className="report-title">{r.title}</span>
+                      <span className="report-chips">
+                        {r.chips.map((c, i) => (
+                          <span key={i} className={`chip num${c.tone ? ` chip-${c.tone}` : ""}`}>
+                            {c.t}
+                          </span>
+                        ))}
+                      </span>
+                      <span className="report-time num">{clockShort(r.at, now)}</span>
+                    </button>
+                    {open === r.key && (
+                      <div className="report-body">
+                        {e && <p>{chronicleText(e, snap.userId, snap.rivals, snap.alliances)}</p>}
+                        {r.text && <p>{r.text}</p>}
+                        {e?.details.log && e.details.log.length > 0 && <RoundsReport log={e.details.log} details={e.details} open />}
+                        {!e && r.rival && <SpyReport r={r.rival} now={now} />}
+                        {r.target && r.rival && !r.rival.allied && (
+                          <div className="row-actions">
+                            <button className="btn btn-small" onClick={() => void run({ type: "spy", target: r.target! })}>
+                              🕵️ Espionner
+                            </button>
+                          </div>
+                        )}
+                      </div>
+                    )}
+                  </li>
+                );
+              })}
+            </ul>
+          )}
+        </>
+      )}
     </>
   );
+}
+
+/** U2 : heure courte d'un rapport (hh:mm aujourd'hui, sinon jour et heure). */
+function clockShort(at: number, now: number): string {
+  const d = new Date(at);
+  const sameDay = new Date(now).toDateString() === d.toDateString();
+  return sameDay ? d.toLocaleTimeString("fr-FR", { hour: "2-digit", minute: "2-digit" }) : d.toLocaleString("fr-FR", { weekday: "short", hour: "2-digit", minute: "2-digit" });
 }
 
 function agoText(t: number, now: number): string {
