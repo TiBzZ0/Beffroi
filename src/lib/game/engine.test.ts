@@ -31,7 +31,7 @@ import {
   type PlayerState,
   type WorldState,
 } from "./engine";
-import { formatNumber } from "./format";
+import { formatNumber, formatRate } from "./format";
 
 const T0 = 1_700_000_000_000;
 const noWorld: WorldState = { stageCompletedAt: [] };
@@ -402,8 +402,9 @@ describe("format", () => {
   it("formate à la française", () => {
     expect(formatNumber(999)).toBe("999");
     expect(formatNumber(12_345).replace(/\s/g, " ")).toBe("12 345");
-    expect(formatNumber(1_234_567)).toBe("1,23 M");
-    expect(formatNumber(4.2e9)).toBe("4,20 Md");
+    expect(formatNumber(1_234_567).replace(/\s/g, " ")).toBe("1,23 M");
+    expect(formatNumber(4.2e9).replace(/\s/g, " ")).toBe("4,20 Md");
+    expect(formatRate(11_583).replace(/\s/g, " ")).toBe("11,6 k");
   });
 });
 

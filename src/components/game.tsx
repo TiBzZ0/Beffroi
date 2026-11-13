@@ -926,18 +926,36 @@ export function Generators({ live, stagesDone, snap, run }: { live: PlayerState;
                 {hidden ? "❔" : g.icon}
               </div>
               <div>
-                <div className="row-title">
-                  {hidden ? "???" : g.name}
+                <div className="row-title row-title-one">
+                  <span className="row-name">{hidden ? "???" : g.name}</span>
                   {n > 0 && <span className="row-count num">{n}</span>}
+                </div>
+                <div className="row-desc num">
                   {!hidden && g.id === best?.id && (
                     <span className="badge badge-best" title="La meilleure production gagnée par pierre dépensée, paliers compris">
                       ⭐ rentable{best.qty > 1 ? ` ×${best.qty}` : ""}
                     </span>
                   )}
-                </div>
-                <div className="row-desc num">
-                  {hidden ? "Continue de bâtir pour le découvrir." : `${formatRate(each)}/s chacun${n > 0 ? ` · Σ ${formatRate(each * n)}/s` : ""}`}
-                  {!hidden && cost > live.stone && rate > 0 ? ` · ⏳ ${duration(((cost - live.stone) / rate) * 1000)}` : ""}
+                  {!hidden && g.id === best?.id ? " " : ""}
+                  {hidden ? (
+                    "Continue de bâtir pour le découvrir."
+                  ) : (
+                    <>
+                      <span className="nw">{formatRate(each)}/s</span> chacun
+                      {n > 0 && (
+                        <>
+                          {" · "}
+                          <span className="nw">Σ {formatRate(each * n)}/s</span>
+                        </>
+                      )}
+                    </>
+                  )}
+                  {!hidden && cost > live.stone && rate > 0 && (
+                    <>
+                      {" · "}
+                      <span className="nw">⏳ {duration(((cost - live.stone) / rate) * 1000)}</span>
+                    </>
+                  )}
                 </div>
                 {!hidden && n > 0 && <TierLine live={live} id={g.id} />}
               </div>
@@ -965,14 +983,22 @@ export function Generators({ live, stagesDone, snap, run }: { live: PlayerState;
 
 /** Prochains paliers d'un bâtiment : corps de métier et compagnonnage. */
 function TierLine({ live, id }: { live: PlayerState; id: GeneratorId }) {
+  const [open, setOpen] = useState(false);
   const t = nextTiers(live, id);
   const companion = t.companion;
   const big = companion ? GENERATORS.find((g) => g.id === companion.target) : undefined;
   return (
-    <div className="row-tier num">
-      <span title="Corps de métier : prochaine tranche de 50">🛠️ +{t.mastery.missing} → +{t.mastery.bonus * 100} %</span>
-      {companion && big && <span title={`Compagnonnage : +${companion.bonus * 100} % à la production des ${big.plural.toLowerCase()}`}>{` · 🤝 +${companion.missing} → ${big.icon} +${companion.bonus * 100} %`}</span>}
-    </div>
+    <button className="row-tier num link-btn tier-btn" aria-expanded={open} onClick={() => setOpen(!open)} title="Corps de métier et compagnonnage : combien en acheter pour le prochain palier">
+      <span className="nw">🛠️ +{t.mastery.missing}</span>
+      {open && <span className="nw">{` → +${t.mastery.bonus * 100} % de production`}</span>}
+      {companion && big && (
+        <>
+          {" · "}
+          <span className="nw">🤝 +{companion.missing}</span>
+          {open && <span className="nw">{` → ${big.icon} +${companion.bonus * 100} % aux ${big.plural.toLowerCase()}`}</span>}
+        </>
+      )}
+    </button>
   );
 }
 
@@ -2038,10 +2064,20 @@ function Info({ children }: { children: React.ReactNode }) {
   );
 }
 
+/** Titre de bloc avec son seul ⓘ à droite. */
+function BlockHead({ title, info }: { title: React.ReactNode; info?: React.ReactNode }) {
+  return (
+    <div className="block-head">
+      <h3 className="section-title">{title}</h3>
+      {info ? <Info>{info}</Info> : null}
+    </div>
+  );
+}
+
 /** U1 : compte à rebours, mm:ss sous une heure, « 1 h 12 » au-dessus. */
 function countdown(ms: number): string {
   const s = Math.max(0, Math.ceil(ms / 1000));
-  if (s >= 3600) return `${Math.floor(s / 3600)} h ${String(Math.floor((s % 3600) / 60)).padStart(2, "0")}`;
+  if (s >= 3600) return `${Math.floor(s / 3600)}\u00a0h\u00a0${String(Math.floor((s % 3600) / 60)).padStart(2, "0")}`;
   return `${String(Math.floor(s / 60)).padStart(2, "0")}:${String(s % 60).padStart(2, "0")}`;
 }
 
@@ -2426,7 +2462,6 @@ function GuildHall({ snap, live, now, run }: { snap: GameSnapshot; live: PlayerS
   const sieges = g.targets.length > 0 && (
     <>
       <h4 className="hall-sub">⚔️ Halles ennemies</h4>
-      <Info>En guerre, une halle peut être prise d&apos;assaut : l&apos;aile visée est hors service 24 h, rien n&apos;est détruit ni volé. La halle est ensuite à l&apos;abri 24 h.</Info>
       <div className="list">
         {g.targets.map((t) => {
           const wings = WINGS.filter((w) => (t.wings[w.id] ?? 0) > 0);
@@ -2466,17 +2501,27 @@ function GuildHall({ snap, live, now, run }: { snap: GameSnapshot; live: PlayerS
     setBusy(false);
   };
   const title = g.lodge ? "🏛️ Ta loge" : "🏛️ Halle de guilde";
+  const siegeNote = g.targets.length > 0 ? (
+    <>
+      {" "}⚔️ {"En guerre, une halle peut être prise d'assaut : l'aile visée est hors service 24 h, rien n'est détruit ni volé. La halle est ensuite à l'abri 24 h."}
+    </>
+  ) : null;
   const h = g.hall;
   if (!h) {
     return (
       <div className="hall">
-        <h3 className="section-title">{title}</h3>
-        <Info>
+        <BlockHead
+          title={title}
+          info={
+            <>
           {g.lodge
             ? "Seul, tu peux fonder une petite loge près de ton domaine : 4 étapes et deux ailes au plus. Si tu rejoins une alliance qui a sa halle, la moitié de ce que tu lui as versé y passe."
             : "Un chantier propre à l'alliance, posé sur la carte près de vos domaines. La fondation puis chaque étape terminée donnent un niveau d'aile : production, stock à l'abri, renforts, guet, écuries ou infirmerie. Il y a dix étapes, et dix-huit niveaux possibles."}{" "}
           {g.lodge ? "Ouvre le chantier, puis verse-lui la somme de fondation." : "Une fois le chantier ouvert, toute l'alliance peut y verser, dons et part de dîme compris."}
-        </Info>
+              {siegeNote}
+            </>
+          }
+        />
         {g.dormantLodge && <p className="note">💤 Loge en attente : la moitié de tes versements rejoindra la halle à sa fondation.</p>}
         <div className="row-actions">
           <Btn className="btn btn-primary" busy={busy} reason={g.chief ? null : `Seul le chef${g.chiefName ? ` (${g.chiefName})` : ""} peut la fonder.`} onClick={() => act({ type: "hall", op: "found" })}>
@@ -2500,7 +2545,18 @@ function GuildHall({ snap, live, now, run }: { snap: GameSnapshot; live: PlayerS
   };
   return (
     <div className="hall">
-      <h3 className="section-title">{title}</h3>
+      <BlockHead
+        title={title}
+        info={
+          <>
+            Le reste de ta dîme ({Math.round((live.tithe ?? 0) * 100)} % de ta production) continue d&apos;aller au beffroi. Ce qui est versé ici ne compte ni pour le beffroi, ni
+            pour les lots, ni pour les paliers de don, et ne peut être ni repris ni pillé.
+            {founding ? " Chantier de fondation : versez ensemble la somme affichée. Une fois fondée, chaque étape donnera un niveau d'aile." : ""}
+            {!g.lodge && !founding ? " 🛡️ Les murs valent 10 % de la pierre reçue. Seule une alliance en guerre avec la vôtre peut assiéger la halle. Un assaut réussi met une aile hors service 24 h, sans rien détruire." : ""}
+            {siegeNote}
+          </>
+        }
+      />
       <div className="bar" role="progressbar" aria-valuenow={Math.round(pct)} aria-valuemin={0} aria-valuemax={100}>
         <span style={{ width: `${pct}%` }} />
       </div>
@@ -2542,11 +2598,6 @@ function GuildHall({ snap, live, now, run }: { snap: GameSnapshot; live: PlayerS
           ))}
         </select>
       </label>
-      <Info>
-        Le reste de ta dîme ({Math.round((live.tithe ?? 0) * 100)} % de ta production) continue d&apos;aller au beffroi. Ce qui est versé ici ne compte ni pour le beffroi, ni
-        pour les lots, ni pour les paliers de don, et ne peut être ni repris ni pillé.
-        {founding ? " Chantier de fondation : versez ensemble la somme affichée. Une fois fondée, chaque étape donnera un niveau d'aile." : ""}
-      </Info>
       <h4 className="hall-sub">
         Ailes · {h.placed}/{h.available} niveaux placés{h.masterLevels > 0 ? ` (dont ${h.masterLevels} offert${h.masterLevels > 1 ? "s" : ""} par le beffroi)` : ""}
       </h4>
@@ -2562,11 +2613,11 @@ function GuildHall({ snap, live, now, run }: { snap: GameSnapshot; live: PlayerS
                 {w.icon}
               </div>
               <div>
-                <div className="row-title">
-                  {w.name}
+                <div className="row-title row-title-one">
+                  <span className="row-name">{w.name}</span>
                   <span className="row-count num">{lvl}/3</span>
                 </div>
-                <div className="row-desc">
+                <div className="row-desc one-line" title={`${lvl > 0 ? w.levels[lvl - 1] : "—"}${lvl < 3 ? ` → ${w.levels[lvl]}` : ""}`}>
                   {down > now ? `🔥 ${duration(down - now)} · ` : ""}
                   {lvl > 0 ? w.levels[lvl - 1] : "—"}
                   {lvl < 3 ? ` → ${w.levels[lvl]}` : ""}
@@ -2617,7 +2668,6 @@ function GuildHall({ snap, live, now, run }: { snap: GameSnapshot; live: PlayerS
               ↩️ Rappeler
             </button>
           )}
-          <Info>Les murs valent 10 % de la pierre reçue. Seule une alliance en guerre avec la vôtre peut assiéger la halle. Un assaut réussi met une aile hors service 24 h, sans rien détruire.</Info>
         </>
       )}
       {sieges}
@@ -2636,16 +2686,22 @@ function Alliance({ snap, run }: { snap: GameSnapshot; run: ReturnType<typeof us
   const a = snap.alliance;
   return (
     <div className="alliance">
-      <h3 className="section-title">Ton alliance</h3>
+      <BlockHead
+        title="Ton alliance"
+        info={
+          a ? (
+            <>
+              Entre alliés, pas de pillage. Les troupes envoyées chez un allié défendent son domaine et partent en raid avec lui (butin et pertes sont
+              partagés au prorata de la valeur des troupes engagées par chacun).
+            </>
+          ) : null
+        }
+      />
       {a ? (
         <>
           <p className="row-desc">
             🤝 <strong>{a.name}</strong> · {a.members.map((m) => (m.id === snap.userId ? "toi" : m.name)).join(", ")} ({a.members.length}/{MAX_ALLIANCE_SIZE})
           </p>
-          <Info>
-            Entre alliés, pas de pillage. Les troupes envoyées chez un allié défendent son domaine et partent en raid avec lui (butin et pertes sont
-            partagés au prorata de la valeur des troupes engagées par chacun).
-          </Info>
         </>
       ) : (
         <>
@@ -2725,7 +2781,17 @@ function Wars({ snap, run, now }: { snap: GameSnapshot; run: ReturnType<typeof u
   };
   return (
     <>
-      <h3 className="section-title">Guerre</h3>
+      <BlockHead
+        title="Guerre"
+        info={
+          w ? (
+            <>
+              Pendant la guerre, plus de bouclier entre vous (le repos de 5 min reste, et pas deux fois de suite la même cible) : chaque pierre pillée compte. Les
+              vainqueurs se partagent une prime égale à la moitié du butin total.
+            </>
+          ) : null
+        }
+      />
       {w ? (
         <div className="war-card">
           <div className="row-title">⚔️ Contre {w.enemyName}</div>
@@ -2738,10 +2804,6 @@ function Wars({ snap, run, now }: { snap: GameSnapshot; run: ReturnType<typeof u
             </span>
           </div>
           <div className="row-desc num">{w.startsAt > now ? `⏳ début dans ${duration(w.startsAt - now)} · 24 h` : `⏳ ${duration(w.endsAt - now)}`}</div>
-          <Info>
-            Pendant la guerre, plus de bouclier entre vous (le repos de 5 min reste, et pas deux fois de suite la même cible) : chaque pierre pillée compte. Les
-            vainqueurs se partagent une prime égale à la moitié du butin total.
-          </Info>
         </div>
       ) : others.length === 0 ? (
         <p className="empty">Aucune alliance adverse.</p>
@@ -2786,7 +2848,10 @@ function Fortress({ snap, live, now, run }: { snap: GameSnapshot; live: PlayerSt
   const hasGarrison = Object.keys(f.myGarrison).length > 0;
   return (
     <>
-      <h3 className="section-title">Forteresse</h3>
+      <BlockHead
+        title="Forteresse"
+        info="La forteresse n'est défendue que par les troupes que les membres de l'alliance qui la tient y envoient. L'alliance qui la tient gagne +20 % de production."
+      />
       <div className="row">
         <div className="row-icon" aria-hidden>
           🏰
@@ -2800,7 +2865,6 @@ function Fortress({ snap, live, now, run }: { snap: GameSnapshot; live: PlayerSt
           <div className="row-desc army-line num">
             {intel ? `🕵️ ${armyIcons(f.army)} · ${duration(f.intelUntil! - now)}` : f.exact ? armyIcons(f.army) : `≈ ${armyIcons(f.army)}`}
           </div>
-          <Info>La forteresse n&apos;est défendue que par les troupes que les membres de l&apos;alliance qui la tient y envoient. L&apos;alliance qui la tient gagne +20 % de production.</Info>
           {!f.mine && !f.blocker && <TravelTo place="fortress" army={live.troops as Record<string, number>} />}
         </div>
         {!f.mine && (

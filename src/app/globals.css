@@ -2373,3 +2373,17 @@ use.g-enemy {
 .reinforce select { min-width: 0; }
 .reinforce select { flex: 1 1 120px; }
 .reinforce .input-qty { flex: 0 1 72px; width: 72px; }
+
+/* Finition téléphone */
+.nw { white-space: nowrap; }
+.row-title-one { flex-wrap: nowrap; min-width: 0; }
+.row-title-one .row-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.row-title-one .row-count { flex: 0 0 auto; }
+.one-line { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.tier-btn { text-decoration: none; text-align: left; display: block; color: var(--ink-soft); }
+.block-head { display: flex; flex-wrap: wrap; align-items: baseline; justify-content: space-between; column-gap: 10px; margin: 16px 0 8px; }
+.block-head:first-child { margin-top: 0; }
+.block-head > .section-title { margin: 0; }
+.block-head > .info { margin: 0; }
+.block-head > .info[open] { flex-basis: 100%; }
+.row > div > select.input { display: block; width: 100%; max-width: 100%; min-width: 0; box-sizing: border-box; }
