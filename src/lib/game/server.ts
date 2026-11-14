@@ -254,7 +254,8 @@ import {
 } from "./types";
 import { armyForChance, armyFromBudget, armySize, armyValue, battle, cleanArmy, estimateChance, seededRng, type Army, type Levels } from "./battle";
 import { recordContribution } from "@/lib/redis";
-import { applyRiftFight, cleanRift, expeditionLevels, floorRenown, floorTrain, riftBattleOpts, riftFightBlocker, riftFloor, riftOf, riftReturn, riftSend, riftWeek, RIFT_CHEST_EVERY, RIFT_CHEST_SECONDS } from "./rift";
+import { addRelics, assignCaptain, assignRelic, captainOf, CAPTAIN_COST, cleanCaptains, cleanOffer, cleanRelics, drawTraits, dropRelic, addCaptain, HUNT_TARGETS, expeditionSpeed, makeCaptain, makeRelic, RARITY_LABEL, RELICS, TRAIT_IDS, TRAITS, type Relic, type TraitId } from "./captains";
+import { applyRiftFight, cleanRift, expeditionOpts, floorRenown, floorTrain, guardianBattle, isGuardian, splitLosses, riftFightBlocker, riftFloor, riftOf, riftReturn, riftSend, riftWeek, RIFT_CHEST_EVERY, RIFT_CHEST_SECONDS } from "./rift";
 import { COMPANY_VALUE, FIXED_EVENT_COMPANIES, FIXED_TRAIN, FORTRESS_COMPANIES, LORD_COMPANIES, LORD_RAID_SHARE, LORD_TRAIN, trainLevels, buildBarracks, buildFort, combatLevels, cleanCompanies, cleanFortLevels, cleanRecruits, cleanWorks, createCompany, dissolveCompany, recruit, retypeCompany, startTraining } from "./companies";
 import { buyNode, cleanLineage, lin, lineageMark, LIN_MOLE, LIN_SPY_CATCH, NODE_BY_ID, parisDay, RENOWN, RENOWN_GIFT_SEASON, renownAvailable, respec, type RenownSource } from "./lineage";
 import { notify, notifyEach, type PushMessage } from "@/lib/push";
@@ -275,7 +276,7 @@ interface PlayerRow {
   upgrades: string[];
   total_produced: number;
   total_contributed: number;
-  military?: { levels?: Record<string, number>; research?: { id: string; endsAt: number; cost?: number }[] | { id: string; endsAt: number } | null; academy?: number; sabotageImmuneUntil?: number; ruinImmuneUntil?: number; elanUntil?: number; tithe?: number; titheOwed?: number; titheSet?: boolean; share?: StageShare | null; donorTiers?: number; curfew?: Curfew | null; seen?: PlayerState["seen"] | null; veinAt?: number; frenzyUntil?: number; quest?: number | null; questFlags?: string[]; wounded?: Record<string, number>; healAt?: number; marches?: unknown; boostProdUntil?: number; boostSafeUntil?: number; merchantEvent?: number; daily?: unknown; dailyBoostUntil?: number; dailyBoost?: number; hallTithe?: number; spyLevel?: number; spies?: unknown; moles?: unknown; counterUntil?: number; rumor?: { mode?: string; until?: number } | null; granaryCutUntil?: number; blindUntil?: number; spyLog?: unknown; tribute?: { seconds?: number; at?: number } | null; inboxRead?: Record<string, unknown> | null; lineage?: unknown; companies?: unknown; barracks?: number; works?: unknown; fortLevels?: unknown; recruits?: unknown; rift?: unknown } | null;
+  military?: { levels?: Record<string, number>; research?: { id: string; endsAt: number; cost?: number }[] | { id: string; endsAt: number } | null; academy?: number; sabotageImmuneUntil?: number; ruinImmuneUntil?: number; elanUntil?: number; tithe?: number; titheOwed?: number; titheSet?: boolean; share?: StageShare | null; donorTiers?: number; curfew?: Curfew | null; seen?: PlayerState["seen"] | null; veinAt?: number; frenzyUntil?: number; quest?: number | null; questFlags?: string[]; wounded?: Record<string, number>; healAt?: number; marches?: unknown; boostProdUntil?: number; boostSafeUntil?: number; merchantEvent?: number; daily?: unknown; dailyBoostUntil?: number; dailyBoost?: number; hallTithe?: number; spyLevel?: number; spies?: unknown; moles?: unknown; counterUntil?: number; rumor?: { mode?: string; until?: number } | null; granaryCutUntil?: number; blindUntil?: number; spyLog?: unknown; tribute?: { seconds?: number; at?: number } | null; inboxRead?: Record<string, unknown> | null; lineage?: unknown; companies?: unknown; barracks?: number; works?: unknown; fortLevels?: unknown; recruits?: unknown; rift?: unknown; captains?: unknown; relics?: unknown; captainOffer?: unknown } | null;
   total_clicks: number;
   last_ip?: string | null;
   last_update: string;
@@ -444,7 +445,7 @@ function toEntity(row: PlayerRow): Entity {
       lineage: cleanLineage(row.military?.lineage),
       // C1 à C4 : le modèle des compagnies ne vaut qu'à partir de la saison 1.
       ...(currentCompanyModel && !lord && !row.profiles?.is_bot
-        ? { companyModel: true, companies: cleanCompanies(row.military?.companies), barracks: Math.max(0, Math.floor(Number(row.military?.barracks ?? 0) || 0)), works: cleanWorks(row.military?.works), fortLevels: cleanFortLevels(row.military?.fortLevels), recruits: cleanRecruits(row.military?.recruits), rift: cleanRift(row.military?.rift) }
+        ? { companyModel: true, companies: cleanCompanies(row.military?.companies), barracks: Math.max(0, Math.floor(Number(row.military?.barracks ?? 0) || 0)), works: cleanWorks(row.military?.works), fortLevels: cleanFortLevels(row.military?.fortLevels), recruits: cleanRecruits(row.military?.recruits), rift: cleanRift(row.military?.rift), captains: cleanCaptains(row.military?.captains), relics: cleanRelics(row.military?.relics), captainOffer: cleanOffer(row.military?.captainOffer) }
         : {}),
       ...(row.military?.seen ? { seen: { produced: Number(row.military.seen.produced ?? 0), contributed: Number(row.military.seen.contributed ?? 0), levels: armyCounts(row.military.seen.levels ?? {}, [...UNIT_IDS, ...DEFENSE_IDS]) } } : {}),
     },
@@ -474,7 +475,7 @@ function toJson(e: Entity, state: PlayerState, extra: Record<string, unknown> = 
     troops: state.troops,
     defenses: state.defenses,
     stationed: state.stationed,
-    military: { levels: state.levels, research: state.research, academy: state.academy, sabotageImmuneUntil: state.sabotageImmuneUntil, ruinImmuneUntil: state.ruinImmuneUntil, elanUntil: state.elanUntil, tithe: state.tithe, titheOwed: state.titheOwed, titheSet: state.titheSet, share: state.share, donorTiers: state.donorTiers, curfew: state.curfew, seen: state.seen ?? null, veinAt: state.veinAt, frenzyUntil: state.frenzyUntil, quest: state.quest, questFlags: state.questFlags, wounded: state.wounded, healAt: state.healAt, marches: state.marches ?? [], boostProdUntil: state.boostProdUntil, boostSafeUntil: state.boostSafeUntil, merchantEvent: state.merchantEvent, daily: state.daily ?? null, dailyBoostUntil: state.dailyBoostUntil, dailyBoost: state.dailyBoost, hallTithe: state.hallTithe, spyLevel: state.spyLevel ?? 0, spies: state.spies ?? [], moles: state.moles ?? [], counterUntil: state.counterUntil ?? 0, rumor: state.rumor ?? null, granaryCutUntil: state.granaryCutUntil ?? 0, blindUntil: state.blindUntil ?? 0, spyLog: (state.spyLog ?? []).slice(-SPY_LOG_MAX), tribute: state.tribute ?? null, inboxRead: state.inboxRead ?? {}, lineage: state.lineage ?? null, ...(state.companyModel ? { companies: state.companies ?? [], barracks: state.barracks ?? 0, works: state.works ?? {}, fortLevels: state.fortLevels ?? {}, recruits: state.recruits ?? [], rift: state.rift ?? null } : {}) },
+    military: { levels: state.levels, research: state.research, academy: state.academy, sabotageImmuneUntil: state.sabotageImmuneUntil, ruinImmuneUntil: state.ruinImmuneUntil, elanUntil: state.elanUntil, tithe: state.tithe, titheOwed: state.titheOwed, titheSet: state.titheSet, share: state.share, donorTiers: state.donorTiers, curfew: state.curfew, seen: state.seen ?? null, veinAt: state.veinAt, frenzyUntil: state.frenzyUntil, quest: state.quest, questFlags: state.questFlags, wounded: state.wounded, healAt: state.healAt, marches: state.marches ?? [], boostProdUntil: state.boostProdUntil, boostSafeUntil: state.boostSafeUntil, merchantEvent: state.merchantEvent, daily: state.daily ?? null, dailyBoostUntil: state.dailyBoostUntil, dailyBoost: state.dailyBoost, hallTithe: state.hallTithe, spyLevel: state.spyLevel ?? 0, spies: state.spies ?? [], moles: state.moles ?? [], counterUntil: state.counterUntil ?? 0, rumor: state.rumor ?? null, granaryCutUntil: state.granaryCutUntil ?? 0, blindUntil: state.blindUntil ?? 0, spyLog: (state.spyLog ?? []).slice(-SPY_LOG_MAX), tribute: state.tribute ?? null, inboxRead: state.inboxRead ?? {}, lineage: state.lineage ?? null, ...(state.companyModel ? { companies: state.companies ?? [], barracks: state.barracks ?? 0, works: state.works ?? {}, fortLevels: state.fortLevels ?? {}, recruits: state.recruits ?? [], rift: state.rift ?? null, captains: state.captains ?? [], relics: state.relics ?? [], captainOffer: state.captainOffer ?? null } : {}) },
     click_strikes: state.clickStrikes,
     click_paused_until: iso(state.clickPausedUntil),
     ...extra,
@@ -1064,18 +1065,37 @@ async function loadRiftBoard(admin: SupabaseClient, seasonId: number, week: stri
   return { firsts, best };
 }
 
-function riftView(state: PlayerState, board: { firsts: Record<number, string>; best: Map<string, { name: string; floor: number }> }, userId: string, now: number): RiftView {
+function riftView(state: PlayerState, board: { firsts: Record<number, string>; best: Map<string, { name: string; floor: number }> }, userId: string, now: number, allies: string[] = []): RiftView {
   const w = riftWeek(now);
   const rs = riftOf(state, now);
   const from = rs.exp && rs.exp.status !== "back" ? rs.exp.floor : rs.best + 1;
   const floors: RiftFloorView[] = [];
   for (let n = from; n < from + 3; n++) {
     const f = riftFloor(w.key, n);
-    const waiting = rs.exp?.status === "wait" && rs.exp.floor === n && !f.guardian;
-    floors.push({ floor: n, alterations: f.alterations, shape: f.shape, army: f.army, train: floorTrain(n), guardian: f.guardian, ...(board.firsts[n] ? { first: board.firsts[n] } : {}), ...(waiting ? { chance: estimateChance(rs.exp!.troops, f.army, riftBattleOpts(f, expeditionLevels(state, rs.exp!))) } : {}) });
+    const waiting = rs.exp?.status === "wait" && rs.exp.floor === n && (!f.guardian || allies.length > 0);
+    floors.push({ floor: n, alterations: f.alterations, shape: f.shape, army: f.army, train: floorTrain(n), guardian: f.guardian, ...(board.firsts[n] ? { first: board.firsts[n] } : {}), ...(waiting && !f.guardian ? { chance: estimateChance(rs.exp!.troops, f.army, expeditionOpts(state, rs.exp!, f)) } : {}), ...(f.guardian && rs.exp?.status === "wait" && rs.exp.floor === n ? { allies } : {}) });
   }
   const top = [...board.best.entries()].sort((a, b) => b[1].floor - a[1].floor).slice(0, 10).map(([id, v]) => ({ name: v.name, floor: v.floor, me: id === userId }));
   return { week: w.key, endsAt: w.end, floors, firsts: board.firsts, top };
+}
+
+/** F2 : alliés (même alliance, autre adresse) dont l'expédition attend devant le même gardien cette semaine. */
+function riftPartners(me: Entity, entities: Map<string, Entity>, world: WorldState, flat: Map<string, number>, now: number, floor: number): { e: Entity; state: PlayerState }[] {
+  if (me.allianceId === null) return [];
+  const out: { e: Entity; state: PlayerState }[] = [];
+  for (const e of entities.values()) {
+    if (e.id === me.id || e.isLord || e.allianceId !== me.allianceId || !e.state.companyModel || sameIp(me, e)) continue;
+    const state = advanceEntity(e, now, world, flat);
+    const x = riftOf(state, now).exp;
+    if (x && x.status === "wait" && x.floor === floor && Object.keys(x.troops).length > 0) out.push({ e, state });
+    if (out.length >= 3) break;
+  }
+  return out;
+}
+
+function riftAllies(me: Entity, state: PlayerState, entities: Map<string, Entity>, world: WorldState, flat: Map<string, number>, now: number): string[] {
+  const x = riftOf(state, now).exp;
+  return x && x.status === "wait" && isGuardian(x.floor) ? riftPartners(me, entities, world, flat, now, x.floor).map((p) => p.e.name) : [];
 }
 
 /** L1 : pas de renom entre deux comptes qui partagent une adresse IP. */
@@ -2356,7 +2376,7 @@ function applySimpleAction(state: PlayerState, action: GameAction, now: number, 
         op === "create" ? createCompany(state, String(action.unit), now)
         : op === "dissolve" ? dissolveCompany(state, id)
         : op === "retype" ? retypeCompany(state, id, String(action.unit))
-        : op === "recruit" ? recruit(state, id, Number(action.qty), now)
+        : op === "recruit" ? recruit(state, id, Number(action.qty), now, captainOf(state, id)?.trait === "recruteur" ? 2 : 1)
         : op === "train" ? startTraining(state, id, base, now)
         : op === "barracks" ? buildBarracks(state, base, now)
         : op === "fort" ? buildFort(state, String(action.unit), base, now)
@@ -2614,11 +2634,46 @@ export async function runAction(admin: SupabaseClient, userId: string, action: G
           message = `🏛️ ${def.icon} ${def.name} niveau ${legacy?.[def.id] ?? 1} acquis pour ${r.cost} écus. Il te suivra de saison en saison.`;
         }
       }
+    } else if (action.type === "captain") {
+      // C3, F3 : recruter un capitaine (15 renom, un trait parmi trois), placer capitaines et reliques.
+      const op = String(action.op);
+      let r: { ok: true; value: PlayerState } | { ok: false; error: string };
+      if (!current.companyModel) r = { ok: false, error: "Les capitaines arrivent avec la saison 1." };
+      else if (op === "draw") {
+        const tally = await loadRenown(admin, season.id, userId, now);
+        if (current.captainOffer?.length) r = { ok: false, error: "Choisis d'abord parmi les traits proposés." };
+        else if (renownAvailable(tally.earned, current.lineage) < CAPTAIN_COST) r = { ok: false, error: `Il faut ${CAPTAIN_COST} renom.` };
+        else if ((current.captains ?? []).length >= 12) r = { ok: false, error: "12 capitaines au plus." };
+        else {
+          const l = current.lineage ?? { nodes: [], fees: 0, respecAt: 0 };
+          r = { ok: true, value: { ...current, lineage: { ...l, captains: (l.captains ?? 0) + CAPTAIN_COST }, captainOffer: drawTraits(Math.random) } };
+        }
+      } else if (op === "pick") {
+        const trait = String(action.trait) as TraitId;
+        if (!current.captainOffer?.includes(trait) || !TRAIT_IDS.includes(trait)) r = { ok: false, error: "Trait non proposé." };
+        else {
+          const target = HUNT_TARGETS.find((h) => h.id === action.target)?.id;
+          const k = makeCaptain(trait, target, Math.random, now);
+          const added = addCaptain({ ...current, captainOffer: null }, k);
+          r = added;
+          if (added.ok) message = `🎖️ ${k.name} rejoint ton armée : ${TRAITS[trait].icon} ${TRAITS[trait].name}.`;
+        }
+      } else if (op === "assign") r = assignCaptain(current, String(action.id), action.company ? String(action.company) : null);
+      else if (op === "relic") r = assignRelic(current, String(action.id), action.company ? String(action.company) : null);
+      else if (op === "drop") r = dropRelic(current, String(action.id));
+      else r = { ok: false, error: "Action inconnue." };
+      if (!r.ok) error = r.error;
+      else {
+        finalState = r.value;
+        const { data } = await admin.rpc("commit_state", { p_season: season.id, p_state: toJson(me, finalState, {}), p_touch: true, p_contribution: 0, p_stage_bases: stageSizes, p_active_window_days: ACTIVE_WINDOW_DAYS, p_action: `captain_${op}`, p_details: null });
+        if ((data as { conflict?: boolean } | null)?.conflict) continue;
+      }
     } else if (action.type === "rift") {
       // F1, F2 : expédition dans la faille, étage par étage.
       const op = String(action.op);
       let r: { ok: true; value: PlayerState } | { ok: false; error: string };
       let cleared: { floor: number; week: string; chest: number } | null = null;
+      let riftAfter: { p: { e: Entity; state: PlayerState }; next: PlayerState; first: boolean }[] = [];
       if (!current.companyModel) r = { ok: false, error: "La faille s'ouvre avec la saison 1." };
       else if (op === "send") {
         const ids = Array.isArray(action.ids) ? action.ids.map(String).slice(0, 8) : [];
@@ -2627,29 +2682,62 @@ export async function runAction(admin: SupabaseClient, userId: string, action: G
           const c = current.companies?.find((x) => x.id === id);
           if (c) sample[c.unit] = 1;
         }
-        const travel = await travelToFortress(admin, season.id, entities, userId, sample as Army);
+        const travel = Math.round((await travelToFortress(admin, season.id, entities, userId, sample as Army)) / (1 + expeditionSpeed(current, ids)));
         r = riftSend(current, ids, travel, now);
       } else if (op === "return") r = riftReturn(current, now);
       else if (op === "fight") {
-        const why = riftFightBlocker(current, now);
+        const rs = riftOf(current, now);
+        const e0 = rs.exp;
+        const guardian = e0?.status === "wait" && isGuardian(e0.floor);
+        const partners = guardian ? riftPartners(me, entities, world, flat, now, e0!.floor) : [];
+        const why = riftFightBlocker(current, now, partners.length);
         if (why) r = { ok: false, error: why };
         else {
-          const rs = riftOf(current, now);
-          const e = rs.exp!;
+          const e = e0!;
           const f = riftFloor(rs.week, e.floor);
-          const fight = battle(e.troops, f.army, Math.random, riftBattleOpts(f, expeditionLevels(current, e)));
-          let next = applyRiftFight(current, f, fight, fight.success ? WOUNDED_WINNER : WOUNDED_ATTACKER_BEATEN, now);
-          const first = fight.success && (next.rift?.best ?? 0) > rs.best;
-          let chest = 0;
-          if (first && f.floor % RIFT_CHEST_EVERY === 0) {
-            chest = Math.ceil(baseRate(current, world, now) * RIFT_CHEST_SECONDS);
-            next = { ...next, stone: next.stone + chest };
-          }
-          if (first) cleared = { floor: f.floor, week: rs.week, chest };
-          r = { ok: true, value: next };
+          const parts = [{ s: current, e }, ...partners.map((p) => ({ s: p.state, e: riftOf(p.state, now).exp! }))];
+          const g = guardian ? guardianBattle(parts, f) : { troops: e.troops, opts: expeditionOpts(current, e, f) };
+          const fight = battle(g.troops, f.army, Math.random, g.opts);
+          const losses = guardian ? splitLosses(parts, fight.attackerLost) : [fight.attackerLost];
+          const wound = fight.success ? WOUNDED_WINNER : WOUNDED_ATTACKER_BEATEN;
+          const settle = (st: PlayerState, lost: Army) => {
+            const before = riftOf(st, now).best;
+            let next = applyRiftFight(st, f, { success: fight.success, attackerLost: lost, defenderLost: fight.defenderLost }, wound, now);
+            const first = fight.success && (next.rift?.best ?? 0) > before;
+            const got: { chest: number; relic: Relic | null; captain: string | null } = { chest: 0, relic: null, captain: null };
+            if (first && f.floor % RIFT_CHEST_EVERY === 0) {
+              got.chest = Math.ceil(baseRate(st, world, now) * RIFT_CHEST_SECONDS);
+              got.relic = makeRelic(f.floor, guardian, Math.random, now);
+              next = addRelics({ ...next, stone: next.stone + got.chest }, [got.relic]);
+            }
+            if (first && guardian) {
+              // F2 : un capitaine offert (trois traits proposés, ou un trait au hasard si un choix attend déjà).
+              if (!next.captainOffer?.length) {
+                next = { ...next, captainOffer: drawTraits(Math.random) };
+                got.captain = "offer";
+              } else {
+                const k = makeCaptain(TRAIT_IDS[Math.floor(Math.random() * TRAIT_IDS.length)], undefined, Math.random, now);
+                const added = addCaptain(next, k);
+                if (added.ok) {
+                  next = added.value;
+                  got.captain = k.name;
+                }
+              }
+            }
+            return { next, first, got };
+          };
+          const mine = settle(current, losses[0]);
+          const others = partners.map((p, k) => ({ p, ...settle(p.state, losses[k + 1] ?? {}) }));
+          if (mine.first) cleared = { floor: f.floor, week: rs.week, chest: mine.got.chest };
+          r = { ok: true, value: mine.next };
+          const relic = mine.got.relic;
+          const fallen = mine.next.rift?.exp?.fights.at(-1)?.dead ?? [];
+          const who = partners.length ? ` avec ${partners.map((p) => p.e.name).join(", ")}` : "";
           message = fight.success
-            ? `🌀 Étage ${f.floor} franchi !${chest > 0 ? ` Coffre : ${chest.toLocaleString("fr-FR")} pierres.` : ""}`
-            : `🌀 L'étage ${f.floor} tient bon : tes survivants rentrent.`;
+            ? `${guardian ? "👹 Gardien" : "🌀 Étage"} ${f.floor} franchi${who} !${mine.got.chest > 0 ? ` Coffre : ${mine.got.chest.toLocaleString("fr-FR")} pierres.` : ""}${relic ? ` Relique : ${RELICS[relic.kind].icon} ${RELICS[relic.kind].name} (${RARITY_LABEL[RELICS[relic.kind].rarity]}).` : ""}${mine.got.captain ? " Un capitaine te rejoint : va le choisir dans l'Armée." : ""}`
+            : `${guardian ? "👹 Le gardien" : "🌀 L'étage"} ${f.floor} tient bon : les survivants rentrent.`;
+          if (fallen.length) message += ` ⚰️ ${fallen.join(", ")} est tombé${fallen.length > 1 ? "s" : ""}.`;
+          riftAfter = others;
         }
       } else r = { ok: false, error: "Action inconnue." };
       if (!r.ok) error = r.error;
@@ -2661,6 +2749,16 @@ export async function runAction(admin: SupabaseClient, userId: string, action: G
           await addChronicle(admin, season.id, { kind: "rift", actor_id: userId, details: { week: cleared.week, floor: cleared.floor, name: me.name } });
           const got = await grantRenown(admin, season.id, me, "rift", `Faille, étage ${cleared.floor}`, `${cleared.week}:${cleared.floor}`, floorRenown(cleared.floor));
           if (got > 0) message = `${message} +${got} 🎖️`;
+        }
+        // Gardien : les alliés de la bataille, enregistrés après moi (une écriture refusée laisse leur expédition intacte).
+        for (const o of riftAfter) {
+          const { data: od } = await admin.rpc("commit_state", { p_season: season.id, p_state: toJson(o.p.e, o.next, {}), p_touch: false, p_contribution: 0, p_stage_bases: stageSizes, p_active_window_days: ACTIVE_WINDOW_DAYS, p_action: null, p_details: null });
+          if ((od as { conflict?: boolean } | null)?.conflict) continue;
+          if (o.first) {
+            const wk = riftWeek(now).key;
+            await addChronicle(admin, season.id, { kind: "rift", actor_id: o.p.e.id, details: { week: wk, floor: o.next.rift?.best ?? 0, name: o.p.e.name } });
+            await grantRenown(admin, season.id, o.p.e, "rift", `Faille, gardien de l'étage ${o.next.rift?.best ?? 0}`, `${wk}:${o.next.rift?.best ?? 0}`, floorRenown(o.next.rift?.best ?? 0));
+          }
         }
       }
     } else if (action.type === "lineage_buy" || action.type === "lineage_respec") {
@@ -2993,7 +3091,7 @@ export async function runAction(admin: SupabaseClient, userId: string, action: G
       daily: dailyView(finalState, dailyCounts, now),
       guild: guildView(meNow, finalState, entities, chiefs, worldFrom(worksite), now, conflicts.wars, names, intel),
       renown: { earned: renown.earned, available: renownAvailable(renown.earned, finalState.lineage), today: renown.today },
-      ...(finalState.companyModel ? { rift: riftView(finalState, await loadRiftBoard(admin, season.id, riftWeek(now).key), userId, now) } : {}),
+      ...(finalState.companyModel ? { rift: riftView(finalState, await loadRiftBoard(admin, season.id, riftWeek(now).key), userId, now, riftAllies(meNow, finalState, entities, worldFrom(worksite), flat, now)) } : {}),
     };
     return error ? { ok: false, error, snapshot } : { ok: true, snapshot, message };
   }

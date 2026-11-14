@@ -319,6 +319,8 @@ export interface RiftFloorView {
   guardian: boolean;
   /** Premier joueur à l'avoir franchi cette semaine. */
   first?: string;
+  /** Gardien : alliés qui attendent devant avec toi. */
+  allies?: string[];
   /** Chance de l'expédition en cours, quand elle attend devant cet étage. */
   chance?: number;
 }
@@ -369,6 +371,7 @@ export type GameAction =
   | { type: "lineage_buy"; node: string }
   | { type: "lineage_respec" }
   | { type: "rift"; op: "send" | "fight" | "return"; ids?: string[] }
+  | { type: "captain"; op: "draw" | "pick" | "assign" | "relic" | "drop"; id?: string; company?: string | null; trait?: string; target?: string }
   | { type: "company"; op: "create" | "dissolve" | "retype" | "recruit" | "train" | "barracks" | "fort"; id?: string; unit?: string; qty?: number }
   | { type: "click"; count: number }
   | { type: "buy"; generator: string; qty: number }

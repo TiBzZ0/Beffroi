@@ -2466,3 +2466,14 @@ use.g-enemy {
 .rift-floor .row-desc + .row-desc {
   margin-top: 2px;
 }
+.badge.rarity-rare {
+  color: #2f5fa8;
+  border-color: currentColor;
+}
+.badge.rarity-legendaire {
+  color: #a8741a;
+  border-color: currentColor;
+}
+.row-title-one .badge {
+  white-space: nowrap;
+}

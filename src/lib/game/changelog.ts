@@ -5,6 +5,13 @@ export interface ChangeEntry {
   id: number;
   date: string;
   items: string[];
+  /** Montrée seulement à partir de cette saison (annonce d'un changement qui l'attend). */
+  minSeason?: number;
+}
+
+/** Entrées visibles dans une saison donnée. */
+export function changelogFor(season: number): ChangeEntry[] {
+  return CHANGELOG.filter((c) => (c.minSeason ?? 0) <= season);
 }
 
 export const CHANGELOG: ChangeEntry[] = [
@@ -530,6 +537,20 @@ export const CHANGELOG: ChangeEntry[] = [
       "🎖️ Nouveau : le renom. Il se gagne en jouant, pas en produisant : raid gagné contre un joueur 3 (15 par jour au plus), défense réussie 2 (10 par jour), seigneur battu 1 (6 par jour), reconnaissance réussie 1 (4 par jour), quête du jour 3, participation à un événement 2 et 3 de plus sur le podium, étape finie avec au moins un palier de don 10. Rien dans sa propre alliance ni entre comptes d'une même adresse. Les limites repartent à minuit, heure de Paris. Ton renom s'affiche en haut, et chaque gain arrive dans tes rapports.",
       "🌳 Nouveau : la Lignée, dans 🏆 Rangs. Trois branches (⛏️ Bâtisseur, ⚔️ Seigneur de guerre, 🕵️ Maître espion) de neuf nœuds sur quatre rangs, achetés en renom. Un seul nœud de rang 4 dans toute la Lignée, et son icône s'affiche à côté de ton nom. Changer de voie rend tout sauf 10 renom, une fois par jour.",
       "🧪 C'est un essai : 20 renom sont offerts pour commencer, et renom comme Lignée repartent de zéro le 23 novembre avec la nouvelle saison.",
+    ],
+  },
+  {
+    id: 63,
+    date: "23 novembre",
+    minSeason: 1,
+    items: [
+      "🏯 Saison 1 : l'armée change de modèle. Elle se compose maintenant de compagnies : une compagnie, un seul type de troupe, un effectif maximal (1 000 miliciens, 600 piquiers, 500 arbalétriers, 150 chevaliers ou 40 béliers). La caserne en donne 2 au départ, +1 par niveau, 8 au plus. Une armée plus riche n'est plus une armée plus grosse : elle est mieux entraînée, mieux commandée et mieux équipée.",
+      "⏳ Les hommes se paient toujours en pierre, mais ils arrivent un par un dans la file de la caserne (une deuxième file au niveau 3 de caserne, une troisième au niveau 6). Une perte coûte du temps : les hommes tombés se recrutent de nouveau.",
+      "🎯 Chaque compagnie s'entraîne de 0 à 10 : +8 % d'attaque et de points de vie par niveau, en plus de la Forge. Une compagnie à l'entraînement ne sort pas.",
+      "🧱 Palissades, tours, balistes et murailles se bâtissent par niveaux (0 à 10) et se relèvent toujours après une bataille.",
+      "🏰 Les seigneurs, la forteresse et les événements ont des armées fixes selon leur niveau, au lieu de suivre la tienne. Le butin, lui, suit toujours la production.",
+      "🌀 Nouveau : la faille, au centre de la carte (Carte › Faille). Des étages à garnison fixe, les mêmes pour tous, avec une ou deux altérations connues pour la semaine. Envoie de 1 à 4 compagnies, monte tant que tu gagnes, rentre quand tu veux. Premier passage d'un étage dans la semaine : du renom, et tous les 5 étages un coffre et une relique. Tous les 10 étages, un gardien à battre à deux joueurs d'une même alliance au moins. Remise à zéro chaque lundi à 4 h, et le premier à franchir chaque étage y grave son nom.",
+      "🎖️ Nouveau : les capitaines (15 renom, un trait parmi trois, cinq niveaux gagnés dans la faille) et les reliques, une de chaque par compagnie.",
     ],
   },
 ];

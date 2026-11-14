@@ -35,6 +35,13 @@ export interface RoundLog {
   defenderLeft: number;
 }
 
+/** C3, F3 : bonus d'une armée par type (capitaines, reliques) : attaque, points de vie, dégâts contre une catégorie. */
+export interface Boost {
+  atk?: Partial<Record<string, number>>;
+  hp?: Partial<Record<string, number>>;
+  vs?: Partial<Record<string, Partial<Record<string, number>>>>;
+}
+
 export interface BattleOptions {
   /** Multiplicateur des dégâts de l'attaquant (revanche). */
   attackBonus?: number;
@@ -48,7 +55,12 @@ export interface BattleOptions {
   /** L2 : part des pertes de l'attaquant qui tombent vraiment (Vétérans : 0,9). */
   attackerLosses?: number;
   /** F1 : altérations de la faille, multiplicateur de dégâts selon le tireur, la cible et le round (les deux camps). */
-  dmgMod?: (shooter: CombatantDef, target: CombatantDef, round: number) => number;
+  dmgMod?: (shooter: CombatantDef, target: CombatantDef, round: number, side: "attacker" | "defender") => number;
+  /** F3 : part de chaque type de l'attaquant qui frappe en premier au premier round (Lame de la faille). */
+  attackerFirst?: Partial<Record<string, number>>;
+  /** C3, F3 : bonus des capitaines et des reliques de chaque camp. */
+  attackerBoost?: Boost;
+  defenderBoost?: Boost;
   /** Clé de `dmgMod` pour le cache des chances (sans clé, pas de cache). */
   modKey?: string;
 }
@@ -94,10 +106,10 @@ const MIN_BREACH_FACTOR = 0.2;
  * n'en absorbent jamais plus de la moitié (un quart pour les palissades). Les béliers visent
  * d'abord les obstacles et réduisent la part qu'ils absorbent pour les autres.
  */
-function damageOn(shooters: Army, targets: Army, mult: number, shooterLv?: Levels, targetLv?: Levels, fortBonus = 1, mod?: (s: CombatantDef, t: CombatantDef) => number): Map<CombatantId, number> {
+function damageOn(shooters: Army, targets: Army, mult: number, shooterLv?: Levels, targetLv?: Levels, fortBonus = 1, mod?: (s: CombatantDef, t: CombatantDef) => number, sBoost?: Boost, tBoost?: Boost): Map<CombatantId, number> {
   const out = new Map<CombatantId, number>();
   const alive = (Object.entries(targets) as [CombatantId, number][]).filter(([id, m]) => m > 0 && defOf(id));
-  const hpOf = (id: CombatantId, m: number) => m * defOf(id)!.hp * levelFactor(targetLv, id);
+  const hpOf = (id: CombatantId, m: number) => m * defOf(id)!.hp * levelFactor(targetLv, id) * (tBoost?.hp?.[id] ?? 1);
   const pool = (keep: (t: CombatantDef) => boolean) => alive.filter(([id]) => keep(defOf(id)!));
   const sumHp = (list: [CombatantId, number][]) => list.reduce((s, [id, m]) => s + hpOf(id, m), 0);
   const armed = pool((t) => t.attack > 0);
@@ -142,7 +154,7 @@ function damageOn(shooters: Army, targets: Army, mult: number, shooterLv?: Level
     const plan = s.bonus?.fortification ? siege : normal;
     for (const [tid, share] of plan) {
       const t = defOf(tid)!;
-      const dmg = n * s.attack * levelFactor(shooterLv, sid) * (s.bonus?.[t.category] ?? 1) * (t.category === "fortification" ? fortBonus : 1) * share * mult * (mod ? mod(s, t) : 1);
+      const dmg = n * s.attack * levelFactor(shooterLv, sid) * (s.bonus?.[t.category] ?? 1) * (t.category === "fortification" ? fortBonus : 1) * share * mult * (mod ? mod(s, t) : 1) * (sBoost?.atk?.[sid] ?? 1) * (sBoost?.vs?.[sid]?.[t.category] ?? 1);
       out.set(tid, (out.get(tid) ?? 0) + dmg);
     }
   }
@@ -150,11 +162,11 @@ function damageOn(shooters: Army, targets: Army, mult: number, shooterLv?: Level
 }
 
 /** Transforme des dégâts en pertes : les fractions de PV tuent au hasard. */
-function casualties(army: Army, damage: Map<CombatantId, number>, rng: () => number, levels?: Levels): Army {
+function casualties(army: Army, damage: Map<CombatantId, number>, rng: () => number, levels?: Levels, boost?: Boost): Army {
   const lost: Army = {};
   for (const [id, dmg] of damage) {
     const n = army[id] ?? 0;
-    const hp = (defOf(id)?.hp ?? 1) * levelFactor(levels, id);
+    const hp = (defOf(id)?.hp ?? 1) * levelFactor(levels, id) * (boost?.hp?.[id] ?? 1);
     const exact = dmg / hp;
     const kills = Math.min(n, Math.floor(exact) + (rng() < exact - Math.floor(exact) ? 1 : 0));
     if (kills > 0) lost[id] = kills;
@@ -201,10 +213,28 @@ export function battle(attacker: Army, defender: Army, rng: () => number, opts: 
     const swingAtt = 1 - BATTLE_SWING + rng() * 2 * BATTLE_SWING;
     const swingDef = 1 - BATTLE_SWING + rng() * 2 * BATTLE_SWING;
     const r = rounds;
-    const mod = opts.dmgMod ? (s: CombatantDef, t: CombatantDef) => opts.dmgMod!(s, t, r) : undefined;
-    const onDef = casualties(def, damageOn(att, def, mult * swingAtt, aLv, dLv, opts.fortBonus ?? 1, mod), rng, dLv);
-    const onAtt = casualties(att, damageOn(def, att, swingDef * (opts.attackerLosses ?? 1), dLv, aLv, 1, mod), rng, aLv);
-    def = subtract(def, onDef);
+    const mod = opts.dmgMod ? (s: CombatantDef, t: CombatantDef) => opts.dmgMod!(s, t, r, "attacker") : undefined;
+    const modDef = opts.dmgMod ? (s: CombatantDef, t: CombatantDef) => opts.dmgMod!(s, t, r, "defender") : undefined;
+    const aB = opts.attackerBoost;
+    const dB = opts.defenderBoost;
+    let shooters = att;
+    let early: Army = {};
+    if (rounds === 1 && opts.attackerFirst) {
+      // Les premiers frappent seuls, avant la riposte ; ils ne tirent pas une deuxième fois ce round.
+      const first: Army = {};
+      for (const [id, share] of Object.entries(opts.attackerFirst) as [CombatantId, number][]) {
+        const n = Math.floor((att[id] ?? 0) * Math.max(0, Math.min(1, share)));
+        if (n > 0) first[id] = n;
+      }
+      if (armySize(first) > 0) {
+        early = casualties(def, damageOn(first, def, mult * swingAtt, aLv, dLv, opts.fortBonus ?? 1, mod, aB, dB), rng, dLv, dB);
+        def = subtract(def, early);
+        shooters = subtract(att, first);
+      }
+    }
+    const onDef = add(early, casualties(def, damageOn(shooters, def, mult * swingAtt, aLv, dLv, opts.fortBonus ?? 1, mod, aB, dB), rng, dLv, dB));
+    const onAtt = casualties(att, damageOn(def, att, swingDef * (opts.attackerLosses ?? 1), dLv, aLv, 1, modDef, dB, aB), rng, aLv, aB);
+    def = subtract(def, subtract(onDef, early));
     att = subtract(att, onAtt);
     defenderLost = add(defenderLost, onDef);
     attackerLost = add(attackerLost, onAtt);
@@ -230,7 +260,7 @@ export function estimateChance(attacker: Army, defender: Army, opts: BattleOptio
   if (armySize(cleanArmy(attacker)) === 0) return 0;
   // Les tirages sont fixes : mêmes armées, même résultat. On garde les derniers calculs (le serveur
   // recalcule sinon la chance contre chaque rival à chaque synchronisation).
-  const key = JSON.stringify([attacker, defender, opts.attackerLevels ?? null, opts.defenderLevels ?? null, opts.attackBonus ?? null, opts.fortune ?? false, opts.fortBonus ?? 1, opts.attackerLosses ?? 1, opts.modKey ?? null]);
+  const key = JSON.stringify([attacker, defender, opts.attackerLevels ?? null, opts.defenderLevels ?? null, opts.attackBonus ?? null, opts.fortune ?? false, opts.fortBonus ?? 1, opts.attackerLosses ?? 1, opts.modKey ?? null, opts.attackerFirst ?? null, opts.attackerBoost ?? null, opts.defenderBoost ?? null]);
   const cacheable = !opts.dmgMod || !!opts.modKey;
   const known = cacheable ? chanceCache.get(key) : undefined;
   if (known !== undefined) return known;

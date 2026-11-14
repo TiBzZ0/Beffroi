@@ -105,10 +105,11 @@ import { worldFrom, type AwaySummary, type LotView, type AllianceSummary, type C
 import { useChat, useGame, useLeaderboard, usePush, useTick } from "./use-game";
 import { BRANCHES, lineageMark, NODE_BY_ID, NODES, nodeBlocker, RANK_COST, RANK_REQUIRED, RENOWN, RENOWN_CAPPED, RESPEC_FEE, respecBlocker, spentIn, type BranchId } from "@/lib/game/lineage";
 import { allocation, BARRACKS_MAX, BARRACKS_MS, barracksBlocker, barracksCost, barracksLevel, COMPANY_CAP, fortBlocker, fortCost, fortCount, fortMs, FORT_MAX, maxCompanies, RECRUIT_MS, recruitPrice, recruitSlots, trainBlocker, trainCost, trainMs, TRAIN_MAX } from "@/lib/game/companies";
+import { CAPTAIN_COST, CAPTAINS_MAX, captainLevel, captainOf, HUNT_TARGETS, RARITY_LABEL, RELICS, RELICS_MAX, relicOf, TRAITS } from "@/lib/game/captains";
 import { ALTERATIONS, riftCompanyBlocker, riftFightBlocker, riftOf, RIFT_IDLE_MS, RIFT_MAX_COMPANIES, SHAPES, type AlterationId } from "@/lib/game/rift";
 import { MapBoard, type BoardMarch, type BoardPlace } from "./kingdom-map";
 import { CHAT_MAX_LENGTH, CHAT_REACTIONS, type ChatChannel } from "@/lib/game/chat-config";
-import { CHANGELOG } from "@/lib/game/changelog";
+import { changelogFor } from "@/lib/game/changelog";
 
 type Tab = "ateliers" | "ameliorations" | "chantier" | "armee" | "carte" | "raids" | "alliance" | "messages" | "classement" | "heritage" | "lignee" | "faille";
 /** U3 : sept onglets, certains avec des sous-onglets. */
@@ -188,7 +189,7 @@ export function Game({ userId }: { userId: string }) {
       selectTab(where);
     } }}>
     <div className="game">
-      <WhatsNew />
+      <WhatsNew season={snap.season.number} />
       {game.away && <AwayModal away={game.away} event={snap.event} onClose={game.dismissAway} />}
       <TopBar snap={snap} now={now} />
       <Movements snap={snap} live={live} now={now} run={game.run} />
@@ -397,19 +398,20 @@ function AwayModal({ away, event, onClose }: { away: AwaySummary; event: EventVi
   );
 }
 
-function WhatsNew() {
+function WhatsNew({ season }: { season: number }) {
+  const log = changelogFor(season);
   // Rendu seulement côté navigateur (le jeu attend sa première synchronisation), on peut lire le stockage tout de suite.
   const [seen, setSeen] = useState<number>(() => {
     try {
       return Number(localStorage.getItem("beffroi.changes") ?? 0);
     } catch {
-      return CHANGELOG.at(-1)?.id ?? 0;
+      return log.at(-1)?.id ?? 0;
     }
   });
-  const fresh = CHANGELOG.filter((c) => c.id > seen);
+  const fresh = log.filter((c) => c.id > seen);
   if (fresh.length === 0) return null;
   const close = () => {
-    const last = CHANGELOG.at(-1)?.id ?? 0;
+    const last = log.at(-1)?.id ?? 0;
     try {
       localStorage.setItem("beffroi.changes", String(last));
     } catch {
@@ -440,7 +442,7 @@ function WhatsNew() {
 }
 
 /** Bouton « Ce qui change » : tout l'historique des règles, du plus récent au plus ancien. */
-function ChangelogButton() {
+function ChangelogButton({ season }: { season: number }) {
   const [open, setOpen] = useState(false);
   return (
     <>
@@ -451,7 +453,7 @@ function ChangelogButton() {
         <div className="modal-backdrop" role="dialog" aria-modal="true" aria-label="Ce qui change" onClick={() => setOpen(false)}>
           <div className="modal panel" onClick={(e) => e.stopPropagation()}>
             <h2>📜 Ce qui change</h2>
-            {[...CHANGELOG].reverse().map((c) => (
+            {[...changelogFor(season)].reverse().map((c) => (
               <section key={c.id}>
                 <h3>{c.date}</h3>
                 <ul>
@@ -575,7 +577,7 @@ function TopBar({ snap, now }: { snap: GameSnapshot; now: number }) {
           <br />
           fin dans {days} j {hours} h
         </div>
-        <ChangelogButton />
+        <ChangelogButton season={snap.season.number} />
         <PushButton />
         <form action={signOut}>
           <button className="btn btn-ghost" title="Se déconnecter" aria-label="Se déconnecter">
@@ -1614,7 +1616,7 @@ function Army({ snap, live, now, run }: { snap: GameSnapshot; live: PlayerState;
             riposte en face. Une partie des troupes perdues revient de l&apos;infirmerie au bout de 30 minutes.
           </Info>
           <TributeGauge live={live} now={now} />
-          {live.companyModel ? <Companies live={live} now={now} base={baseRate(live, worldFrom(snap.worksite), now)} run={run} /> : <Garrison live={live} run={run} />}
+          {live.companyModel ? <Companies live={live} now={now} base={baseRate(live, worldFrom(snap.worksite), now)} run={run} renown={snap.renown?.available ?? 0} /> : <Garrison live={live} run={run} />}
           <CurfewCard live={live} now={now} run={run} />
         </>
       )}
@@ -4256,6 +4258,7 @@ export function Rift({ snap, live, now, run }: { snap: GameSnapshot; live: Playe
                   .map((f) => (
                     <li key={f.at}>
                       {f.won ? "✅" : "❌"} Étage {f.floor} : pertes {armyIcons(f.lost as Record<string, number>, "aucune")}
+                      {f.dead?.length ? ` · ⚰️ ${f.dead.join(", ")}` : ""}
                     </li>
                   ))}
               </ul>
@@ -4263,8 +4266,8 @@ export function Rift({ snap, live, now, run }: { snap: GameSnapshot; live: Playe
           </div>
           <div className="row-actions">
             {e.status === "wait" && (
-              <Btn className="btn btn-primary" busy={busy} reason={riftFightBlocker(live, now)} onClick={() => void act({ type: "rift", op: "fight" })}>
-                ⚔️ Étage {e.floor}
+              <Btn className="btn btn-primary" busy={busy} reason={riftFightBlocker(live, now, view.floors[0]?.allies?.length ?? 0)} onClick={() => void act({ type: "rift", op: "fight" })}>
+                {view.floors[0]?.guardian ? "👹" : "⚔️"} Étage {e.floor}
                 {view.floors[0]?.chance !== undefined && <span className="cost num">{Math.round(view.floors[0].chance * 100)} %</span>}
               </Btn>
             )}
@@ -4328,6 +4331,8 @@ export function Rift({ snap, live, now, run }: { snap: GameSnapshot; live: Playe
                   </div>
                 ) : null;
               })}
+              {f.guardian && <div className="row-desc">👹 Gardien : il faut au moins deux joueurs de ton alliance, chacun devant cet étage. Récompense : un capitaine et une relique rare pour chacun.</div>}
+              {f.allies && <div className="row-desc">{f.allies.length ? `🤝 Devant avec toi : ${f.allies.join(", ")}` : "🤝 Aucun allié n'attend encore devant."}</div>}
               {f.first && <div className="row-desc">🪦 Gravé : {f.first}</div>}
             </div>
           </div>
@@ -4351,8 +4356,143 @@ export function Rift({ snap, live, now, run }: { snap: GameSnapshot; live: Playe
   );
 }
 
+/** C3, F3 : capitaines (recrutés en renom, un trait parmi trois) et reliques trouvées dans la faille. */
+function CaptainsPanel({ live, run, renown }: { live: PlayerState; run: ReturnType<typeof useGame>["run"]; renown: number }) {
+  const [busy, setBusy] = useState(false);
+  const [hunt, setHunt] = useState<string>("cavalerie");
+  const act = async (a: Extract<Parameters<typeof run>[0], { type: "captain" }>) => {
+    setBusy(true);
+    await run(a);
+    setBusy(false);
+  };
+  const companies = live.companies ?? [];
+  const label = (id: string | null) => {
+    const i = companies.findIndex((c) => c.id === id);
+    const u = i >= 0 ? UNITS.find((x) => x.id === companies[i].unit) : undefined;
+    return i >= 0 ? `${u?.icon ?? ""} ${i + 1}. ${u?.plural ?? ""}` : "En réserve";
+  };
+  const offer = live.captainOffer ?? [];
+  const captains = live.captains ?? [];
+  const relics = live.relics ?? [];
+  const where = (value: string | null, onPick: (v: string | null) => void, aria: string) => (
+    <select className="input" aria-label={aria} value={value ?? ""} disabled={busy} onChange={(e) => onPick(e.target.value || null)}>
+      <option value="">En réserve</option>
+      {companies.map((c) => (
+        <option key={c.id} value={c.id}>
+          {label(c.id)}
+        </option>
+      ))}
+    </select>
+  );
+  return (
+    <>
+      <div className="block-head">
+        <h3 className="section-title">🎖️ Capitaines</h3>
+        <Info>
+          Un capitaine coûte {CAPTAIN_COST} renom ; tu choisis son trait parmi trois. Un par compagnie au plus, et il change de compagnie quand elle est au
+          domaine. Il gagne de l&apos;expérience dans la faille (bataille gagnée 1, perdue 0,5) : niveaux 1 à 5 à 0, 3, 8, 15 et 25, chacun +4 % d&apos;attaque et de
+          points de vie pour sa compagnie. Si sa compagnie perd plus de 80 % de ses hommes, il a une chance sur quatre de tomber.
+        </Info>
+      </div>
+      {offer.length > 0 ? (
+        <div className="list">
+          {offer.map((t) => (
+            <div key={t} className="row">
+              <div className="row-icon" aria-hidden>
+                {TRAITS[t].icon}
+              </div>
+              <div>
+                <div className="row-title">{TRAITS[t].name}</div>
+                <div className="row-desc">{TRAITS[t].text}</div>
+                {t === "chasseur" && (
+                  <select className="input" aria-label="Catégorie visée" value={hunt} onChange={(e) => setHunt(e.target.value)}>
+                    {HUNT_TARGETS.map((h) => (
+                      <option key={h.id} value={h.id}>
+                        contre {h.label}
+                      </option>
+                    ))}
+                  </select>
+                )}
+              </div>
+              <Btn className="btn btn-primary btn-small" busy={busy} onClick={() => void act({ type: "captain", op: "pick", trait: t, ...(t === "chasseur" ? { target: hunt } : {}) })}>
+                Choisir
+              </Btn>
+            </div>
+          ))}
+        </div>
+      ) : (
+        <Btn className="btn" busy={busy} reason={renown < CAPTAIN_COST ? `Il faut ${CAPTAIN_COST} renom (tu en as ${renown}).` : captains.length >= CAPTAINS_MAX ? `${CAPTAINS_MAX} capitaines au plus.` : null} onClick={() => void act({ type: "captain", op: "draw" })}>
+          🎖️ Recruter un capitaine
+          <span className="cost num">{CAPTAIN_COST} 🎖️</span>
+        </Btn>
+      )}
+      {captains.length > 0 && (
+        <div className="list">
+          {captains.map((k) => (
+            <div key={k.id} className="row">
+              <div className="row-icon" aria-hidden>
+                {TRAITS[k.trait].icon}
+              </div>
+              <div>
+                <div className="row-title row-title-one">
+                  <span className="row-name">{k.name}</span>
+                  <span className="badge">niv. {captainLevel(k)}</span>
+                </div>
+                <div className="row-desc">
+                  {TRAITS[k.trait].name}
+                  {k.target ? ` (contre ${HUNT_TARGETS.find((h) => h.id === k.target)?.label ?? k.target})` : ""} · {k.xp.toLocaleString("fr-FR")} bataille{k.xp > 1 ? "s" : ""}
+                </div>
+                {where(k.company, (v) => void act({ type: "captain", op: "assign", id: k.id, company: v }), `Compagnie de ${k.name}`)}
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+      <div className="block-head">
+        <h3 className="section-title">🏺 Reliques ({relics.length}/{RELICS_MAX})</h3>
+        <Info>
+          Trouvées dans la faille tous les 5 étages, de plus en plus rares en montant, et auprès des gardiens. Une relique par compagnie ; elle se perd si la
+          compagnie est dissoute. Au-delà de {RELICS_MAX}, la plus ancienne en réserve est perdue.
+        </Info>
+      </div>
+      {relics.length === 0 ? (
+        <p className="empty">Aucune relique pour l&apos;instant.</p>
+      ) : (
+        <div className="list">
+          {relics.map((r) => {
+            const d = RELICS[r.kind];
+            return (
+              <div key={r.id} className="row">
+                <div className="row-icon" aria-hidden>
+                  {d.icon}
+                </div>
+                <div>
+                  <div className="row-title row-title-one">
+                    <span className="row-name">{d.name}</span>
+                    <span className={`badge rarity-${d.rarity}`}>{RARITY_LABEL[d.rarity]}</span>
+                  </div>
+                  <div className="row-desc">
+                    {d.text}
+                    {r.target ? ` (contre ${HUNT_TARGETS.find((h) => h.id === r.target)?.label ?? r.target})` : ""}
+                  </div>
+                  <div className="company-more">
+                    {where(r.company, (v) => void act({ type: "captain", op: "relic", id: r.id, company: v }), `Compagnie de ${d.name}`)}
+                    <Btn className="btn btn-small" busy={busy} onClick={() => void act({ type: "captain", op: "drop", id: r.id })}>
+                      ✖ Jeter
+                    </Btn>
+                  </div>
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      )}
+    </>
+  );
+}
+
 /** C1 à C4 : caserne, compagnies, recrutement, entraînement et fortifications en niveaux (saison 1 et suivantes). */
-export function Companies({ live, now, base, run }: { live: PlayerState; now: number; base: number; run: ReturnType<typeof useGame>["run"] }) {
+export function Companies({ live, now, base, run, renown = 0 }: { live: PlayerState; now: number; base: number; run: ReturnType<typeof useGame>["run"]; renown?: number }) {
   const [busy, setBusy] = useState(false);
   const [open, setOpen] = useState<string | null>(null);
   const [newUnit, setNewUnit] = useState<string>("piquier");
@@ -4425,6 +4565,15 @@ export function Companies({ live, now, base, run }: { live: PlayerState; now: nu
                   {a.queued > 0 ? ` · ⏳ +${formatNumber(a.queued)}` : ""}
                   {training ? ` · 🎯 ${countdown(c.trainUntil - now)}` : ""}
                 </div>
+                {(captainOf(live, c.id) || relicOf(live, c.id)) && (
+                  <div className="row-desc one-line">
+                    {(() => {
+                      const k = captainOf(live, c.id);
+                      const r = relicOf(live, c.id);
+                      return [k ? `${TRAITS[k.trait].icon} ${k.name} niv. ${captainLevel(k)}` : "", r ? `${RELICS[r.kind].icon} ${RELICS[r.kind].name}` : ""].filter(Boolean).join(" · ");
+                    })()}
+                  </div>
+                )}
                 {isOpen && (
                   <div className="company-more">
                     <Btn className="btn btn-small" busy={busy} reason={c.trainUntil > 0 ? "Elle est à l'entraînement." : null} onClick={() => void act({ type: "company", op: "dissolve", id: c.id })}>
@@ -4478,6 +4627,7 @@ export function Companies({ live, now, base, run }: { live: PlayerState; now: nu
           </button>
         </div>
       )}
+      <CaptainsPanel live={live} run={run} renown={renown} />
       <div className="block-head">
         <h3 className="section-title">🧱 Fortifications</h3>
       </div>

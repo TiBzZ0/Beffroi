@@ -44,6 +44,9 @@ export interface ArmyHolder {
   recruits?: RecruitOrder[];
   /** Mes troupes postées ailleurs (alliés, halle, forteresse). Fixé par le serveur, jamais enregistré. */
   abroad?: Army;
+  /** C3, F3 : capitaines et reliques, chacun rattaché à une compagnie ou en réserve. */
+  captains?: { id: string; company: string | null }[];
+  relics?: { id: string; company: string | null }[];
   /** F1 : expédition en cours dans la faille (hommes par compagnie, blessés en route). */
   rift?: { exp?: { by: Record<string, number>; troops: Army; wounded: Army } | null } | null;
   /** Le modèle des compagnies est en vigueur (saison 1 et suivantes). Fixé par le serveur, jamais enregistré. */
@@ -334,7 +337,7 @@ export function createCompany<S extends ArmyHolder>(s: S, unit: string, now: num
 }
 
 /** Dissoudre : la compagnie et ses hommes disparaissent (ils doivent être au domaine). */
-export function dissolveCompany<S extends ArmyHolder>(s: S, id: string): R<S> {
+export function dissolveCompany<S extends ArmyHolder>(s: S, id: string, keepGear = false): R<S> {
   const c = (s.companies ?? []).find((x) => x.id === id);
   if (!c) return fail("Compagnie inconnue.");
   const a = allocation(s).get(id) ?? { men: 0, home: 0, queued: 0 };
@@ -353,7 +356,9 @@ export function dissolveCompany<S extends ArmyHolder>(s: S, id: string): R<S> {
     budget -= keep;
     return keep > 0 ? [{ ...r, n: keep }] : [];
   });
-  return { ok: true, value: { ...left, recruits } };
+  // Sa relique se perd, son capitaine revient en réserve (sauf changement de type, où tout reste).
+  const gear = keepGear ? {} : { ...(s.relics ? { relics: s.relics.filter((r) => r.company !== id) } : {}), ...(s.captains ? { captains: s.captains.map((k) => (k.company === id ? { ...k, company: null } : k)) } : {}) };
+  return { ok: true, value: { ...left, recruits, ...gear } };
 }
 
 /** Changer de type : la compagnie repart à 0 homme et garde la moitié de son entraînement. */
@@ -362,7 +367,7 @@ export function retypeCompany<S extends ArmyHolder>(s: S, id: string, unit: stri
   if (!c) return fail("Compagnie inconnue.");
   if (!UNITS.some((u) => u.id === unit) || unit === c.unit) return fail("Choisis un autre type.");
   if (c.trainUntil > 0) return fail("Elle est à l'entraînement.");
-  const gone = dissolveCompany(s, id);
+  const gone = dissolveCompany(s, id, true);
   if (!gone.ok) return gone;
   const companies = [...(gone.value.companies ?? [])];
   const at = (s.companies ?? []).findIndex((x) => x.id === id);

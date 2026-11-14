@@ -110,6 +110,8 @@ export interface LineageState {
   fees: number;
   /** Dernier changement de voie (ms). */
   respecAt: number;
+  /** C3 : renom dépensé en capitaines. */
+  captains?: number;
   /** Jour (Paris) où le Maître des ombres a servi. */
   shadowDay?: string;
 }
@@ -131,7 +133,7 @@ export function spentIn(nodes: string[], branch: BranchId): number {
 }
 
 export function lineageSpent(l: LineageState | null | undefined): number {
-  return (l?.nodes ?? []).reduce((a, id) => a + nodeCost(id), 0) + (l?.fees ?? 0);
+  return (l?.nodes ?? []).reduce((a, id) => a + nodeCost(id), 0) + (l?.fees ?? 0) + (l?.captains ?? 0);
 }
 
 /** Renom disponible : gagné moins dépensé (nœuds et frais de changement de voie). */
@@ -190,7 +192,7 @@ export function respec<S extends Holder>(state: S, now: number): { ok: true; val
 /** Nettoie une Lignée lue en base. */
 export function cleanLineage(raw: unknown): LineageState | undefined {
   if (!raw || typeof raw !== "object") return undefined;
-  const r = raw as { nodes?: unknown; fees?: unknown; respecAt?: unknown; shadowDay?: unknown };
+  const r = raw as { nodes?: unknown; fees?: unknown; respecAt?: unknown; shadowDay?: unknown; captains?: unknown };
   const nodes = Array.isArray(r.nodes) ? [...new Set(r.nodes.map(String).filter((id) => NODE_BY_ID.has(id)))] : [];
-  return { nodes, fees: Math.max(0, Number(r.fees) || 0), respecAt: Number(r.respecAt) || 0, ...(typeof r.shadowDay === "string" ? { shadowDay: r.shadowDay } : {}) };
+  return { nodes, fees: Math.max(0, Number(r.fees) || 0), respecAt: Number(r.respecAt) || 0, ...(Number(r.captains) > 0 ? { captains: Number(r.captains) } : {}), ...(typeof r.shadowDay === "string" ? { shadowDay: r.shadowDay } : {}) };
 }

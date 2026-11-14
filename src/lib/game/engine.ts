@@ -151,6 +151,7 @@ import {
   MINE_SLICE_MS,
   FOG_SPY_FACTOR,
   MAX_MARCHES,
+  BATTLE_FORTUNE,
   TRAVEL_BASE_MIN,
   TRAVEL_MAX_MIN,
   TRAVEL_MIN_MIN,
@@ -169,6 +170,7 @@ import {
 } from "./config";
 import { armySize, armyValue, battle, cleanArmy, type Army, type BattleOptions, type Levels, type RoundLog } from "./battle";
 import { settleRift, type RiftState } from "./rift";
+import { armyBoost, hasTrait, type Captain, type Relic, type TraitId } from "./captains";
 import { combatLevels, lockedMen, settleArmy, type ArmyWorks, type Company, type RecruitOrder } from "./companies";
 import { lin, LIN_ATTACK, LIN_ATTACK_LOSSES, LIN_CAVE_SECONDS, LIN_DONOR_TIERS, LIN_ELAN, LIN_FORT_DAMAGE, LIN_FORTUNE, LIN_GENERATOR_DISCOUNT, LIN_PRODUCTION, LIN_PROTECTED, LIN_PVP_CAP, LIN_REBUILD, LIN_RESEARCH_SPEED, LIN_REVENGE_MS, LIN_RUIN_OUTPUT, LIN_SABOTAGE, LIN_SPEED, LIN_SPY_SPEED, LIN_TROOP_DISCOUNT, LIN_WOUNDED, type LineageState } from "./lineage";
 
@@ -295,6 +297,10 @@ export interface PlayerState {
   companyModel?: boolean;
   /** F1 : la faille (semaine, plus haut étage, repos des compagnies, expédition). */
   rift?: RiftState | null;
+  /** C3, F3 : capitaines, reliques, et les trois traits proposés au dernier recrutement. */
+  captains?: Captain[];
+  relics?: Relic[];
+  captainOffer?: TraitId[] | null;
 }
 
 /** Une recherche de la Forge : un type de troupe ou de fortification, ou l'espionnage. */
@@ -1396,7 +1402,7 @@ export function raidArmies(attacker: PlayerState, victim: PlayerState, ctx: Pick
   // Le coup de pouce de la victime rend ses défenseurs plus durs à abattre.
   const sturdy = (masterActive(victim, "defense", ctx.now) ? 1 + MASTER_BONUSES.defense.value : 1) * (ctx.defenderArmy ? 1 : 1 + stagePerk(ctx.stagesDone ?? 0, "defenseHp")) * (ctx.defenderArmy ? 1 : reinforcementStrength(victim) * rampartStrength(victim));
   const attackBonus = ((hasRevenge(attacker, ctx.victimId, ctx.now) ? REVENGE_ATTACK_BONUS : 1) + (ctx.attackerIsLord ? 0 : warAttack(attacker))) / (1 + (victim.catchUp ?? 0)) / sturdy;
-  const opts: BattleOptions = { ...(ctx.attackerIsLord ? {} : warOpts(attacker)), attackBonus, attackerLevels: combatLevels(attacker), defenderLevels: combatLevels(victim), fortune: ctx.attackerIsLord ? false : warFortune(attacker) };
+  const opts: BattleOptions = { ...(ctx.attackerIsLord ? {} : warOpts(attacker)), attackBonus, attackerLevels: combatLevels(attacker), defenderLevels: combatLevels(victim), fortune: ctx.attackerIsLord ? false : warFortune(attacker), attackerBoost: armyBoost(attacker, "attack"), defenderBoost: armyBoost(victim, "defense") };
   return {
     attack: ctx.attackerArmy ? withAllies(ctx.attackerArmy, ctx.allyArmies) : attackArmy(attacker),
     defense: ctx.defenderArmy ?? defenseArmy(victim),
@@ -1412,7 +1418,10 @@ export function warAttack(state: PlayerState): number {
 
 /** L2 : fortune d'une bataille menée par ce joueur (Chef de guerre : 0,95 à 1,25). */
 export function warFortune(state: PlayerState): BattleOptions["fortune"] {
-  return lin(state, "chef") ? { ...LIN_FORTUNE } : true;
+  const base = lin(state, "chef") ? { ...LIN_FORTUNE } : { min: 1 - BATTLE_FORTUNE, max: 1 + BATTLE_FORTUNE };
+  // C3 : un capitaine Veinard empêche la fortune de descendre sous 0,95.
+  if (hasTrait(state, "veinard")) return { min: Math.max(0.95, base.min), max: Math.max(base.max, 0.95) };
+  return lin(state, "chef") ? base : true;
 }
 
 /** L2 : options de bataille que la Lignée donne à l'attaquant (béliers lourds, vétérans). */
@@ -1425,7 +1434,7 @@ export function warOpts(state: PlayerState): Pick<BattleOptions, "fortBonus" | "
 
 /** L2 : options complètes d'une attaque de joueur hors raid (forteresse, halles, événements, simulateur). */
 export function playerAttackOpts(state: PlayerState, opts: BattleOptions = {}): BattleOptions {
-  return { ...opts, ...warOpts(state), attackBonus: (opts.attackBonus ?? 1) + warAttack(state), attackerLevels: opts.attackerLevels ?? combatLevels(state), fortune: warFortune(state) };
+  return { ...opts, ...warOpts(state), attackBonus: (opts.attackBonus ?? 1) + warAttack(state), attackerLevels: opts.attackerLevels ?? combatLevels(state), attackerBoost: opts.attackerBoost ?? armyBoost(state, "attack"), fortune: warFortune(state) };
 }
 
 /** Halle : la salle d'armes rend les renforts postés plus durs, au prorata de leur part dans la défense. */
@@ -1559,7 +1568,9 @@ export function resolveRaid(
 
   const playerVsPlayer = !ctx.attackerIsLord && !ctx.defenderArmy;
   const factor = playerVsPlayer ? fairness(ctx.relativeSize, revenge) : ctx.defenderArmy ? (ctx.lordFairness ?? 1) : 1;
-  const lootBonus = masterActive(attacker, "loot", now) ? 1 + MASTER_BONUSES.loot.value : 1;
+  // C3 : un capitaine Pillard dont la compagnie part au raid ajoute 15 % au butin (sous les plafonds).
+  const pillard = (attacker.captains ?? []).some((k) => k.trait === "pillard" && k.company && ((fight.attackerStart as Record<string, number>)[attacker.companies?.find((c) => c.id === k.company)?.unit ?? ""] ?? 0) > 0);
+  const lootBonus = (masterActive(attacker, "loot", now) ? 1 + MASTER_BONUSES.loot.value : 1) * (pillard ? 1.15 : 1);
   const stolen = lootOf(victim.stone, ctx.victimRate, revenge, {
     extraSecured: extraSecured(victim, now),
     securedFactor: (victim.granaryCutUntil ?? 0) > now ? 0.5 : 1,

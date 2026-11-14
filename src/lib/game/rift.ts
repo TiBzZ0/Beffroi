@@ -2,10 +2,11 @@
 // Des étages à garnison fixe, les mêmes pour tout le monde, avec une ou deux altérations tirées pour la semaine.
 // Une expédition de 1 à 4 compagnies monte étage par étage tant qu'elle gagne ; le joueur choisit après chaque étage.
 
-import type { Army, BattleOptions, Levels } from "./battle";
+import type { Army, BattleOptions, Boost, Levels } from "./battle";
 import { armyFromBudget } from "./battle";
 import { allocation, companiesOn, companyLevels, trainLevels, type ArmyHolder } from "./companies";
 import type { CombatantDef, CombatantId, UnitId } from "./config";
+import { afterBattle, armyBoost, hasTrait, relicShare, type Captain, type Relic, type RelicKind } from "./captains";
 
 // ---------------------------------------------------------------------------
 // Réglages (calés par simulation, voir rift.test.ts)
@@ -154,19 +155,31 @@ export function riftFloor(week: string, floor: number): Floor {
   return { floor, alterations, shape: alterations.includes("horde") ? "horde" : alterations.includes("champions") ? "champions" : shape, army: army as Army, levels: trainLevels(floorTrain(floor)), guardian: isGuardian(floor) };
 }
 
-/** Options de bataille d'un étage. */
-export function riftBattleOpts(f: Floor, attackerLevels: Levels): BattleOptions {
+/**
+ * Options de bataille d'un étage. `gear` : part des hommes de chaque type dont la relique annule une altération
+ * (Fers à glace, Torche de poix, Cuir mouillé), et le reste des bonus de l'expédition.
+ */
+export function riftBattleOpts(f: Floor, attackerLevels: Levels, gear: { ignore?: Partial<Record<"gel" | "brouillard" | "gregeois", Partial<Record<string, number>>>>; boost?: Boost; first?: Partial<Record<string, number>>; lucky?: boolean } = {}): BattleOptions {
   const has = (a: AlterationId) => f.alterations.includes(a);
   const mods = has("brouillard") || has("gel") || has("gregeois");
+  const spared = (alt: "gel" | "brouillard" | "gregeois", id: string, side: string) => (side === "attacker" ? (gear.ignore?.[alt]?.[id] ?? 0) : 0);
   return {
     attackerLevels,
     defenderLevels: f.levels,
-    fortune: has("sainte") ? false : true,
+    fortune: has("sainte") ? false : gear.lucky ? { min: 0.95, max: 1.2 } : true,
+    ...(gear.boost ? { attackerBoost: gear.boost } : {}),
+    ...(gear.first ? { attackerFirst: gear.first } : {}),
     ...(mods
       ? {
-          modKey: f.alterations.filter((a) => a === "brouillard" || a === "gel" || a === "gregeois").join(","),
-          dmgMod: (s: CombatantDef, t: CombatantDef, round: number) =>
-            (has("brouillard") && s.category === "tir" && round % 2 === 0 ? 0 : 1) * (has("gel") && s.category === "cavalerie" ? 0.5 : 1) * (has("gregeois") && (t.id === "belier" || t.id === "chevalier") ? 1.5 : 1),
+          modKey: `${f.alterations.filter((a) => a === "brouillard" || a === "gel" || a === "gregeois").join(",")}|${JSON.stringify(gear.ignore ?? {})}`,
+          dmgMod: (s: CombatantDef, t: CombatantDef, round: number, side: "attacker" | "defender") => {
+            let m = 1;
+            if (has("brouillard") && s.category === "tir" && round % 2 === 0) m *= spared("brouillard", s.id, side);
+            if (has("gel") && s.category === "cavalerie") m *= 0.5 + 0.5 * spared("gel", s.id, side);
+            // Le feu frappe les béliers et chevaliers de l'expédition (côté défenseur qui tire) ou de la garnison.
+            if (has("gregeois") && (t.id === "belier" || t.id === "chevalier")) m *= 1 + 0.5 * (1 - (side === "defender" ? (gear.ignore?.gregeois?.[t.id] ?? 0) : 0));
+            return m;
+          },
         }
       : {}),
   };
@@ -187,6 +200,8 @@ export interface RiftFight {
   lost: Army;
   killed: Army;
   at: number;
+  /** Capitaines tombés dans ce combat. */
+  dead?: string[];
 }
 
 export interface RiftExpedition {
@@ -218,7 +233,7 @@ export interface RiftState {
   exp: RiftExpedition | null;
 }
 
-type Holder = ArmyHolder & { rift?: RiftState | null; stone: number };
+type Holder = Omit<ArmyHolder, "captains" | "relics" | "rift"> & { rift?: RiftState | null; stone: number; captains?: Captain[]; relics?: Relic[] };
 type R<S> = { ok: true; value: S } | { ok: false; error: string };
 const fail = <S>(error: string): R<S> => ({ ok: false, error });
 
@@ -305,12 +320,12 @@ export function settleRift<S extends Holder>(s: S, now: number, heal: (s: S, wou
 }
 
 /** Pourquoi on ne peut pas attaquer l'étage suivant, ou null. */
-export function riftFightBlocker(s: Holder, now: number): string | null {
+export function riftFightBlocker(s: Holder, now: number, allies = 0): string | null {
   const e = riftOf(s, now).exp;
   if (!e) return "Aucune expédition dans la faille.";
   if (e.status === "out") return "L'expédition n'est pas encore arrivée.";
   if (e.status === "back") return "L'expédition rentre.";
-  if (isGuardian(e.floor)) return "Un gardien garde cet étage : il faut deux joueurs d'une même alliance.";
+  if (isGuardian(e.floor) && allies < 1) return "Un gardien garde cet étage : il faut qu'un allié de ton alliance attende aussi devant.";
   return null;
 }
 
@@ -319,48 +334,131 @@ export function expeditionLevels(s: Holder, e: RiftExpedition): Levels {
   return companyLevels(s, Object.keys(e.by), e.by);
 }
 
+/** Options complètes de la bataille d'un étage pour cette expédition (capitaines et reliques compris). */
+export function expeditionOpts(s: Holder, e: RiftExpedition, f: Floor): BattleOptions {
+  const ids = Object.keys(e.by);
+  const share = (kind: RelicKind, unit: UnitId) => relicShare(s, kind, unit, e.by);
+  const first: Record<string, number> = {};
+  for (const u of ["milicien", "piquier", "arbaletrier", "chevalier", "belier"] as UnitId[]) {
+    const x = share("lame", u);
+    if (x > 0) first[u] = x;
+  }
+  return riftBattleOpts(f, expeditionLevels(s, e), {
+    boost: armyBoost(s, "attack", e.by),
+    ignore: { gel: { chevalier: share("fers", "chevalier") }, brouillard: { arbaletrier: share("torche", "arbaletrier") }, gregeois: { chevalier: share("cuir", "chevalier"), belier: share("cuir", "belier") } },
+    ...(Object.keys(first).length ? { first } : {}),
+    lucky: hasTrait(s, "veinard", ids),
+  });
+}
+
 /**
- * Applique l'issue d'un combat à l'expédition : pertes réparties sur les compagnies, blessés gardés (sauf Nuit de sang),
- * étage suivant si elle gagne, retour sinon.
+ * Applique l'issue d'un combat à l'expédition : pertes réparties sur les compagnies au prorata, bornées par Tenace et
+ * l'Écu des anciens ; blessés gardés (sauf Nuit de sang, et +20 % avec le Reliquaire) ; expérience et mort des
+ * capitaines ; étage suivant si elle gagne, retour sinon.
  */
-export function applyRiftFight<S extends Holder>(s: S, f: Floor, result: { success: boolean; attackerLost: Army; defenderLost: Army }, woundShare: number, now: number): S {
+export function applyRiftFight<S extends Holder>(s: S, f: Floor, result: { success: boolean; attackerLost: Army; defenderLost: Army }, woundShare: number, now: number, rng: () => number = Math.random): S {
   const r = riftOf(s, now);
   const e = r.exp!;
-  const troops: Record<string, number> = { ...(e.troops as Record<string, number>) };
-  const wounded: Record<string, number> = { ...(e.wounded as Record<string, number>) };
-  const by = { ...e.by };
-  const share = f.alterations.includes("sang") ? 0 : woundShare;
+  const start = { ...e.by };
+  const unitOf = (id: string) => s.companies?.find((c) => c.id === id)?.unit;
+  // Pertes du type réparties sur ses compagnies, au prorata de leurs hommes.
+  const cut: Record<string, number> = {};
   for (const [unit, lostRaw] of Object.entries(result.attackerLost)) {
-    const lost = Math.min(troops[unit] ?? 0, lostRaw ?? 0);
-    troops[unit] = (troops[unit] ?? 0) - lost;
-    if (troops[unit] <= 0) delete troops[unit];
-    const w = Math.floor(lost * share);
-    if (w > 0) wounded[unit] = (wounded[unit] ?? 0) + w;
-    // Les pertes tombent sur les compagnies de ce type, au prorata.
-    const ids = Object.keys(by).filter((id) => s.companies?.find((c) => c.id === id)?.unit === unit);
-    const total = ids.reduce((a, id) => a + by[id], 0);
-    let left = lost;
+    const ids = Object.keys(start).filter((id) => unitOf(id) === unit);
+    const total = ids.reduce((a, id) => a + start[id], 0);
+    let left = Math.min(total, lostRaw ?? 0);
     ids.forEach((id, i) => {
-      const cut = i === ids.length - 1 ? left : Math.min(left, Math.round((lost * by[id]) / Math.max(1, total)));
-      by[id] = Math.max(0, by[id] - cut);
-      left -= cut;
+      const c = i === ids.length - 1 ? left : Math.min(left, Math.round(((lostRaw ?? 0) * start[id]) / Math.max(1, total)));
+      cut[id] = Math.min(start[id], c);
+      left -= cut[id];
     });
   }
-  const fight: RiftFight = { floor: f.floor, won: result.success, lost: result.attackerLost, killed: result.defenderLost, at: now };
+  const won = result.success;
+  const after = afterBattle(s, start, cut, won, rng);
+  const share = f.alterations.includes("sang") ? 0 : woundShare;
+  const by: Record<string, number> = {};
+  const troops: Record<string, number> = {};
+  const wounded: Record<string, number> = { ...(e.wounded as Record<string, number>) };
+  const lost: Record<string, number> = {};
+  for (const id of Object.keys(start)) {
+    const unit = unitOf(id);
+    const c = after.cut[id] ?? 0;
+    by[id] = start[id] - c;
+    if (!unit) continue;
+    if (by[id] > 0) troops[unit] = (troops[unit] ?? 0) + by[id];
+    if (c > 0) lost[unit] = (lost[unit] ?? 0) + c;
+    const w = Math.floor(c * Math.min(1, share * (1 + (after.woundBonus[id] ?? 0))));
+    if (w > 0) wounded[unit] = (wounded[unit] ?? 0) + w;
+  }
   const alive = Object.values(troops).some((n) => n > 0);
-  const won = result.success && alive;
+  const ok = won && alive;
+  const fight: RiftFight = { floor: f.floor, won: ok, lost: lost as Army, killed: result.defenderLost, at: now, ...(after.dead.length ? { dead: after.dead.map((k) => k.name) } : {}) };
   const exp: RiftExpedition = {
     ...e,
     by,
     troops: troops as Army,
     wounded: wounded as Army,
-    floor: won ? e.floor + 1 : e.floor,
-    status: won ? "wait" : "back",
-    returnAt: won ? 0 : now + e.travel,
+    floor: ok ? e.floor + 1 : e.floor,
+    status: ok ? "wait" : "back",
+    returnAt: ok ? 0 : now + e.travel,
     lastAt: now,
     fights: [...e.fights, fight].slice(-12),
   };
-  return { ...s, rift: { ...r, best: won ? Math.max(r.best, f.floor) : r.best, exp } };
+  return { ...after.state, rift: { ...r, best: ok ? Math.max(r.best, f.floor) : r.best, exp } };
+}
+
+/** Gardiens : une seule bataille pour plusieurs expéditions alliées, bonus mêlés au prorata des hommes de chaque type. */
+export function guardianBattle(parts: { s: Holder; e: RiftExpedition }[], f: Floor): { troops: Army; opts: BattleOptions } {
+  const troops: Record<string, number> = {};
+  for (const p of parts) for (const [id, n] of Object.entries(p.e.troops)) if ((n ?? 0) > 0) troops[id] = (troops[id] ?? 0) + (n ?? 0);
+  const each = parts.map((p) => ({ men: p.e.troops as Record<string, number>, o: expeditionOpts(p.s, p.e, f) }));
+  const avg = (unit: string, get: (o: BattleOptions) => number) => {
+    const total = troops[unit] ?? 0;
+    return total > 0 ? each.reduce((a, x) => a + (x.men[unit] ?? 0) * get(x.o), 0) / total : 1;
+  };
+  const levels: Record<string, number> = {};
+  const boost: Required<Boost> = { atk: {}, hp: {}, vs: {} };
+  const first: Record<string, number> = {};
+  for (const unit of Object.keys(troops)) {
+    levels[unit] = (avg(unit, (o) => 1 + 0.1 * Math.max(0, o.attackerLevels?.[unit as UnitId] ?? 0)) - 1) / 0.1;
+    boost.atk[unit] = avg(unit, (o) => o.attackerBoost?.atk?.[unit] ?? 1);
+    boost.hp[unit] = avg(unit, (o) => o.attackerBoost?.hp?.[unit] ?? 1);
+    const vs: Record<string, number> = {};
+    for (const cat of ["infanterie", "tir", "cavalerie", "siege", "fortification"]) {
+      const v = avg(unit, (o) => o.attackerBoost?.vs?.[unit]?.[cat] ?? 1);
+      if (Math.abs(v - 1) > 1e-9) vs[cat] = v;
+    }
+    if (Object.keys(vs).length) boost.vs[unit] = vs;
+    const fs = avg(unit, (o) => o.attackerFirst?.[unit] ?? 0);
+    if (fs > 0) first[unit] = fs;
+  }
+  const share = (unit: string, kind: RelicKind) => {
+    const total = troops[unit] ?? 0;
+    return total > 0 ? parts.reduce((a, p) => a + ((p.e.troops as Record<string, number>)[unit] ?? 0) * relicShare(p.s, kind, unit as UnitId, p.e.by), 0) / total : 0;
+  };
+  const opts = riftBattleOpts(f, levels as Levels, {
+    boost,
+    ignore: { gel: { chevalier: share("chevalier", "fers") }, brouillard: { arbaletrier: share("arbaletrier", "torche") }, gregeois: { chevalier: share("chevalier", "cuir"), belier: share("belier", "cuir") } },
+    ...(Object.keys(first).length ? { first } : {}),
+    lucky: parts.some((p) => hasTrait(p.s, "veinard", Object.keys(p.e.by))),
+  });
+  return { troops: troops as Army, opts };
+}
+
+/** Pertes d'une bataille commune réparties entre les expéditions, au prorata de leurs hommes de chaque type. */
+export function splitLosses(parts: { e: RiftExpedition }[], lost: Army): Army[] {
+  const out: Record<string, number>[] = parts.map(() => ({}));
+  for (const [unit, n] of Object.entries(lost)) {
+    const total = parts.reduce((a, p) => a + ((p.e.troops as Record<string, number>)[unit] ?? 0), 0);
+    let left = Math.min(total, n ?? 0);
+    parts.forEach((p, i) => {
+      const mine = (p.e.troops as Record<string, number>)[unit] ?? 0;
+      const c = i === parts.length - 1 ? left : Math.min(left, mine, Math.round(((n ?? 0) * mine) / Math.max(1, total)));
+      if (c > 0) out[i][unit] = c;
+      left -= c;
+    });
+  }
+  return out as Army[];
 }
 
 /** Nettoyage à la lecture. */
@@ -384,7 +482,7 @@ export function cleanRift(raw: unknown): RiftState | null {
           travel: num(e.travel),
           lastAt: num(e.lastAt),
           week: String(e.week ?? r.week),
-          fights: Array.isArray(e.fights) ? e.fights.slice(-12).map((x) => ({ floor: num(x?.floor), won: !!x?.won, lost: army(x?.lost), killed: army(x?.killed), at: num(x?.at) })) : [],
+          fights: Array.isArray(e.fights) ? e.fights.slice(-12).map((x) => ({ floor: num(x?.floor), won: !!x?.won, lost: army(x?.lost), killed: army(x?.killed), at: num(x?.at), ...(Array.isArray(x?.dead) ? { dead: x.dead.map(String).slice(0, 4) } : {}) })) : [],
         }
       : null;
   return { week: r.week, best: Math.max(0, Math.floor(num(r.best))), rest, exp };
