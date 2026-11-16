@@ -562,4 +562,13 @@ export const CHANGELOG: ChangeEntry[] = [
       "⚔️ Les raids des seigneurs contre les joueurs visent de nouveau une chance de victoire raisonnable, au lieu d'envoyer toute leur armée sur un domaine qui démarre.",
     ],
   },
+  {
+    id: 65,
+    date: "16 novembre",
+    minSeason: 1,
+    items: [
+      "🏯 Caserne : deux files de recrutement dès le départ (trois au niveau 3, quatre au niveau 6). Tes deux premières compagnies se remplissent en même temps, et les commandes déjà en attente ont été réparties sur la nouvelle file.",
+      "⏳ Chaque compagnie en attente affiche maintenant quand ses hommes commencent à arriver, ou quand elle sera pleine.",
+    ],
+  },
 ];

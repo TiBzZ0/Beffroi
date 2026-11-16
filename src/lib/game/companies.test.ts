@@ -64,3 +64,25 @@ describe("companyEta", () => {
     expect(eta.get("b")).toEqual({ next: 144 * 20_000 + 4_000, last: 144 * 20_000 + 400_000 });
   });
 });
+
+describe("Files de la caserne", () => {
+  it("deux files au départ : deux compagnies se remplissent ensemble", () => {
+    let s = ok(createCompany(model(), "chevalier", T0));
+    s = ok(createCompany(s, "piquier", T0));
+    s = ok(recruit(s, s.companies![0].id, 150, T0));
+    s = ok(recruit(s, s.companies![1].id, 100, T0));
+    expect(s.recruits!.map((r) => [r.slot, r.from])).toEqual([[0, T0], [1, T0]]);
+  });
+
+  it("une commande en attente passe sur une file libre", () => {
+    const s = model({
+      recruits: [
+        { unit: "chevalier", n: 144, from: T0, per: 20_000, slot: 0 },
+        { unit: "piquier", n: 100, from: T0 + 144 * 20_000, per: 4_000, slot: 0 },
+      ],
+    });
+    const later = settleArmy(s, T0 + 60_000);
+    expect(later.recruits![1]).toMatchObject({ slot: 1, from: T0 + 60_000 });
+    expect(later.troops.chevalier).toBe(3);
+  });
+});

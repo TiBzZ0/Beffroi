@@ -4513,9 +4513,9 @@ export function Companies({ live, now, base, run, renown = 0 }: { live: PlayerSt
         <h3 className="section-title">🏯 Caserne niv. {lv}</h3>
         <Info>
           Ton armée se compose de compagnies : une compagnie, un seul type de troupe, un effectif maximal et un entraînement de 0 à 10 (+8 % d&apos;attaque et
-          de points de vie par niveau, en plus de la Forge). Les hommes se paient tout de suite mais arrivent un par un dans la file de la caserne, commande après commande : une compagnie commandée après une autre attend que la file se libère. Une
-          compagnie à l&apos;entraînement ne peut pas sortir. La caserne ajoute une compagnie par niveau (8 au plus), une deuxième file au niveau 3 et une
-          troisième au niveau 6. Les fortifications se bâtissent par niveaux et se relèvent toujours après une bataille.
+          de points de vie par niveau, en plus de la Forge). Les hommes se paient tout de suite mais arrivent un par un dans la file de la caserne, commande après commande : quand toutes les files sont prises, une nouvelle commande attend que l&apos;une se libère. Une
+          compagnie à l&apos;entraînement ne peut pas sortir. La caserne a deux files au départ et ajoute une compagnie par niveau (8 au plus), une troisième file au niveau 3 et une
+          quatrième au niveau 6. Les fortifications se bâtissent par niveaux et se relèvent toujours après une bataille.
         </Info>
       </div>
       <div className="row">

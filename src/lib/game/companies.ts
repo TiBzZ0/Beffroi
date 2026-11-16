@@ -105,7 +105,7 @@ export function maxCompanies(s: ArmyHolder): number {
 /** Files de recrutement en parallèle : une, deux au niveau 3, trois au niveau 6. */
 export function recruitSlots(s: ArmyHolder): number {
   const lv = barracksLevel(s);
-  return 1 + (lv >= 3 ? 1 : 0) + (lv >= 6 ? 1 : 0);
+  return 2 + (lv >= 3 ? 1 : 0) + (lv >= 6 ? 1 : 0);
 }
 
 const add = (a: Record<string, number>, id: string, n: number) => {
@@ -323,6 +323,21 @@ export function settleArmy<S extends ArmyHolder>(s: S, now: number): S {
     delete works.fort;
     changed = true;
   }
+  // Les commandes pas encore commencées passent sur la file qui se libère le plus tôt (une file vient de s'ouvrir, une autre s'est vidée).
+  const slots = recruitSlots({ ...s, barracks });
+  const ends = Array.from({ length: slots }, () => now);
+  const started = recruits.filter((r) => r.from <= now || r.slot >= slots);
+  for (const r of started) if (r.slot < slots) ends[r.slot] = Math.max(ends[r.slot], r.from + r.n * r.per);
+  const waiting = recruits.filter((r) => !started.includes(r)).sort((a, b) => a.from - b.from);
+  const queue: RecruitOrder[] = [...started];
+  for (const r of waiting) {
+    const slot = ends.indexOf(Math.min(...ends));
+    const from = Math.min(r.from, ends[slot]);
+    if (from !== r.from || slot !== r.slot) changed = true;
+    queue.push(from !== r.from || slot !== r.slot ? { ...r, from, slot } : r);
+    ends[slot] = from + r.n * r.per;
+  }
+  recruits.splice(0, recruits.length, ...queue);
   // Les fortifications se relèvent toujours au compte de leur niveau.
   const defenses = fortsFromLevels(fortLevels);
   const sameDefenses = DEFENSES.every((d) => (s.defenses[d.id] ?? 0) === (defenses[d.id] ?? 0));
