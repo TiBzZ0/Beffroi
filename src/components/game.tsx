@@ -4562,7 +4562,7 @@ export function Companies({ live, now, base, run, renown = 0 }: { live: PlayerSt
                   <span style={{ width: `${Math.min(100, (a.men / cap) * 100)}%` }} />
                 </div>
                 <div className="row-desc num one-line">
-                  {formatNumber(a.men)}/{formatNumber(cap)}
+                  {formatNumber(a.men)}/{formatNumber(cap)} · {formatNumber(recruitPrice(c.unit, 1))} 🪨 l&apos;homme
                   {a.home < a.men ? ` · 🚶 ${formatNumber(a.men - a.home)} dehors` : ""}
                   {a.queued > 0 ? ` · ⏳ +${formatNumber(a.queued)}` : ""}
                   {training ? ` · 🎯 ${countdown(c.trainUntil - now)}` : ""}
@@ -4622,7 +4622,7 @@ export function Companies({ live, now, base, run, renown = 0 }: { live: PlayerSt
           <select className="input" value={newUnit} onChange={(e) => setNewUnit(e.target.value)} aria-label="Type de la nouvelle compagnie">
             {UNITS.map((u) => (
               <option key={u.id} value={u.id}>
-                {u.icon} {u.plural} ({formatNumber(COMPANY_CAP[u.id])})
+                {u.icon} {u.plural} ({formatNumber(COMPANY_CAP[u.id])} hommes · {formatNumber(recruitPrice(u.id, 1))} 🪨 l&apos;homme)
               </option>
             ))}
           </select>
