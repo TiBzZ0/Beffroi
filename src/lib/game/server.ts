@@ -953,14 +953,14 @@ function lordBudgets(entities: Map<string, Entity>): Record<1 | 2 | 3 | 4, numbe
 }
 
 /**
- * C5 : en début de saison, les armées des seigneurs montent avec le temps, comme celles des joueurs : (heures / heures du
- * jour cible)^0,75, entre 5 % et 100 %. Simulé : une demi-compagnie bat un seigneur facile à la première heure, deux
- * compagnies au bout de 6 heures, et chaque niveau atteint sa pleine force à son jour cible (1, 2, 5, 9).
+ * Saison 1 : les seigneurs suivent la croissance d'un joueur actif pendant le premier jour, tous au même rythme,
+ * puis gardent leur taille calée (faciles jour 1, moyens jour 2, difficiles jour 5, redoutables jour 9).
+ * La même courbe pour tous garde l'écart entre niveaux. Simulé (70 % de chances, compagnies non entraînées) :
+ * à 2 h, 0,75 compagnie bat un facile, 4 à 4,5 un redoutable ; à 6 h, 1,5 contre 9 à 10.
  */
-const LORD_RAMP_DAYS: Record<number, number> = { 1: 1, 2: 2, 3: 5, 4: 9 };
-function lordRamp(difficulty: number, ageHours: number): number {
-  const days = LORD_RAMP_DAYS[difficulty] ?? 1;
-  return Math.max(0.05, Math.min(1, (ageHours / (days * 24)) ** 0.75));
+const LORD_RAMP_HOURS = 24;
+function lordRamp(ageHours: number): number {
+  return Math.max(0.05, Math.min(1, (ageHours / LORD_RAMP_HOURS) ** 0.75));
 }
 
 /** Armée des seigneurs : elle suit les vrais joueurs, selon leur niveau et leur caractère. */
@@ -977,7 +977,7 @@ function lordArmies(entities: Map<string, Entity>, world?: WorldState, now?: num
     const ageH = Math.max(0, ((now ?? Date.now()) - currentSeasonStart) / 3_600_000);
     for (const l of LORDS) {
       const taste = LORD_ARMY[l.key];
-      const total = (LORD_COMPANIES[l.key] ?? 4) * COMPANY_VALUE * lordRamp(l.difficulty, ageH);
+      const total = (LORD_COMPANIES[l.key] ?? 4) * COMPANY_VALUE * lordRamp(ageH);
       const attack = armyFromBudget(total * LORD_RAID_SHARE, Object.keys(taste.troops).length ? taste.troops : { milicien: 1 });
       const troops = armyFromBudget(total * taste.troopShare, taste.troops);
       const forts = armyFromBudget(total * (1 - taste.troopShare), taste.forts);
