@@ -551,14 +551,17 @@ async function loadEntities(admin: SupabaseClient, seasonId: number, userId: str
     const { count: earlier } = missing.includes(userId)
       ? await admin.from("player_states").select("user_id", { count: "exact", head: true }).eq("user_id", userId).neq("season_id", seasonId)
       : { count: 1 };
-    await admin.from("player_states").upsert(
+    // Toutes les lignes portent les mêmes colonnes : un upsert groupé met NULL dans une colonne absente d'une ligne
+    // (military est NOT NULL), et toute la création échouait au début d'une saison neuve.
+    const { error: insertError } = await admin.from("player_states").upsert(
       missing.map((id) => ({
         user_id: id, season_id: seasonId, last_update: now, last_click_at: now, last_seen: now,
         // Un nouveau compte démarre avec une dîme de 5 % (les seigneurs n'en versent pas).
-        ...(LORDS.some((l) => l.id === id) ? {} : { military: { tithe: NEW_PLAYER_TITHE, titheSet: true, ...(id === userId && !earlier ? { quest: 0 } : {}) } }),
+        military: LORDS.some((l) => l.id === id) ? {} : { tithe: NEW_PLAYER_TITHE, titheSet: true, ...(id === userId && !earlier ? { quest: 0 } : {}) },
       })),
       { onConflict: "user_id,season_id", ignoreDuplicates: true },
     );
+    if (insertError) throw new Error(`Création des joueurs de la saison impossible : ${insertError.message}`);
     ({ data, error } = await select());
     if (error) throw new Error(`Joueurs introuvables : ${error.message}`);
   }
