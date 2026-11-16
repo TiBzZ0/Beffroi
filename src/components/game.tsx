@@ -104,7 +104,7 @@ import { armySize, armyValue, battle, cleanArmy, estimateChance, seededRng, type
 import { worldFrom, type AwaySummary, type LotView, type AllianceSummary, type ChronicleEntry, type EventView, type GameSnapshot, type RivalView } from "@/lib/game/types";
 import { useChat, useGame, useLeaderboard, usePush, useTick } from "./use-game";
 import { BRANCHES, lineageMark, NODE_BY_ID, NODES, nodeBlocker, RANK_COST, RANK_REQUIRED, RENOWN, RENOWN_CAPPED, RESPEC_FEE, respecBlocker, spentIn, type BranchId } from "@/lib/game/lineage";
-import { allocation, BARRACKS_MAX, BARRACKS_MS, barracksBlocker, barracksCost, barracksLevel, COMPANY_CAP, fortBlocker, fortCost, fortCount, fortMs, FORT_MAX, maxCompanies, RECRUIT_MS, recruitPrice, recruitSlots, trainBlocker, trainCost, trainMs, TRAIN_MAX } from "@/lib/game/companies";
+import { allocation, BARRACKS_MAX, companyEta, BARRACKS_MS, barracksBlocker, barracksCost, barracksLevel, COMPANY_CAP, fortBlocker, fortCost, fortCount, fortMs, FORT_MAX, maxCompanies, RECRUIT_MS, recruitPrice, recruitSlots, trainBlocker, trainCost, trainMs, TRAIN_MAX } from "@/lib/game/companies";
 import { CAPTAIN_COST, CAPTAINS_MAX, captainLevel, captainOf, HUNT_TARGETS, RARITY_LABEL, RELICS, RELICS_MAX, relicOf, TRAITS } from "@/lib/game/captains";
 import { ALTERATIONS, riftCompanyBlocker, riftFightBlocker, riftOf, RIFT_IDLE_MS, RIFT_MAX_COMPANIES, SHAPES, type AlterationId } from "@/lib/game/rift";
 import { MapBoard, type BoardMarch, type BoardPlace } from "./kingdom-map";
@@ -4502,6 +4502,7 @@ export function Companies({ live, now, base, run, renown = 0 }: { live: PlayerSt
     setBusy(false);
   };
   const alloc = allocation(live);
+  const eta = companyEta(live);
   const list = live.companies ?? [];
   const lv = barracksLevel(live);
   const works = live.works ?? {};
@@ -4512,7 +4513,7 @@ export function Companies({ live, now, base, run, renown = 0 }: { live: PlayerSt
         <h3 className="section-title">🏯 Caserne niv. {lv}</h3>
         <Info>
           Ton armée se compose de compagnies : une compagnie, un seul type de troupe, un effectif maximal et un entraînement de 0 à 10 (+8 % d&apos;attaque et
-          de points de vie par niveau, en plus de la Forge). Les hommes se paient tout de suite mais arrivent un par un dans la file de la caserne. Une
+          de points de vie par niveau, en plus de la Forge). Les hommes se paient tout de suite mais arrivent un par un dans la file de la caserne, commande après commande : une compagnie commandée après une autre attend que la file se libère. Une
           compagnie à l&apos;entraînement ne peut pas sortir. La caserne ajoute une compagnie par niveau (8 au plus), une deuxième file au niveau 3 et une
           troisième au niveau 6. Les fortifications se bâtissent par niveaux et se relèvent toujours après une bataille.
         </Info>
@@ -4564,7 +4565,12 @@ export function Companies({ live, now, base, run, renown = 0 }: { live: PlayerSt
                 <div className="row-desc num one-line">
                   {formatNumber(a.men)}/{formatNumber(cap)} · {formatNumber(recruitPrice(c.unit, 1))} 🪨 l&apos;homme
                   {a.home < a.men ? ` · 🚶 ${formatNumber(a.men - a.home)} dehors` : ""}
-                  {a.queued > 0 ? ` · ⏳ +${formatNumber(a.queued)}` : ""}
+                  {a.queued > 0 ? ` · ⏳ +${formatNumber(a.queued)}${(() => {
+                    const e = eta.get(c.id);
+                    if (!e) return "";
+                    // Derrière une autre commande dans la file : on dit quand ses hommes commencent à arriver.
+                    return e.next - now > RECRUIT_MS[c.unit] + 1000 ? `, en file : début dans ${countdown(e.next - now)}` : `, fini dans ${countdown(Math.max(0, e.last - now))}`;
+                  })()}` : ""}
                   {training ? ` · 🎯 ${countdown(c.trainUntil - now)}` : ""}
                 </div>
                 {(captainOf(live, c.id) || relicOf(live, c.id)) && (

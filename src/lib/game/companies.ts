@@ -163,6 +163,26 @@ export function allocation(s: ArmyHolder): Map<string, { men: number; home: numb
   return out;
 }
 
+/** Pour chaque compagnie qui attend des hommes : arrivée du prochain et du dernier (même ordre de remplissage qu'`allocation`). */
+export function companyEta(s: ArmyHolder): Map<string, { next: number; last: number }> {
+  const out = new Map<string, { next: number; last: number }>();
+  const alloc = allocation(s);
+  for (const u of UNITS) {
+    const times: number[] = [];
+    for (const r of s.recruits ?? []) if (r.unit === u.id) for (let k = 1; k <= r.n; k++) times.push(r.from + k * r.per);
+    if (times.length === 0) continue;
+    times.sort((a, b) => a - b);
+    let i = 0;
+    for (const c of s.companies ?? []) {
+      if (c.unit !== u.id) continue;
+      const q = alloc.get(c.id)?.queued ?? 0;
+      if (q > 0 && i < times.length) out.set(c.id, { next: times[i], last: times[Math.min(times.length, i + q) - 1] });
+      i += q;
+    }
+  }
+  return out;
+}
+
 /** Niveaux de combat de quelques compagnies seulement (expédition dans la faille). */
 export function companyLevels(s: ArmyHolder, ids: string[], men: Record<string, number>): Levels {
   const out: Record<string, number> = { ...(s.levels as Record<string, number>) };

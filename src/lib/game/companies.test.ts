@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { buyArmy, newPlayerState, sendTroops, type PlayerState } from "./engine";
-import { allocation, buildFort, combatLevels, createCompany, lockedMen, recruit, settleArmy, startTraining, trainMs, COMPANY_CAP, RECRUIT_MS } from "./companies";
+import { allocation, buildFort, companyEta, combatLevels, createCompany, lockedMen, recruit, settleArmy, startTraining, trainMs, COMPANY_CAP, RECRUIT_MS } from "./companies";
 
 const T0 = Date.parse("2026-11-24T10:00:00Z");
 const model = (extra: Partial<PlayerState> = {}): PlayerState => ({ ...newPlayerState(T0), stone: 1e9, companyModel: true, ...extra });
@@ -49,5 +49,18 @@ describe("Compagnies", () => {
     expect(s.fortLevels?.palissade).toBe(1);
     expect(s.defenses.palissade).toBe(100);
     expect(settleArmy({ ...s, defenses: { palissade: 12 } }, T0 + 3_600_001).defenses.palissade).toBe(100);
+  });
+});
+
+describe("companyEta", () => {
+  it("une compagnie commandée après une autre attend que la file se libère", () => {
+    const s = {
+      troops: { chevalier: 6 },
+      companies: [{ id: "a", unit: "chevalier", train: 0, trainUntil: 0 }, { id: "b", unit: "piquier", train: 0, trainUntil: 0 }],
+      recruits: [{ unit: "chevalier", n: 144, from: 0, per: 20_000, slot: 0 }, { unit: "piquier", n: 100, from: 144 * 20_000, per: 4_000, slot: 0 }],
+    } as never;
+    const eta = companyEta(s);
+    expect(eta.get("a")).toEqual({ next: 20_000, last: 144 * 20_000 });
+    expect(eta.get("b")).toEqual({ next: 144 * 20_000 + 4_000, last: 144 * 20_000 + 400_000 });
   });
 });
