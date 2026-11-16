@@ -4542,6 +4542,8 @@ export function Companies({ live, now, base, run, renown = 0 }: { live: PlayerSt
           const a = alloc.get(c.id) ?? { men: 0, home: 0, queued: 0 };
           const cap = COMPANY_CAP[c.unit];
           const room = Math.max(0, cap - a.men - a.queued);
+          // Recruter ce que la pierre permet, jusqu'à remplir la compagnie.
+          const take = Math.min(room, Math.floor(live.stone / Math.max(1, recruitPrice(c.unit, 1))));
           const training = c.trainUntil > now;
           const isOpen = open === c.id;
           return (
@@ -4592,9 +4594,11 @@ export function Companies({ live, now, base, run, renown = 0 }: { live: PlayerSt
               </div>
               <div className="row-actions">
                 {room > 0 && (
-                  <Btn className="btn btn-primary btn-small" busy={busy} reason={recruitPrice(c.unit, room) > live.stone ? "Pas assez de pierre." : null} onClick={() => void act({ type: "company", op: "recruit", id: c.id, qty: room })}>
-                    +{formatNumber(room)}
-                    <span className="cost num">{countdown(room * RECRUIT_MS[c.unit])}</span>
+                  <Btn className="btn btn-primary btn-small" busy={busy} reason={take <= 0 ? `Pas assez de pierre : ${formatNumber(recruitPrice(c.unit, 1))} 🪨 l'homme.` : null} onClick={() => void act({ type: "company", op: "recruit", id: c.id, qty: Math.max(1, take) })}>
+                    +{formatNumber(Math.max(1, take))}
+                    <span className="cost num">
+                      {formatNumber(recruitPrice(c.unit, Math.max(1, take)))} 🪨 · {countdown(Math.max(1, take) * RECRUIT_MS[c.unit])}
+                    </span>
                   </Btn>
                 )}
                 {c.train < TRAIN_MAX && !training && (
