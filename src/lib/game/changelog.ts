@@ -596,4 +596,12 @@ export const CHANGELOG: ChangeEntry[] = [
       "💰 Butin des seigneurs : plus de réduction (×0) quand tu produis plus que leurs joueurs de référence. Un raid gagné rapporte maintenant un temps fixe de ta production de base : 15 min sur un facile, 25 min sur un moyen, 40 min sur un difficile, 1 h sur un redoutable, toujours dans la limite de ton tribut des seigneurs.",
     ],
   },
+  {
+    id: 69,
+    date: "16 novembre",
+    minSeason: 1,
+    items: [
+      "🏷️ Caserne, entraînement et fortifications : les prix sont maintenant fixes, les mêmes pour tous, et ne montent plus avec ta production. Chaque niveau a son prix, calé sur ce que produit un joueur actif au moment où il l'achète d'habitude.",
+    ],
+  },
 ];

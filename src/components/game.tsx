@@ -1616,7 +1616,7 @@ function Army({ snap, live, now, run }: { snap: GameSnapshot; live: PlayerState;
             riposte en face. Une partie des troupes perdues revient de l&apos;infirmerie au bout de 30 minutes.
           </Info>
           <TributeGauge live={live} now={now} />
-          {live.companyModel ? <Companies live={live} now={now} base={baseRate(live, worldFrom(snap.worksite), now)} run={run} renown={snap.renown?.available ?? 0} /> : <Garrison live={live} run={run} />}
+          {live.companyModel ? <Companies live={live} now={now} run={run} renown={snap.renown?.available ?? 0} /> : <Garrison live={live} run={run} />}
           <CurfewCard live={live} now={now} run={run} />
         </>
       )}
@@ -4492,7 +4492,7 @@ function CaptainsPanel({ live, run, renown }: { live: PlayerState; run: ReturnTy
 }
 
 /** C1 à C4 : caserne, compagnies, recrutement, entraînement et fortifications en niveaux (saison 1 et suivantes). */
-export function Companies({ live, now, base, run, renown = 0 }: { live: PlayerState; now: number; base: number; run: ReturnType<typeof useGame>["run"]; renown?: number }) {
+export function Companies({ live, now, run, renown = 0 }: { live: PlayerState; now: number; run: ReturnType<typeof useGame>["run"]; renown?: number }) {
   const [busy, setBusy] = useState(false);
   const [open, setOpen] = useState<string | null>(null);
   const [newUnit, setNewUnit] = useState<string>("piquier");
@@ -4531,9 +4531,9 @@ export function Companies({ live, now, base, run, renown = 0 }: { live: PlayerSt
           </div>
         </div>
         {lv < BARRACKS_MAX && !works.barracks && (
-          <Btn className="btn btn-primary" busy={busy} reason={barracksBlocker(live, base)} onClick={() => void act({ type: "company", op: "barracks" })}>
+          <Btn className="btn btn-primary" busy={busy} reason={barracksBlocker(live)} onClick={() => void act({ type: "company", op: "barracks" })}>
             🔨 Niv. {lv + 1}
-            <span className="cost num">{formatNumber(barracksCost(live, base))} 🪨</span>
+            <span className="cost num">{formatNumber(barracksCost(live))} 🪨</span>
           </Btn>
         )}
       </div>
@@ -4608,10 +4608,10 @@ export function Companies({ live, now, base, run, renown = 0 }: { live: PlayerSt
                   </Btn>
                 )}
                 {c.train < TRAIN_MAX && !training && (
-                  <Btn className="btn btn-small" busy={busy} reason={trainBlocker(live, c.id, base, now)} onClick={() => void act({ type: "company", op: "train", id: c.id })}>
+                  <Btn className="btn btn-small" busy={busy} reason={trainBlocker(live, c.id, now)} onClick={() => void act({ type: "company", op: "train", id: c.id })}>
                     🎯 ⭐{c.train + 1}
                     <span className="cost num">
-                      {formatNumber(trainCost(c, base))} · {countdown(trainMs(c))}
+                      {formatNumber(trainCost(c))} · {countdown(trainMs(c))}
                     </span>
                   </Btn>
                 )}
@@ -4661,10 +4661,10 @@ export function Companies({ live, now, base, run, renown = 0 }: { live: PlayerSt
                 </div>
               </div>
               {level < FORT_MAX && !building && (
-                <Btn className="btn btn-primary btn-small" busy={busy} reason={fortBlocker(live, d.id, base)} onClick={() => void act({ type: "company", op: "fort", unit: d.id })}>
+                <Btn className="btn btn-primary btn-small" busy={busy} reason={fortBlocker(live, d.id)} onClick={() => void act({ type: "company", op: "fort", unit: d.id })}>
                   🔨 Niv. {level + 1}
                   <span className="cost num">
-                    {formatNumber(fortCost(level, base))} · {countdown(fortMs(level))}
+                    {formatNumber(fortCost(level))} · {countdown(fortMs(level))}
                   </span>
                 </Btn>
               )}

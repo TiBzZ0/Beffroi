@@ -35,7 +35,7 @@ describe("Compagnies", () => {
     let s = ok(createCompany(model({ troops: { piquier: 600 } }), "piquier", T0));
     const id = s.companies![0].id;
     const before = combatLevels(s).piquier ?? 0;
-    s = ok(startTraining(s, id, 10, T0));
+    s = ok(startTraining(s, id, T0));
     expect(lockedMen(s, T0 + 1).piquier).toBe(600);
     expect(sendTroops({ ...s, lastUpdate: T0 + 1 }, { piquier: 1 }).ok).toBe(false);
     s = settleArmy(s, T0 + trainMs({ train: 0 }));
@@ -44,7 +44,7 @@ describe("Compagnies", () => {
   });
 
   it("les fortifications suivent leur niveau et se relèvent", () => {
-    let s = ok(buildFort(model(), "palissade", 10, T0));
+    let s = ok(buildFort(model(), "palissade", T0));
     s = settleArmy(s, T0 + 3_600_000);
     expect(s.fortLevels?.palissade).toBe(1);
     expect(s.defenses.palissade).toBe(100);

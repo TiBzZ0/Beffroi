@@ -2386,7 +2386,6 @@ function applySimpleAction(state: PlayerState, action: GameAction, now: number, 
     case "company": {
       // C1 à C4 : compagnies, recrutement, entraînement, caserne et fortifications.
       if (!state.companyModel) return { ok: false, error: "Les compagnies arrivent avec la saison 1." };
-      const base = baseRate(state, world, now);
       const op = String(action.op);
       const id = String(action.id ?? "");
       const r =
@@ -2394,9 +2393,9 @@ function applySimpleAction(state: PlayerState, action: GameAction, now: number, 
         : op === "dissolve" ? dissolveCompany(state, id)
         : op === "retype" ? retypeCompany(state, id, String(action.unit))
         : op === "recruit" ? recruit(state, id, Number(action.qty), now, captainOf(state, id)?.trait === "recruteur" ? 2 : 1)
-        : op === "train" ? startTraining(state, id, base, now)
-        : op === "barracks" ? buildBarracks(state, base, now)
-        : op === "fort" ? buildFort(state, String(action.unit), base, now)
+        : op === "train" ? startTraining(state, id, now)
+        : op === "barracks" ? buildBarracks(state, now)
+        : op === "fort" ? buildFort(state, String(action.unit), now)
         : ({ ok: false, error: "Action inconnue." } as const);
       return r.ok ? { ok: true, value: { state: r.value, log: { action: `company_${op}`, details: { id, unit: action.unit ?? null, qty: action.qty ?? null } } } } : r;
     }
