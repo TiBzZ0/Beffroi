@@ -553,4 +553,13 @@ export const CHANGELOG: ChangeEntry[] = [
       "🎖️ Nouveau : les capitaines (15 renom, un trait parmi trois, cinq niveaux gagnés dans la faille) et les reliques, une de chaque par compagnie.",
     ],
   },
+  {
+    id: 64,
+    date: "16 novembre",
+    minSeason: 1,
+    items: [
+      "🏰 Seigneurs : leurs armées grandissent avec la saison au lieu d'être à pleine force dès le premier jour. Un seigneur facile atteint sa taille finale au bout d'un jour, un moyen au bout de deux, un difficile au bout de cinq, un redoutable au bout de neuf. Une jeune armée a donc de vraies cibles dès les premières heures.",
+      "⚔️ Les raids des seigneurs contre les joueurs visent de nouveau une chance de victoire raisonnable, au lieu d'envoyer toute leur armée sur un domaine qui démarre.",
+    ],
+  },
 ];

@@ -952,6 +952,17 @@ function lordBudgets(entities: Map<string, Entity>): Record<1 | 2 | 3 | 4, numbe
   return { 1: easy, 2: medium, 3: strong, 4: strong };
 }
 
+/**
+ * C5 : en début de saison, les armées des seigneurs montent avec le temps, comme celles des joueurs : (heures / heures du
+ * jour cible)^0,75, entre 5 % et 100 %. Simulé : une demi-compagnie bat un seigneur facile à la première heure, deux
+ * compagnies au bout de 6 heures, et chaque niveau atteint sa pleine force à son jour cible (1, 2, 5, 9).
+ */
+const LORD_RAMP_DAYS: Record<number, number> = { 1: 1, 2: 2, 3: 5, 4: 9 };
+function lordRamp(difficulty: number, ageHours: number): number {
+  const days = LORD_RAMP_DAYS[difficulty] ?? 1;
+  return Math.max(0.05, Math.min(1, (ageHours / (days * 24)) ** 0.75));
+}
+
 /** Armée des seigneurs : elle suit les vrais joueurs, selon leur niveau et leur caractère. */
 /**
  * Armées des seigneurs. L'attaque (leurs raids) suit les armées des joueurs.
@@ -963,9 +974,10 @@ function lordArmies(entities: Map<string, Entity>, world?: WorldState, now?: num
   const out = new Map<string, { attack: Army; defense: Army }>();
   if (currentCompanyModel) {
     // C5 : armées fixées par seigneur, calées par simulation ; le butin, lui, reste calé sur la production.
+    const ageH = Math.max(0, ((now ?? Date.now()) - currentSeasonStart) / 3_600_000);
     for (const l of LORDS) {
       const taste = LORD_ARMY[l.key];
-      const total = (LORD_COMPANIES[l.key] ?? 4) * COMPANY_VALUE;
+      const total = (LORD_COMPANIES[l.key] ?? 4) * COMPANY_VALUE * lordRamp(l.difficulty, ageH);
       const attack = armyFromBudget(total * LORD_RAID_SHARE, Object.keys(taste.troops).length ? taste.troops : { milicien: 1 });
       const troops = armyFromBudget(total * taste.troopShare, taste.troops);
       const forts = armyFromBudget(total * (1 - taste.troopShare), taste.forts);
@@ -1110,7 +1122,7 @@ function sameIp(a: Entity | undefined, b: Entity | undefined): boolean {
 async function tickLords(admin: SupabaseClient, season: SeasonView, entities: Map<string, Entity>, worksite: WorksiteView, now: number): Promise<boolean> {
   const world = worldFrom(worksite);
   const flat = lordRates(entities, world, now);
-  const armies = lordArmies(entities);
+  const armies = lordArmies(entities, undefined, now);
   let changed = false;
 
   for (const lord of LORDS) {
@@ -1179,7 +1191,9 @@ async function tickLords(admin: SupabaseClient, season: SeasonView, entities: Ma
         // A10 : l'armée du seigneur est taillée sur la défense de sa cible, pour une chance d'environ un tiers.
         const shaped = raidArmies(state, pick.s, { now, victimId: pick.e.id, attackerArmy: army.attack, stagesDone: stagesDoneAt(world, now), attackerIsLord: true });
         // C5 : avec les compagnies, l'armée d'un seigneur est fixe ; avant, elle était taillée sur la cible.
-        const sized = currentCompanyModel ? army.attack : armyForChance(army.attack, shaped.defense, LORD_RAID_CHANCE, shaped.opts);
+        // Saison 1 : l'armée de raid reste bornée par l'armée fixe du seigneur, mais vise la même chance qu'avant.
+        const aimed = armyForChance(army.attack, shaped.defense, LORD_RAID_CHANCE, shaped.opts);
+        const sized = currentCompanyModel && armyValue(aimed) > armyValue(army.attack) ? army.attack : aimed;
         const ctx = { now, attackerId: lord.id, victimId: pick.e.id, victimRate: pick.rate, attackerIsLord: true, allowRepeat: lord.retaliateOnly, attackerArmy: armySize(sized) > 0 ? sized : army.attack, stagesDone: stagesDoneAt(world, now) };
         // T6 : l'armée du seigneur part de sa case, à vitesse 1 ; le combat se jouera à l'arrivée.
         if (!raidBlocker(state, pick.s, ctx) && (state.marches ?? []).length < MAX_MARCHES) {
