@@ -588,4 +588,12 @@ export const CHANGELOG: ChangeEntry[] = [
       "🌀 Faille : au retour, une compagnie se repose une heure avant de repartir (au lieu de 4 heures après son départ).",
     ],
   },
+  {
+    id: 68,
+    date: "16 novembre",
+    minSeason: 1,
+    items: [
+      "💰 Butin des seigneurs : plus de réduction (×0) quand tu produis plus que leurs joueurs de référence. Un raid gagné rapporte maintenant un temps fixe de ta production de base : 15 min sur un facile, 25 min sur un moyen, 40 min sur un difficile, 1 h sur un redoutable, toujours dans la limite de ton tribut des seigneurs.",
+    ],
+  },
 ];

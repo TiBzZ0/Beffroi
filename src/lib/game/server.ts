@@ -219,6 +219,7 @@ import {
   INBOX_CATEGORIES,
   markInboxRead,
   lordLootCapOf,
+  tributeLeft,
   spendTribute,
 } from "./engine";
 import {
@@ -911,11 +912,20 @@ function lordRates(entities: Map<string, Entity>, world: WorldState, now: number
   return out;
 }
 
+/** Saison 1 : butin d'un seigneur en secondes de production de base de l'attaquant, selon son niveau. */
+const LORD_LOOT_SECONDS_S1: Record<number, number> = { 1: 15 * 60, 2: 25 * 60, 3: 40 * 60, 4: 60 * 60 };
+function lordLootS1(lordId: string, state: PlayerState, base: number, now: number): number {
+  const d = LORD_BY_ID.get(lordId)?.difficulty ?? 1;
+  return Math.max(0, base) * Math.min(LORD_LOOT_SECONDS_S1[d] ?? 900, tributeLeft(state, now));
+}
+
 /** G2 : production de référence de chaque seigneur (avant son facteur), relevée avec lordRates. */
 const lordRefs = new Map<string, number>();
 
 /** G2 : équité sur le butin d'un seigneur : min(1, 2 × sa référence / production de l'attaquant). */
 function lordFairness(lordId: string, attackerRate: number): number {
+  // Saison 1 : les armées des seigneurs sont fixes et le tribut borne le pillage ; pas de réduction selon la production.
+  if (currentCompanyModel) return 1;
   const ref = lordRefs.get(lordId);
   if (!ref || !(attackerRate > 0)) return 1;
   return Math.min(1, (2 * ref) / attackerRate);
@@ -2150,7 +2160,8 @@ function rivalsFor(
   const armies = lordArmies(entities, world, now, flat);
   const myRate = currentRate(me, myState, now, world, flat);
   // G5 : butin attendu sur un seigneur, borné par 1 h de production de base et le tribut restant.
-  const lordCap = lordLootCapOf(myState, baseRate(myState, world, now), now);
+  const myBase = baseRate(myState, world, now);
+  const lordCap = lordLootCapOf(myState, myBase, now);
   const mySize = attackerSizeOf(me.id, myState, entities, myRate);
   return [...entities.values()]
     .filter((e) => e.id !== me.id)
@@ -2191,7 +2202,8 @@ function rivalsFor(
       const seen = seesArmy ? shown : {};
       const stone = jitter(s.stone, "stone");
       const fair = e.isLord ? lordFairness(e.id, myRate) : fairness(ctx.relativeSize, revenge);
-      const loot = lootOf(stone, rate, revenge, { lord: e.isLord, cap: e.isLord ? lordCap : myRate * PVP_LOOT_CAP_SECONDS, factor: fair, stagesDone: stagesDoneAt(world, now), extraSecured: extraSecured(s, now), securedFactor: (s.granaryCutUntil ?? 0) > now ? 0.5 : 1 });
+      const lordFixed = e.isLord && currentCompanyModel ? lordLootS1(e.id, myState, myBase, now) : undefined;
+      const loot = lordFixed !== undefined ? Math.floor(lordFixed) : lootOf(stone, rate, revenge, { lord: e.isLord, cap: e.isLord ? lordCap : myRate * PVP_LOOT_CAP_SECONDS, factor: fair, stagesDone: stagesDoneAt(world, now), extraSecured: extraSecured(s, now), securedFactor: (s.granaryCutUntil ?? 0) > now ? 0.5 : 1 });
       // Rançon attendue en cas de victoire : la défense, abattue.
       const ransom = e.isLord || !seesStock ? 0 : ransomOf(fight.defense as Army, fair);
       const exact = estimateChance(fight.attack, shown, fight.opts);
@@ -2215,7 +2227,7 @@ function rivalsFor(
         ...(seesInner
           ? { levels: s.levels as Record<string, number>, spyLevel: s.spyLevel ?? 0, researchQueue: s.research.map((r) => ({ id: r.id, endsAt: r.endsAt })), wounded: (s.wounded ?? {}) as Record<string, number>, healAt: s.healAt, curfewStart: s.curfew?.start ?? null }
           : {}),
-        lootCap: e.isLord ? lordCap : myRate * PVP_LOOT_CAP_SECONDS,
+        lootCap: e.isLord ? (lordFixed ?? lordCap) : myRate * PVP_LOOT_CAP_SECONDS,
         lootSafe: extraSecured(s, now) || undefined,
         id: e.id,
         name: e.name,
@@ -3422,6 +3434,7 @@ async function settleMarches(
     allyArmies: m.allies,
     lordFairness: victim.isLord && !owner.isLord ? lordFairness(victim.id, aRate) : undefined,
     lordLootCap: victim.isLord && !owner.isLord ? lordLootCapOf(aState, aBase, at) : undefined,
+    lordLootFixed: victim.isLord && !owner.isLord && currentCompanyModel ? lordLootS1(victim.id, aState, aBase, at) : undefined,
     attackerIsLord: owner.isLord,
     marching: true,
     allowRepeat: true,

@@ -1359,6 +1359,8 @@ export interface RaidContext {
   lordFairness?: number;
   /** G5 : plafond du butin d'un joueur sur un seigneur (1 h de production de base, borné par le tribut restant). */
   lordLootCap?: number;
+  /** Saison 1 : butin fixe pris à un seigneur (minutes de production de base selon son niveau, bornées par le tribut). */
+  lordLootFixed?: number;
   /** Tirages aléatoires entre 0 et 1 (fournis pour des tests reproductibles). */
   rng: () => number;
 }
@@ -1571,7 +1573,7 @@ export function resolveRaid(
   // C3 : un capitaine Pillard dont la compagnie part au raid ajoute 15 % au butin (sous les plafonds).
   const pillard = (attacker.captains ?? []).some((k) => k.trait === "pillard" && k.company && ((fight.attackerStart as Record<string, number>)[attacker.companies?.find((c) => c.id === k.company)?.unit ?? ""] ?? 0) > 0);
   const lootBonus = (masterActive(attacker, "loot", now) ? 1 + MASTER_BONUSES.loot.value : 1) * (pillard ? 1.15 : 1);
-  const stolen = lootOf(victim.stone, ctx.victimRate, revenge, {
+  const stolen = ctx.defenderArmy && ctx.lordLootFixed !== undefined ? Math.floor(Math.max(0, ctx.lordLootFixed)) : lootOf(victim.stone, ctx.victimRate, revenge, {
     extraSecured: extraSecured(victim, now),
     securedFactor: (victim.granaryCutUntil ?? 0) > now ? 0.5 : 1,
     lord: !!ctx.defenderArmy,
@@ -1615,7 +1617,7 @@ export function resolveRaid(
       attacker: ctx.marching ? attackerAfter : { ...attackerAfter, stone: attacker.stone + stolen - allyTotal + ransom, totalPlundered: attacker.totalPlundered + stolen - allyTotal },
       victim: {
         ...victimArmyAfter,
-        stone: victim.stone - stolen,
+        stone: Math.max(0, victim.stone - stolen),
         generators,
         ruins,
         burnedUntil: Math.max(victim.burnedUntil, now + BURN_MS),
