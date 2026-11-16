@@ -528,13 +528,13 @@ export const COMPANY_VALUE = 250_000;
 export const LORD_TRAIN: Record<1 | 2 | 3 | 4, number> = { 1: 1, 2: 3, 3: 5, 4: 8 };
 /**
  * Taille de chaque seigneur, en compagnies pleines (troupes et fortifications selon son caractère).
- * Recalée sur la vraie progression d'un joueur actif en saison 1 (2 compagnies au départ, 4 vers 1 h, 5 vers 4 h,
- * entraînement 3 vers 1 h 30, 6 vers 12 h, 8 vers 24 h). Simulé à 70 % de chances, en compagnies non entraînées :
- * faciles ≈ 6 (quelques heures), moyens ≈ 9,5 (jour 1), difficiles ≈ 14 (entraînement complet), redoutables ≈ 27 (Forge, capitaines, reliques ou alliés).
+ * Saison 1, demandé par le créateur : un facile se prend avec 1 à 2 compagnies. Simulé à 70 % de chances, en compagnies
+ * non entraînées (mélange piquiers, arbalétriers, chevaliers) :
+ * faciles ≈ 1,5 (dès les deux premières compagnies), moyens ≈ 4,5, difficiles ≈ 14 (entraînement complet), redoutables ≈ 27 (Forge, capitaines, reliques ou alliés).
  */
 export const LORD_COMPANIES: Record<string, number> = {
-  bourbelin: 6.1, aubeval: 4.9, moulinet: 6.1, bruyere: 6.1, pontcroix: 8.6, sauleraie: 8.1,
-  corbelune: 6, ventebrise: 6, roncebois: 9, clairmarais: 5.5, pierrefendue: 5.9, brumeport: 6,
+  bourbelin: 1.52, aubeval: 1.23, moulinet: 1.52, bruyere: 1.52, pontcroix: 2.15, sauleraie: 2.02,
+  corbelune: 2.82, ventebrise: 2.82, roncebois: 4.23, clairmarais: 2.58, pierrefendue: 2.77, brumeport: 2.82,
   grisemolle: 6.8, noirval: 7.1, lysnoir: 7.4, hautgivre: 7.8, rougemarc: 7.3,
   hautefaille: 10.4, marches: 10.2, orgemont: 10.9,
 };

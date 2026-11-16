@@ -584,7 +584,7 @@ export const CHANGELOG: ChangeEntry[] = [
     date: "16 novembre",
     minSeason: 1,
     items: [
-      "🏰 Seigneurs : ils ne grandissent plus avec la saison, ils sont à pleine force dès le départ, et les faciles et les moyens sont nettement plus solides (environ +35 % et +40 %). Il faut maintenant quelques heures de caserne et d'entraînement pour un facile, une bonne journée pour un moyen.",
+      "🏰 Seigneurs : ils ne grandissent plus avec la saison, ils sont à pleine force dès le départ, et ils sont recalés : un seigneur facile se prend avec 1 à 2 compagnies, un moyen avec 4 ou 5, un difficile demande des compagnies bien entraînées, et un redoutable la Forge, des capitaines, des reliques ou des alliés.",
       "🌀 Faille : au retour, une compagnie se repose une heure avant de repartir (au lieu de 4 heures après son départ).",
     ],
   },
