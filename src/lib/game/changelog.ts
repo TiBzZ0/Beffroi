@@ -571,4 +571,12 @@ export const CHANGELOG: ChangeEntry[] = [
       "⏳ Chaque compagnie en attente affiche maintenant quand ses hommes commencent à arriver, ou quand elle sera pleine.",
     ],
   },
+  {
+    id: 66,
+    date: "16 novembre",
+    minSeason: 1,
+    items: [
+      "🏰 Correction : la montée des seigneurs rendait les plus forts très faibles dans les premières heures. Désormais, tous grandissent au même rythme pendant le premier jour, et l'écart entre niveaux reste entier : les redoutables restent hors d'atteinte au début.",
+    ],
+  },
 ];
