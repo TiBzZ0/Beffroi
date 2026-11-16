@@ -61,16 +61,39 @@ const SHAPE_IDS = Object.keys(SHAPES);
 // La semaine (lundi 4 h, heure de Paris)
 // ---------------------------------------------------------------------------
 
-/** Décalage de Paris sur UTC à l'instant t, en millisecondes. */
+let parisFormat: Intl.DateTimeFormat | null = null;
+const offsetCache = new Map<number, number>();
+
+/** Décalage de Paris sur UTC à l'instant t, en millisecondes (gardé par heure : il ne change qu'aux changements d'heure). */
 function parisOffset(t: number): number {
-  const parts = new Intl.DateTimeFormat("en-US", { timeZone: "Europe/Paris", hourCycle: "h23", year: "numeric", month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit", second: "2-digit" }).formatToParts(new Date(t));
+  const hour = Math.floor(t / 3_600_000);
+  const known = offsetCache.get(hour);
+  if (known !== undefined) return known;
+  parisFormat ??= new Intl.DateTimeFormat("en-US", { timeZone: "Europe/Paris", hourCycle: "h23", year: "numeric", month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit", second: "2-digit" });
+  const off = rawParisOffset(hour * 3_600_000);
+  if (offsetCache.size > 200) offsetCache.clear();
+  offsetCache.set(hour, off);
+  return off;
+}
+
+function rawParisOffset(t: number): number {
+  const parts = parisFormat!.formatToParts(new Date(t));
   const get = (k: string) => Number(parts.find((p) => p.type === k)?.value ?? 0);
   const asUtc = Date.UTC(get("year"), get("month") - 1, get("day"), get("hour"), get("minute"), get("second"));
   return asUtc - Math.floor(t / 1000) * 1000;
 }
 
 /** Semaine de la faille : clé (date du lundi), début et fin. */
+let weekCache: { from: number; to: number; week: { key: string; start: number; end: number } } | null = null;
+
 export function riftWeek(now: number): { key: string; start: number; end: number } {
+  if (weekCache && now >= weekCache.from && now < weekCache.to) return weekCache.week;
+  const week = computeWeek(now);
+  weekCache = { from: week.start, to: week.end, week };
+  return week;
+}
+
+function computeWeek(now: number): { key: string; start: number; end: number } {
   const local = now + parisOffset(now) - 4 * 3_600_000;
   const day = new Date(local).getUTCDay(); // 0 = dimanche
   const back = (day + 6) % 7;
