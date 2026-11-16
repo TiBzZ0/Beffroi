@@ -579,4 +579,13 @@ export const CHANGELOG: ChangeEntry[] = [
       "🏰 Correction : la montée des seigneurs rendait les plus forts très faibles dans les premières heures. Désormais, tous grandissent au même rythme pendant le premier jour, et l'écart entre niveaux reste entier : les redoutables restent hors d'atteinte au début.",
     ],
   },
+  {
+    id: 67,
+    date: "16 novembre",
+    minSeason: 1,
+    items: [
+      "🏰 Seigneurs : ils ne grandissent plus avec la saison, ils sont à pleine force dès le départ, et les faciles et les moyens sont nettement plus solides (environ +35 % et +40 %). Il faut maintenant quelques heures de caserne et d'entraînement pour un facile, une bonne journée pour un moyen.",
+      "🌀 Faille : au retour, une compagnie se repose une heure avant de repartir (au lieu de 4 heures après son départ).",
+    ],
+  },
 ];

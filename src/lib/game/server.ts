@@ -952,17 +952,6 @@ function lordBudgets(entities: Map<string, Entity>): Record<1 | 2 | 3 | 4, numbe
   return { 1: easy, 2: medium, 3: strong, 4: strong };
 }
 
-/**
- * Saison 1 : les seigneurs suivent la croissance d'un joueur actif pendant le premier jour, tous au même rythme,
- * puis gardent leur taille calée (faciles jour 1, moyens jour 2, difficiles jour 5, redoutables jour 9).
- * La même courbe pour tous garde l'écart entre niveaux. Simulé (70 % de chances, compagnies non entraînées) :
- * à 2 h, 0,75 compagnie bat un facile, 4 à 4,5 un redoutable ; à 6 h, 1,5 contre 9 à 10.
- */
-const LORD_RAMP_HOURS = 24;
-function lordRamp(ageHours: number): number {
-  return Math.max(0.05, Math.min(1, (ageHours / LORD_RAMP_HOURS) ** 0.75));
-}
-
 /** Armée des seigneurs : elle suit les vrais joueurs, selon leur niveau et leur caractère. */
 /**
  * Armées des seigneurs. L'attaque (leurs raids) suit les armées des joueurs.
@@ -974,10 +963,9 @@ function lordArmies(entities: Map<string, Entity>, world?: WorldState, now?: num
   const out = new Map<string, { attack: Army; defense: Army }>();
   if (currentCompanyModel) {
     // C5 : armées fixées par seigneur, calées par simulation ; le butin, lui, reste calé sur la production.
-    const ageH = Math.max(0, ((now ?? Date.now()) - currentSeasonStart) / 3_600_000);
     for (const l of LORDS) {
       const taste = LORD_ARMY[l.key];
-      const total = (LORD_COMPANIES[l.key] ?? 4) * COMPANY_VALUE * lordRamp(ageH);
+      const total = (LORD_COMPANIES[l.key] ?? 4) * COMPANY_VALUE;
       const attack = armyFromBudget(total * LORD_RAID_SHARE, Object.keys(taste.troops).length ? taste.troops : { milicien: 1 });
       const troops = armyFromBudget(total * taste.troopShare, taste.troops);
       const forts = armyFromBudget(total * (1 - taste.troopShare), taste.forts);

@@ -24,8 +24,8 @@ export const RIFT_GROWTH_SPLIT = 10;
 export const RIFT_TRAIN_EVERY = 3;
 /** Compagnies par expédition. */
 export const RIFT_MAX_COMPANIES = 4;
-/** Une expédition par compagnie toutes les 4 heures. */
-export const RIFT_REST_MS = 4 * 3_600_000;
+/** Repos d'une compagnie après son retour de la faille. */
+export const RIFT_REST_MS = 3_600_000;
 /** Sans ordre une heure après un étage, l'expédition rentre d'elle-même. */
 export const RIFT_IDLE_MS = 3_600_000;
 /** Tous les 10 étages, un gardien (deux joueurs d'une même alliance). */
@@ -273,7 +273,7 @@ export function riftCompanyBlocker(s: Holder, id: string, now: number): string |
   if (!c) return "Compagnie inconnue.";
   if (c.trainUntil > now) return "Elle est à l'entraînement.";
   const r = riftOf(s, now);
-  if ((r.rest[id] ?? 0) > now) return "Elle s'est battue dans la faille il y a moins de 4 heures.";
+  if ((r.rest[id] ?? 0) > now) return "Elle se repose après la faille.";
   const a = allocation(s).get(id);
   if (!a || a.home <= 0) return "Elle n'a personne au domaine.";
   // Les blessés restent à l'infirmerie ; les autres hommes doivent être rentrés.
@@ -304,10 +304,8 @@ export function riftSend<S extends Holder>(s: S, ids: string[], travel: number, 
     home[c.unit] = (home[c.unit] ?? 0) - n;
     if (home[c.unit] <= 0) delete home[c.unit];
   }
-  const rest = { ...r.rest };
-  for (const id of unique) rest[id] = now + RIFT_REST_MS;
   const exp: RiftExpedition = { by, troops: troops as Army, wounded: {}, floor: r.best + 1, status: "out", arriveAt: now + travel, returnAt: 0, travel, lastAt: now + travel, week: r.week, fights: [] };
-  return { ok: true, value: { ...s, troops: home as S["troops"], rift: { ...r, rest, exp } } };
+  return { ok: true, value: { ...s, troops: home as S["troops"], rift: { ...r, exp } } };
 }
 
 /** Ordre de rentrer. */
@@ -325,6 +323,8 @@ export function riftReturn<S extends Holder>(s: S, now: number): R<S> {
 export function settleRift<S extends Holder>(s: S, now: number, heal: (s: S, wounded: Army, at: number) => S): S {
   if (!s.rift) return s;
   let r = riftOf(s, now);
+  // Repos d'avant le passage à 1 h (4 h depuis le départ) : jamais plus d'une heure à partir de maintenant.
+  if (Object.values(r.rest).some((t) => t > now + RIFT_REST_MS)) r = { ...r, rest: Object.fromEntries(Object.entries(r.rest).map(([k, t]) => [k, Math.min(t, now + RIFT_REST_MS)])) };
   let e = r.exp;
   if (e && e.status === "out" && e.arriveAt <= now) {
     // La semaine a pu changer en route : on repart du bas.
@@ -335,7 +335,10 @@ export function settleRift<S extends Holder>(s: S, now: number, heal: (s: S, wou
     const troops: Record<string, number> = { ...(s.troops as Record<string, number>) };
     for (const [id, n] of Object.entries(e.troops)) if ((n ?? 0) > 0) troops[id] = (troops[id] ?? 0) + (n ?? 0);
     const back = heal({ ...s, troops: troops as S["troops"] }, e.wounded, e.returnAt);
-    r = { ...r, exp: null };
+    // Le repos court à partir du retour.
+    const rest = { ...r.rest };
+    for (const id of Object.keys(e.by)) rest[id] = e.returnAt + RIFT_REST_MS;
+    r = { ...r, rest, exp: null };
     return { ...back, rift: r };
   }
   if (e === r.exp && r === s.rift) return s;

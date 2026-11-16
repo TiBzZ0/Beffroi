@@ -4228,7 +4228,7 @@ export function Rift({ snap, live, now, run }: { snap: GameSnapshot; live: Playe
         <Info>
           Des étages à garnison fixe, les mêmes pour tout le monde. Chaque étage a une ou deux altérations, connues d&apos;avance pour la semaine : choisis tes
           compagnies en conséquence. Envoie de 1 à {RIFT_MAX_COMPANIES} compagnies ; elles montent étage par étage tant qu&apos;elles gagnent, et tu choisis après
-          chaque étage de continuer ou de rentrer. Les pertes sont réelles. Une compagnie ne repart que 4 heures après son départ. Premier passage d&apos;un étage
+          chaque étage de continuer ou de rentrer. Les pertes sont réelles. Au retour, une compagnie se repose une heure avant de repartir. Premier passage d&apos;un étage
           dans la semaine : 1 renom par tranche de 3 étages, et un coffre de 10 minutes de production tous les 5 étages. Tous les 10 étages, un gardien demande
           deux joueurs d&apos;une même alliance. Remise à zéro chaque lundi à 4 h.
         </Info>

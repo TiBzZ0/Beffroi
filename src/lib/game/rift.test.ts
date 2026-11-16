@@ -56,9 +56,10 @@ describe("Faille", () => {
     const home = settleRift(t, T0 + 1_400_000, addWounded);
     expect(riftOf(home, T0 + 1_400_000).exp).toBeNull();
     expect((home.troops.piquier ?? 0) + (home.wounded.piquier ?? 0)).toBeGreaterThan(0);
-    // La compagnie se repose 4 heures.
+    // La compagnie se repose une heure à partir de son retour (T0 + 1 300 000).
     expect(riftSend(home, [pq], 600_000, T0 + 1_400_000).ok).toBe(false);
-    expect(riftSend(home, [pq], 600_000, T0 + RIFT_REST_MS + 1).ok).toBe(true);
+    expect(riftSend(home, [pq], 600_000, T0 + 1_300_000 + RIFT_REST_MS - 1).ok).toBe(false);
+    expect(riftSend(home, [pq], 600_000, T0 + 1_300_000 + RIFT_REST_MS + 1).ok).toBe(true);
   });
 
   it("sans ordre, l'expédition rentre seule ; la semaine suivante repart de l'étage 1", () => {
