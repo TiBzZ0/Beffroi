@@ -171,7 +171,7 @@ import {
 import { armySize, armyValue, battle, cleanArmy, type Army, type BattleOptions, type Levels, type RoundLog } from "./battle";
 import { settleRift, type RiftState } from "./rift";
 import { armyBoost, hasTrait, type Captain, type Relic, type TraitId } from "./captains";
-import { combatLevels, lockedMen, settleArmy, type ArmyWorks, type Company, type RecruitOrder } from "./companies";
+import { combatLevels, lockedMen, refRate, settleArmy, type ArmyWorks, type Company, type RecruitOrder } from "./companies";
 import { lin, LIN_ATTACK, LIN_ATTACK_LOSSES, LIN_CAVE_SECONDS, LIN_DONOR_TIERS, LIN_ELAN, LIN_FORT_DAMAGE, LIN_FORTUNE, LIN_GENERATOR_DISCOUNT, LIN_PRODUCTION, LIN_PROTECTED, LIN_PVP_CAP, LIN_REBUILD, LIN_RESEARCH_SPEED, LIN_REVENGE_MS, LIN_RUIN_OUTPUT, LIN_SABOTAGE, LIN_SPEED, LIN_SPY_SPEED, LIN_TROOP_DISCOUNT, LIN_WOUNDED, type LineageState } from "./lineage";
 
 export interface PlayerState {
@@ -1027,10 +1027,15 @@ export function openShare(state: PlayerState, stage: number, world: WorldState, 
   return { ...state, share: { stage, size, given: 0, tiers: 0 } };
 }
 
+const SHARE_FLOOR = 0.25;
+
 /** Part de chantier d'un joueur : autant d'heures de sa production actuelle que l'étape en compte (4 h, puis 12 h et 24 h). */
 export function shareSize(state: PlayerState, world: WorldState, now: number, stage?: number): number {
   const hours = stage === undefined ? SHARE_HOURS : SHARE_HOURS * (stageHours(stage) / STAGE_SIZE_HOURS);
-  return Math.max(1, Math.ceil(productionPerSecond(state, world, stagesDoneAt(world, now)) * hours * 3600));
+  // Saison 1 : jamais moins de 25 % de la part d'un joueur actif typique à cet âge de la saison (un compte endormi
+  // n'obtient plus paliers, écus et renom pour quelques pierres).
+  const floorRate = state.companyModel && state.seasonStart ? SHARE_FLOOR * refRate((now - state.seasonStart) / 3_600_000) : 0;
+  return Math.max(1, Math.ceil(Math.max(productionPerSecond(state, world, stagesDoneAt(world, now)), floorRate) * hours * 3600));
 }
 
 /** Seuils des paliers de don (L2 : 20 % de moins avec la Dîme généreuse). */

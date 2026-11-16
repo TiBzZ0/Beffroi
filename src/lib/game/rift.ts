@@ -210,7 +210,7 @@ export function riftBattleOpts(f: Floor, attackerLevels: Levels, gear: { ignore?
 
 /** Renom au premier passage d'un étage dans la semaine : 1 par tranche de 3 étages. */
 export function floorRenown(floor: number): number {
-  return Math.ceil(Math.max(1, floor) / 3);
+  return Math.max(2, Math.ceil(Math.max(1, floor) / 2));
 }
 
 // ---------------------------------------------------------------------------
@@ -351,7 +351,8 @@ export function riftFightBlocker(s: Holder, now: number, allies = 0): string | n
   if (!e) return "Aucune expédition dans la faille.";
   if (e.status === "out") return "L'expédition n'est pas encore arrivée.";
   if (e.status === "back") return "L'expédition rentre.";
-  if (isGuardian(e.floor) && allies < 1) return "Un gardien garde cet étage : il faut qu'un allié de ton alliance attende aussi devant.";
+  // Un gardien se joue seul ou à plusieurs : seul le renom change (double à plusieurs).
+  void allies;
   return null;
 }
 

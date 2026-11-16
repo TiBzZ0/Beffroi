@@ -604,4 +604,15 @@ export const CHANGELOG: ChangeEntry[] = [
       "🏷️ Caserne, entraînement et fortifications : les prix sont maintenant fixes, les mêmes pour tous, et ne montent plus avec ta production. Chaque niveau a son prix, calé sur ce que produit un joueur actif au moment où il l'achète d'habitude.",
     ],
   },
+  {
+    id: 70,
+    date: "16 novembre",
+    minSeason: 1,
+    items: [
+      "🏗️ Beffroi : une étape de 4 heures rapporte 3 renom à ceux qui atteignent un palier de don (10 pour les étapes de 12 heures et plus et les embellissements). Une part de chantier ne descend plus sous un minimum fixé par l'âge de la saison : un domaine endormi ne touche plus paliers, écus et renom pour quelques pierres.",
+      "🌀 Faille : le premier passage d'un étage rapporte la moitié de son numéro en renom, 2 au moins (étage 9 : 5, étage 20 : 10).",
+      "👹 Gardiens : ils se jouent maintenant seul. Avec des alliés de ton alliance devant le même étage, la bataille reste commune et chacun reçoit le renom de l'étage en double. Relique rare au moins et capitaine offert dans les deux cas.",
+      "🏰 Seigneurs difficiles un peu moins solides : environ 70 % de chances pour 6 compagnies à l'entraînement 5 avec la Forge au niveau 4.",
+    ],
+  },
 ];

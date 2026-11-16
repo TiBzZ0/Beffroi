@@ -761,7 +761,7 @@ async function stageRewards(admin: SupabaseClient, seasonId: number, before: num
     if (ecus > 0) await admin.rpc("reward_donors", { p_season: seasonId, p_amount: ecus });
     // U2 : la fin d'étape entre dans les rapports « Chantier » de tous.
     if (actorId) await addChronicle(admin, seasonId, { kind: "stage", actor_id: actorId, details: { stage: i, name: stageDef(i).name, ecus } });
-    // L1 : 10 renom pour chaque joueur qui a atteint au moins un palier de don de cette étape.
+    // L1 : du renom pour chaque joueur qui a atteint au moins un palier de don de cette étape.
     const { data: donors } = await admin.from("player_states").select("user_id, military").eq("season_id", seasonId);
     const ids = (donors ?? []).filter((r) => {
       const sh = (r.military as { share?: { stage?: unknown; tiers?: unknown } } | null)?.share;
@@ -769,7 +769,8 @@ async function stageRewards(admin: SupabaseClient, seasonId: number, before: num
     }).map((r) => r.user_id as string);
     for (const id of ids) {
       const row = { id, isLord: false } as Entity;
-      await grantRenown(admin, seasonId, row, "stage", `${stageDef(i).name} achevé`, i);
+      // Saison 1 : 3 renom pour une étape de 4 heures, 10 pour les étapes de 12 heures et plus et les embellissements.
+      await grantRenown(admin, seasonId, row, "stage", `${stageDef(i).name} achevé`, i, currentCompanyModel && stageHours(i) <= 4 ? 3 : RENOWN.stage.amount);
     }
   }
 }
@@ -2763,7 +2764,9 @@ export async function runAction(admin: SupabaseClient, userId: string, action: G
         if ((data as { conflict?: boolean } | null)?.conflict) continue;
         if (cleared) {
           await addChronicle(admin, season.id, { kind: "rift", actor_id: userId, details: { week: cleared.week, floor: cleared.floor, name: me.name } });
-          const got = await grantRenown(admin, season.id, me, "rift", `Faille, étage ${cleared.floor}`, `${cleared.week}:${cleared.floor}`, floorRenown(cleared.floor));
+          // Gardien battu à plusieurs : renom double pour chacun.
+          const together = riftAfter.length > 0 ? 2 : 1;
+          const got = await grantRenown(admin, season.id, me, "rift", `Faille, ${together > 1 ? "gardien de l'étage" : "étage"} ${cleared.floor}`, `${cleared.week}:${cleared.floor}`, floorRenown(cleared.floor) * together);
           if (got > 0) message = `${message} +${got} 🎖️`;
         }
         // Gardien : les alliés de la bataille, enregistrés après moi (une écriture refusée laisse leur expédition intacte).
@@ -2773,7 +2776,7 @@ export async function runAction(admin: SupabaseClient, userId: string, action: G
           if (o.first) {
             const wk = riftWeek(now).key;
             await addChronicle(admin, season.id, { kind: "rift", actor_id: o.p.e.id, details: { week: wk, floor: o.next.rift?.best ?? 0, name: o.p.e.name } });
-            await grantRenown(admin, season.id, o.p.e, "rift", `Faille, gardien de l'étage ${o.next.rift?.best ?? 0}`, `${wk}:${o.next.rift?.best ?? 0}`, floorRenown(o.next.rift?.best ?? 0));
+            await grantRenown(admin, season.id, o.p.e, "rift", `Faille, gardien de l'étage ${o.next.rift?.best ?? 0}`, `${wk}:${o.next.rift?.best ?? 0}`, floorRenown(o.next.rift?.best ?? 0) * 2);
           }
         }
       }

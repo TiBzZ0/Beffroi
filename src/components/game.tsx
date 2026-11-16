@@ -4229,8 +4229,8 @@ export function Rift({ snap, live, now, run }: { snap: GameSnapshot; live: Playe
           Des étages à garnison fixe, les mêmes pour tout le monde. Chaque étage a une ou deux altérations, connues d&apos;avance pour la semaine : choisis tes
           compagnies en conséquence. Envoie de 1 à {RIFT_MAX_COMPANIES} compagnies ; elles montent étage par étage tant qu&apos;elles gagnent, et tu choisis après
           chaque étage de continuer ou de rentrer. Les pertes sont réelles. Au retour, une compagnie se repose une heure avant de repartir. Premier passage d&apos;un étage
-          dans la semaine : 1 renom par tranche de 3 étages, et un coffre de 10 minutes de production tous les 5 étages. Tous les 10 étages, un gardien demande
-          deux joueurs d&apos;une même alliance. Remise à zéro chaque lundi à 4 h.
+          dans la semaine : du renom (la moitié du numéro de l&apos;étage, 2 au moins), et un coffre de 10 minutes de production tous les 5 étages. Tous les 10 étages, un gardien, plus
+          solide : seul, ou avec des alliés devant le même étage pour un renom double. Remise à zéro chaque lundi à 4 h.
         </Info>
       </div>
       <p className="row-desc num">
@@ -4331,7 +4331,7 @@ export function Rift({ snap, live, now, run }: { snap: GameSnapshot; live: Playe
                   </div>
                 ) : null;
               })}
-              {f.guardian && <div className="row-desc">👹 Gardien : il faut au moins deux joueurs de ton alliance, chacun devant cet étage. Récompense : un capitaine et une relique rare pour chacun.</div>}
+              {f.guardian && <div className="row-desc">👹 Gardien : jouable seul. À plusieurs joueurs de ton alliance, chacun devant cet étage, la bataille est commune et chacun reçoit le renom en double. Récompense : un capitaine et une relique rare au moins pour chacun.</div>}
               {f.allies && <div className="row-desc">{f.allies.length ? `🤝 Devant avec toi : ${f.allies.join(", ")}` : "🤝 Aucun allié n'attend encore devant."}</div>}
               {f.first && <div className="row-desc">🪦 Gravé : {f.first}</div>}
             </div>
