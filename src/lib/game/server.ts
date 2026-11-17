@@ -757,6 +757,9 @@ function lotsView(lots: Lot[], me: Entity, entities: Map<string, Entity>, allian
 /** B6 : récompenses versées une fois quand une étape s'achève (écus du beffroi légendaire). */
 async function stageRewards(admin: SupabaseClient, seasonId: number, before: number, after: number, actorId?: string) {
   for (let i = before; i < Math.min(after, TOTAL_STAGES); i++) {
+    // Une seule requête récompense une étape : la première qui inscrit la ligne (sans la table, comme avant).
+    const { error: claimError } = await admin.from("stage_rewards").insert({ season_id: seasonId, stage: i });
+    if (claimError?.code === "23505") continue;
     const ecus = stageDef(i).bonus.donorEcus ?? 0;
     if (ecus > 0) await admin.rpc("reward_donors", { p_season: seasonId, p_amount: ecus });
     // U2 : la fin d'étape entre dans les rapports « Chantier » de tous.
