@@ -615,4 +615,12 @@ export const CHANGELOG: ChangeEntry[] = [
       "🏰 Seigneurs difficiles un peu moins solides : environ 70 % de chances pour 6 compagnies à l'entraînement 5 avec la Forge au niveau 4.",
     ],
   },
+  {
+    id: 71,
+    date: "17 novembre",
+    minSeason: 1,
+    items: [
+      "🔔 Beffroi : la huitième étape, le beffroi légendaire, vaut maintenant 48 heures de la production des joueurs actifs au lieu de 24. Le beffroi doit rester un objectif de toute la saison.",
+    ],
+  },
 ];

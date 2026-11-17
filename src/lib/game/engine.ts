@@ -1086,16 +1086,17 @@ export function refStone(fromHours: number, toHours: number): number {
 }
 
 /**
- * B1 : plancher de la taille d'une étape (saison 2 et suivantes). Joueurs équivalents (chacun compte pour
- * min(1, sa production / la production de référence du moment)) × 15 % × production de référence cumulée entre
- * l'ouverture prévue de l'étape (fin visée de la précédente) et sa fin visée. 0 hors du beffroi étalé.
+ * B1 : taille d'une étape (saison 2 et suivantes) : 20 % × joueurs équivalents (chacun compte pour sa production /
+ * la production de référence du moment, sans plafond) × production de référence cumulée entre l'ouverture prévue
+ * de l'étape (fin visée de la précédente) et sa fin visée. Si les joueurs versent 20 % de ce qu'ils produisent et
+ * gardent leur rythme, l'étape finit à sa fin visée. 0 hors du beffroi étalé.
  */
-export function stageFloor(stage: number, activeRates: number[], ageHours: number): number {
+export function stageTarget(stage: number, activeRates: number[], ageHours: number): number {
   if (!stagesSpread() || stage >= STAGE_END_HOURS.length) return 0;
   const ref = refRate(ageHours);
-  const players = activeRates.reduce((a, r) => a + (Number.isFinite(r) && r > 0 ? Math.min(1, r / ref) : 0), 0);
+  const players = activeRates.reduce((a, r) => a + (Number.isFinite(r) && r > 0 ? r / ref : 0), 0);
   const from = stage === 0 ? 0 : STAGE_END_HOURS[stage - 1];
-  return Math.ceil(players * STAGE_FLOOR_SHARE * refStone(from, STAGE_END_HOURS[stage]));
+  return Math.max(STAGE_MIN_SIZE, Math.ceil(players * STAGE_FLOOR_SHARE * refStone(from, STAGE_END_HOURS[stage])));
 }
 
 // ---------------------------------------------------------------------------

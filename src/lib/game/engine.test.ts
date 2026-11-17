@@ -409,12 +409,12 @@ describe("format", () => {
 });
 
 describe("durée des étapes", () => {
-  it("l'horloge vaut 12 h et le beffroi légendaire 24 h de production", async () => {
+  it("l'horloge vaut 12 h et le beffroi légendaire 48 h de production (saison 1)", async () => {
     const { stageSize: size } = await import("./engine");
     const { stageHours } = await import("./config");
     expect(stageHours(5)).toBe(4);
     expect(stageHours(6)).toBe(12);
-    expect(stageHours(7)).toBe(24);
+    expect(stageHours(7)).toBe(48);
     expect(size([1e6], stageHours(6))).toBe(3 * size([1e6], stageHours(5)));
   });
 });

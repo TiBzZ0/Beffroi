@@ -193,7 +193,7 @@ import {
   rebuildRuin,
   resolveRaid,
   stageSize,
-  stageFloor,
+  stageTarget,
   setTithe,
   payTithe,
   openShare,
@@ -902,9 +902,9 @@ function lordRates(entities: Map<string, Entity>, world: WorldState, now: number
   // Joueurs actifs : vus dans la fenêtre d'activité du chantier.
   const rates = activeHumans(entities, now).map((e) => productionPerSecond(e.state, world, stagesDoneAt(world, now))).sort((a, b) => a - b);
   // Au passage, on retient la taille d'une étape qui s'ouvrirait maintenant.
-  // B1 (saison 2 et suivantes) : jamais sous le plancher fixé par la fin visée de l'étape.
+  // B1 (saison 2 et suivantes) : les huit étapes du beffroi sont taillées sur leur fin visée.
   const ageH = Math.max(0, (now - currentSeasonStart) / 3_600_000);
-  stageSizes = Array.from({ length: TOTAL_STAGES }, (_, i) => Math.max(stageSize(rates, stageHours(i)), stageFloor(i, rates, ageH)));
+  stageSizes = Array.from({ length: TOTAL_STAGES }, (_, i) => stageTarget(i, rates, ageH) || stageSize(rates, stageHours(i)));
   const mid = median(rates);
   // Les seigneurs faciles suivent le quart le plus faible des joueurs, pour que les petits aient une cible.
   const low = rates.length === 0 ? 0 : rates[Math.floor((rates.length - 1) * 0.25)];

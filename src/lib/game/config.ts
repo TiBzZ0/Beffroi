@@ -242,16 +242,16 @@ export const STAGE_BASES = STAGES.map((s) => s.basePerPlayer);
 /** Taille d'une étape à son ouverture : tant d'heures de la production cumulée des joueurs actifs. */
 export const STAGE_SIZE_HOURS = 4;
 /** Durée de chaque étape en heures de production (taille, parts de chantier, lots et paliers) : on ralentit la fin du beffroi. */
-export const STAGE_HOURS_BY_STAGE: readonly number[] = [4, 4, 4, 4, 4, 4, 12, 24];
+export const STAGE_HOURS_BY_STAGE: readonly number[] = [4, 4, 4, 4, 4, 4, 12, 48];
 /**
- * B1 (à partir de la saison 2) : le beffroi s'étale sur toute la saison. Chaque étape a plus d'heures de production
- * et une fin visée (heures depuis le début de la saison) qui fixe un plancher à sa taille.
+ * B1 (à partir de la saison 2) : le beffroi s'étale sur toute la saison. Chaque étape a une fin visée (heures depuis
+ * le début de la saison) qui fixe sa taille ; ses heures de production servent aux parts de chantier et aux paliers.
  */
 export const SPREAD_SEASON = 2;
 export const STAGE_HOURS_SPREAD: readonly number[] = [8, 12, 16, 24, 24, 36, 48, 72];
 export const STAGE_END_HOURS: readonly number[] = [12, 36, 72, 108, 144, 192, 240, 300];
-/** Part de la production de référence cumulée qui fait le plancher d'une étape. */
-export const STAGE_FLOOR_SHARE = 0.15;
+/** Part de la production versée au beffroi (21 % relevés en saison 1) : elle fait la taille d'une étape. */
+export const STAGE_FLOOR_SHARE = 0.2;
 let spreadStages = false;
 /** Règles qui dépendent du numéro de saison (appelée par le serveur et le client dès qu'ils connaissent la saison). */
 export function setSeasonRules(seasonNumber: number): void {
