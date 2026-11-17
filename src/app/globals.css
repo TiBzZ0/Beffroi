@@ -2477,3 +2477,128 @@ use.g-enemy {
 .row-title-one .badge {
   white-space: nowrap;
 }
+
+/* Saison 2 : grande carte et domaine. */
+.s2-map {
+  max-width: 720px;
+  margin: 0 auto 10px;
+}
+.s2-map .map-tools {
+  flex-wrap: wrap;
+}
+.s2-svg {
+  display: block;
+  width: 100%;
+  aspect-ratio: 1;
+  border-radius: var(--radius);
+  box-shadow: var(--shadow);
+  touch-action: none;
+  user-select: none;
+  cursor: grab;
+}
+.s2-paper {
+  fill: var(--map-paper);
+}
+.s2-centre {
+  fill: var(--map-land);
+  stroke: var(--map-ink-soft);
+  stroke-width: 0.08;
+  stroke-dasharray: 0.3 0.2;
+}
+.s2-grid {
+  stroke: var(--map-ink-soft);
+  stroke-width: 0.02;
+  fill: none;
+}
+.s2-road {
+  stroke: var(--map-road);
+  stroke-width: 0.18;
+  stroke-linecap: round;
+}
+.s2-glyph {
+  font-size: 0.7px;
+  text-anchor: middle;
+  pointer-events: none;
+}
+.s2-glyph.s2-big {
+  font-size: 1px;
+}
+.s2-glyph.s2-small {
+  font-size: 0.5px;
+}
+.s2-site {
+  stroke: var(--map-ink-soft);
+  stroke-width: 0.04;
+}
+.s2-site.s2-mine {
+  stroke: var(--accent);
+  stroke-width: 0.12;
+}
+.s2-lord {
+  fill: var(--panel);
+  stroke: var(--map-ink);
+  stroke-width: 0.06;
+}
+.s2-lord.s2-baron {
+  stroke: var(--ok);
+}
+.s2-lord.s2-comte {
+  stroke: var(--gold);
+  stroke-width: 0.1;
+}
+.s2-lord.s2-duc {
+  stroke: var(--accent);
+  stroke-width: 0.14;
+}
+.s2-convoy {
+  stroke: var(--map-ink);
+  stroke-width: 0.03;
+}
+.s2-convoy.s2-mine {
+  stroke: var(--accent);
+  stroke-width: 0.07;
+}
+.s2-pick {
+  fill: none;
+  stroke: var(--accent);
+  stroke-width: 0.1;
+}
+.s2-hint,
+.s2-panel {
+  margin: 8px 0;
+  padding: 10px 12px;
+  background: var(--panel-2);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+}
+.s2-panel .btn {
+  margin-top: 8px;
+}
+.s2-purse {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 14px;
+  font-variant-numeric: tabular-nums;
+  margin-bottom: 8px;
+}
+.s2-actions {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  align-items: flex-end;
+}
+.s2-market {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  align-items: center;
+}
+.s2-market input {
+  width: 7em;
+}
+.s2-domain .row {
+  grid-template-columns: 1fr auto;
+}
+.s2-domain h3 {
+  margin: 14px 0 6px;
+}

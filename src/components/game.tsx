@@ -1,7 +1,8 @@
 "use client";
 
 import { createContext, useContext, useEffect, useId, useRef, useState } from "react";
-import { s2Enabled } from "@/lib/game/s2/rules";
+import { s2Enabled, setS2Map } from "@/lib/game/s2/rules";
+import { S2Domain, S2MapScreen } from "@/components/s2-map";
 import { setIronArmy } from "@/lib/game/companies";
 import { signOut } from "@/app/(auth)/actions";
 import {
@@ -186,6 +187,7 @@ export function Game({ userId }: { userId: string }) {
   setSeasonRules(snap.season.number);
   setS2Geometry(s2Enabled(snap.season.number));
   setIronArmy(s2Enabled(snap.season.number));
+  setS2Map(snap.s2?.map ?? null);
   const live: PlayerState = { ...advance(snap.state, now, world), stone: game.predictedStone() };
   const rate = rateAt(live, world, now);
   const researchDone = tab !== "armee" && researchEnds.some((e) => e <= now && e > armySeenAt);
@@ -221,18 +223,20 @@ export function Game({ userId }: { userId: string }) {
             <div className="subtabs group-subtabs" role="group" aria-label="Sections">
               {GROUPS[group].filter((t) => t !== "faille" || !!snap.rift).map((t) => (
                 <button key={t} className="btn btn-small" aria-pressed={tab === t} onClick={() => selectTab(t)}>
-                  {SUBTAB_LABELS[t]}
+                  {snap.s2 && t === "ateliers" ? "Concessions" : SUBTAB_LABELS[t]}
                   {t === "ameliorations" && affordableUpgrades > 0 ? " •" : ""}
                 </button>
               ))}
             </div>
           )}
           <div className="tab-body" role="tabpanel">
-            {tab === "ateliers" && <Generators live={live} stagesDone={stagesDone} snap={snap} run={game.run} />}
+            {tab === "ateliers" && snap.s2 && <S2Domain snap={snap} live={live} now={now} run={game.run} />}
+            {tab === "ateliers" && !snap.s2 && <Generators live={live} stagesDone={stagesDone} snap={snap} run={game.run} />}
             {tab === "ameliorations" && <Upgrades live={live} run={game.run} />}
             {tab === "chantier" && <Worksite snap={snap} live={live} run={game.run} />}
             {tab === "armee" && <Army snap={snap} live={live} now={now} run={game.run} />}
-            {tab === "carte" && <KingdomMap snap={snap} live={live} now={now} run={game.run} focus={focus} />}
+            {tab === "carte" && snap.s2 && <S2MapScreen snap={snap} live={live} now={now} run={game.run} />}
+            {tab === "carte" && !snap.s2 && <KingdomMap snap={snap} live={live} now={now} run={game.run} focus={focus} />}
             {tab === "raids" && <Raids snap={snap} live={live} now={now} run={game.run} focus={focus} />}
             {tab === "alliance" && <AllianceTab snap={snap} live={live} now={now} run={game.run} />}
             {tab === "messages" && <Inbox snap={snap} live={live} now={now} run={game.run} userId={userId} />}

@@ -234,6 +234,7 @@ import {
   type LotView,
   type GameAction,
   type GameSnapshot,
+  type S2WorldView,
   type LeaderboardRow,
   type MapView,
   type IncomingView,
@@ -263,8 +264,8 @@ import { applyRiftFight, cleanRift, expeditionOpts, floorRenown, floorTrain, gua
 import { COMPANY_CAP, COMPANY_VALUE, FIXED_EVENT_COMPANIES, FIXED_TRAIN, FORTRESS_COMPANIES, LORD_COMPANIES, LORD_RAID_SHARE, LORD_TRAIN, trainLevels, buildBarracks, buildFort, combatLevels, cleanCompanies, cleanFortLevels, cleanRecruits, cleanWorks, createCompany, dissolveCompany, recruit, retypeCompany, setIronArmy, startTraining } from "./companies";
 import { castleBlocker, generateMap, regionAt, type Resource, type S2Map } from "./s2/map";
 import { s2Map, setS2Map, s2Enabled } from "./s2/rules";
-import { build, buyConcession, cleanS2, dropConcession, exchangeBlocker, firstConcessionSites, marketQuote, takeConcession, upgradeConcession, type BuildingId } from "./s2/economy";
-import { afterDefeat, cleanLordS2, fiefLoot, garrison, settleFief } from "./s2/lords";
+import { REF, VALUE, build, buyConcession, cleanS2, dropConcession, exchangeBlocker, firstConcessionSites, marketQuote, takeConcession, upgradeConcession, type BuildingId } from "./s2/economy";
+import { afterDefeat, cleanLordS2, companiesHome, fiefLoot, garrison, lordTrain, patrolUnit, REFORM_MS, settleFief } from "./s2/lords";
 import { buyNode, cleanLineage, lin, lineageMark, LIN_GENERATOR_DISCOUNT, LIN_MOLE, LIN_SPY_CATCH, NODE_BY_ID, nodeEffect, parisDay, RENOWN, RENOWN_GIFT_SEASON, renownAvailable, respec, type RenownSource } from "./lineage";
 import { notify, notifyEach, type PushMessage } from "@/lib/push";
 
@@ -2400,6 +2401,46 @@ interface Outcome {
   message?: string;
 }
 
+/** Saison 2 : vue de la carte pour l'écran. */
+function s2WorldView(entities: Map<string, Entity>, meId: string, now: number): S2WorldView | undefined {
+  const map = s2Map();
+  if (!map) return undefined;
+  const others = s2Others(entities, meId);
+  const taken: Record<number, number> = {};
+  for (const site of map.sites) {
+    const n = others.taken(site.id);
+    if (n > 0) taken[site.id] = n;
+  }
+  const castles: S2WorldView["castles"] = [];
+  const convoys: S2WorldView["convoys"] = [];
+  const ref = REF(Math.max(0, (now - currentSeasonStart) / 86_400_000));
+  const size = (value: number) => (value < ref / 3 ? "petite" : value < ref ? "moyenne" : "grosse") as "petite" | "moyenne" | "grosse";
+  for (const e of entities.values()) {
+    const s2 = e.state.s2;
+    if (!s2?.castle) continue;
+    castles.push({ id: e.id, name: e.name, pos: [s2.castle[0], s2.castle[1]], allianceId: e.allianceId, me: e.id === meId });
+    for (const v of s2.convoys) if (v.arrive > now) convoys.push({ from: [v.from[0], v.from[1]], to: [v.to[0], v.to[1]], depart: v.depart, arrive: v.arrive, res: v.res, size: size(v.load * VALUE[v.res]), mine: e.id === meId });
+  }
+  const lords: S2WorldView["lords"] = map.lords.map((l) => {
+    const e = entities.get(l.id);
+    const ls = settleFief(map, l, cleanLordS2(e?.state.lordS2, now), currentSeasonStart, now);
+    const home = companiesHome(l.companies, ls, now);
+    return {
+      id: l.id,
+      name: e?.name ?? l.id,
+      rank: l.rank,
+      pos: [l.pos[0], l.pos[1]],
+      companies: l.companies,
+      home,
+      patrol: patrolUnit(l.id, l.rank),
+      train: lordTrain(l.rank, currentSeasonStart, now),
+      fief: Math.floor(ls.fief.pierre * VALUE.pierre + ls.fief.fer * VALUE.fer + ls.fief.or * VALUE.or),
+      reformAt: home < l.companies ? ls.beatenAt + REFORM_MS : 0,
+    };
+  });
+  return { map, castles, taken, lords, convoys };
+}
+
 /** Saison 2 : ce que le serveur sait des autres (places prises sur les sites, châteaux posés). */
 interface S2Others {
   taken: (siteId: number) => number;
@@ -3223,7 +3264,9 @@ export async function runAction(admin: SupabaseClient, userId: string, action: G
       : null;
     const titles = titlesFrom(hall);
     allianceNames = names;
+    const s2World = s2WorldView(entities, userId, now);
     const snapshot: GameSnapshot = {
+      ...(s2World ? { s2: s2World } : {}),
       serverNow: now,
       userId,
       username: me.name,

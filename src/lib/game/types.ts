@@ -1,5 +1,6 @@
 import type { PlayerState } from "./engine";
-import { setStagesNow, type EventKind, type MerchantChoice } from "./config";
+import { setStagesNow, type EventKind, type MerchantChoice, type UnitId } from "./config";
+import type { Rank, Resource, S2Map } from "./s2/map";
 
 export interface WorksiteView {
   stage: number;
@@ -269,7 +270,19 @@ export interface MapView {
   halls?: HallPlace[];
 }
 
+/** Saison 2 : la carte de la saison et ce qu'on y voit (châteaux, places prises, seigneurs, convois en route). */
+export interface S2WorldView {
+  map: S2Map;
+  castles: { id: string; name: string; pos: [number, number]; allianceId: number | null; me: boolean }[];
+  /** Places prises sur chaque site par les autres (joueurs et seigneurs), par identifiant de site. */
+  taken: Record<number, number>;
+  lords: { id: string; name: string; rank: Rank; pos: [number, number]; companies: number; home: number; patrol: UnitId; train: number; fief: number; reformAt: number }[];
+  convoys: { from: [number, number]; to: [number, number]; depart: number; arrive: number; res: Resource; size: "petite" | "moyenne" | "grosse"; mine: boolean }[];
+}
+
 export interface GameSnapshot {
+  /** Saison 2 seulement. */
+  s2?: S2WorldView;
   serverNow: number;
   userId: string;
   username: string;
