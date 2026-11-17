@@ -1,6 +1,7 @@
 import { createServerClient } from "@supabase/ssr";
 import { NextResponse, type NextRequest } from "next/server";
 import { SUPABASE_PUBLIC_KEY, SUPABASE_URL, supabaseConfigured } from "@/lib/env";
+import { serverGlobal } from "@/lib/supabase/internal-fetch";
 
 // Rafraîchit la session Supabase à chaque navigation et protège la page de jeu.
 export async function proxy(request: NextRequest) {
@@ -8,6 +9,7 @@ export async function proxy(request: NextRequest) {
   if (!supabaseConfigured()) return response;
 
   const supabase = createServerClient(SUPABASE_URL, SUPABASE_PUBLIC_KEY, {
+    ...serverGlobal,
     cookies: {
       getAll() {
         return request.cookies.getAll();

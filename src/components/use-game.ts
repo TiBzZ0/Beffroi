@@ -3,13 +3,16 @@ import type { ChatChannel, ChatView } from "@/lib/game/chat-config";
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { MAX_CLICKS_PER_SECOND } from "@/lib/game/config";
-import { advance, buyAcademy, buyArmy, buyGenerator, buyUpgrade, clickValue, stagesDoneAt, setTithe, startResearch, type PlayerState } from "@/lib/game/engine";
+import { advance, type WorldState, buyAcademy, buyArmy, buyGenerator, buyUpgrade, clickValue, stagesDoneAt, setTithe, startResearch, type PlayerState } from "@/lib/game/engine";
 import type { GeneratorId } from "@/lib/game/config";
+import { applyS2Action } from "@/lib/game/s2/apply";
 import { worksiteFromRow, worldFrom, type ActionResponse, type AwaySummary, type GameAction, type GameSnapshot, type Leaderboards } from "@/lib/game/types";
 import { getBrowserClient } from "@/lib/supabase/client";
 
 /** Les clics partent par lots : moins d'appels au serveur (la pierre s'affiche déjà en local). */
 const CLICK_FLUSH_MS = 8_000;
+/** Actions qui passent par le chemin commun du serveur : elles emportent les clics en attente. */
+const JOINS_CLICKS = new Set<string>(["buy", "rebuild", "army", "s2", "company", "research", "research_cancel", "curfew", "march_recall", "merchant", "tithe", "academy", "upgrade", "inbox_read", "contribute", "vein"]);
 const SYNC_MS = 60_000;
 /** Délai minimal entre deux synchronisations déclenchées par l'activité des rivaux. */
 const LIVE_SYNC_MS = 5_000;
@@ -56,7 +59,8 @@ export function useGame() {
     let next = s.chronicle ? s : { ...s, chronicle: snapRef.current?.chronicle ?? [], seasonRewards: s.seasonRewards ?? snapRef.current?.seasonRewards };
     // Achats encore en route : on les remet par-dessus l'état reçu pour éviter un retour en arrière.
     if (optimisticOps.current.length > 0) {
-      const state = optimisticOps.current.reduce<PlayerState>((st, op) => applyLocal(st, op) ?? st, advance(next.state, s.serverNow, worldFrom(next.worksite)));
+      const w = worldFrom(next.worksite);
+      const state = optimisticOps.current.reduce<PlayerState>((st, op) => applyLocal(st, op, w) ?? st, advance(next.state, s.serverNow, w));
       next = { ...next, state };
     }
     snapRef.current = next;
@@ -111,8 +115,23 @@ export function useGame() {
           await sendClicks();
           return true;
         }
-        if (pending.current > 0) await sendClicks();
-        const r = await post(action);
+        // Actions simples : les clics en attente partent avec elles (un aller-retour de moins).
+        const joined = pending.current > 0 && JOINS_CLICKS.has(action.type) ? pending.current : 0;
+        if (pending.current > 0 && joined === 0) await sendClicks();
+        if (joined > 0) {
+          pending.current = 0;
+          inflight.current = joined;
+        }
+        let r: ActionResponse;
+        try {
+          const before = snapRef.current?.state.clickPausedUntil ?? 0;
+          r = await post(joined > 0 ? ({ ...action, clicks: joined } as unknown as GameAction) : action);
+          if (joined > 0 && !r.snapshot) pending.current += joined;
+          const paused = r.snapshot?.state.clickPausedUntil ?? 0;
+          if (joined > 0 && r.snapshot && paused > before && paused > r.snapshot.serverNow) showToast("🔨 Trop rapide pour un humain ! Ton marteau est confisqué 2 minutes.");
+        } finally {
+          if (joined > 0) inflight.current = 0;
+        }
         const i = optimisticOps.current.indexOf(action);
         if (i >= 0) optimisticOps.current.splice(i, 1);
         if (r.snapshot) receive(r.snapshot);
@@ -123,7 +142,8 @@ export function useGame() {
       if (action !== "flush-clicks") {
         const s = snapRef.current;
         const now = Date.now() + offset.current;
-        const local = s ? applyLocal(advance(s.state, now, worldFrom(s.worksite)), action) : null;
+        const w = s ? worldFrom(s.worksite) : undefined;
+        const local = s && w ? applyLocal(advance(s.state, now, w), action, w) : null;
         if (s && local) {
           optimisticOps.current.push(action);
           const next = { ...s, state: local };
@@ -354,7 +374,7 @@ export function useTick(ms: number) {
 }
 
 /** Effet local d'un achat, s'il est sûr de réussir ; null sinon (le serveur tranchera). */
-function applyLocal(state: PlayerState, action: GameAction): PlayerState | null {
+function applyLocal(state: PlayerState, action: GameAction, world?: WorldState): PlayerState | null {
   const r =
     action.type === "buy"
       ? buyGenerator(state, action.generator as GeneratorId, Number(action.qty))
@@ -368,8 +388,16 @@ function applyLocal(state: PlayerState, action: GameAction): PlayerState | null 
               ? startResearch(state, action.id, state.lastUpdate)
               : action.type === "tithe"
                 ? setTithe(state, Number(action.percent))
-                : null;
+                : action.type === "s2" && action.op !== "place" && action.op !== "take" && world
+                  ? s2Local(state, action, world)
+                  : null;
   return r && r.ok ? r.value : null;
+}
+
+/** Aperçu d'une action de la saison 2 (le château et les prises de site attendent le serveur). */
+function s2Local(state: PlayerState, action: Extract<GameAction, { type: "s2" }>, world: WorldState) {
+  const r = applyS2Action(state, action, state.lastUpdate, world, { taken: () => 0, castles: [] });
+  return r.ok ? { ok: true as const, value: r.value.state } : r;
 }
 
 export type PushState = "loading" | "unsupported" | "denied" | "off" | "on";

@@ -127,9 +127,11 @@ export function S2MapScreen({ snap, live, now, run }: { snap: GameSnapshot; live
 
   const setZ = (z: number) => setZoom(Math.min(5, Math.max(1, z)));
   const act = async (a: GameAction) => {
-    setBusy(true);
+    // Les actions avec aperçu immédiat ne bloquent pas les boutons pendant l'aller-retour.
+    const waits = a.type !== "s2" || a.op === "place" || a.op === "take";
+    if (waits) setBusy(true);
     await run(a);
-    setBusy(false);
+    if (waits) setBusy(false);
   };
   const cellAt = (clientX: number, clientY: number): Pos | null => {
     const el = canvas.current;
@@ -370,9 +372,11 @@ export function S2Domain({ snap, live, now, run }: { snap: GameSnapshot; live: P
   const [supply, setSupply] = useState<{ res: Resource; amount: number }>({ res: "pierre", amount: 500 });
   if (!s2) return <p className="empty">La saison 2 n&apos;est pas encore ouverte.</p>;
   const act = async (a: GameAction) => {
-    setBusy(true);
+    // Les actions avec aperçu immédiat ne bloquent pas les boutons pendant l'aller-retour.
+    const waits = a.type !== "s2" || a.op === "place" || a.op === "take";
+    if (waits) setBusy(true);
     await run(a);
-    setBusy(false);
+    if (waits) setBusy(false);
   };
   const map = world.map;
   const slots = concessionSlots(s2, { stageConcessions: stageConcessions(snap, now) });

@@ -3,11 +3,13 @@ import { createServerClient } from "@supabase/ssr";
 import { createClient as createSupabaseClient } from "@supabase/supabase-js";
 import { cookies } from "next/headers";
 import { SUPABASE_PUBLIC_KEY, SUPABASE_URL, supabaseSecretKey } from "@/lib/env";
+import { serverGlobal } from "./internal-fetch";
 
 /** Client lié à la session de l'utilisateur (cookies). À recréer à chaque requête. */
 export async function createClient() {
   const cookieStore = await cookies();
   return createServerClient(SUPABASE_URL, SUPABASE_PUBLIC_KEY, {
+    ...serverGlobal,
     cookies: {
       getAll() {
         return cookieStore.getAll();
@@ -26,6 +28,7 @@ export async function createClient() {
 /** Client administrateur (clé secrète) : seul autorisé à écrire en base. Serveur uniquement. */
 export function createAdminClient() {
   return createSupabaseClient(SUPABASE_URL, supabaseSecretKey(), {
+    ...serverGlobal,
     auth: { persistSession: false, autoRefreshToken: false },
   });
 }
