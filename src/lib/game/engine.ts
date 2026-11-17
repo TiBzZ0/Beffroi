@@ -747,8 +747,8 @@ export function elanMaxMs(state: PlayerState): number {
 }
 
 export function elanBonus(state: PlayerState): number {
-  // Saison 2 : l'élan est offert à tous dès le départ (+20 %), sans savoir à acheter.
-  return (state.s2 ? 0.2 : 0) + ownedUpgrades(state).reduce((sum, u) => sum + (u.effect.kind === "elan" ? u.effect.bonus : 0), 0);
+  // Saison 2 : l'élan est offert à tous dès le départ (+25 %), sans savoir à acheter.
+  return (state.s2 ? 0.25 : 0) + ownedUpgrades(state).reduce((sum, u) => sum + (u.effect.kind === "elan" ? u.effect.bonus : 0), 0);
 }
 
 export interface AdvanceOptions {

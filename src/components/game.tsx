@@ -966,7 +966,7 @@ function Hero({ snap, rate, clickGain, game }: { snap: GameSnapshot; rate: numbe
             <div className="catch-up">✨ Frénésie : production doublée encore {Math.ceil((snap.state.frenzyUntil - game.serverNow()) / 1000)} s</div>
           )}
           <div className="hammer-hint">
-            {paused ? `🔨 Marteau confisqué encore ${Math.ceil((snap.state.clickPausedUntil - game.serverNow()) / 1000)} s` : snap.s2 ? "Frappe pour l'élan : +20 % de production tant qu'il dure" : `Frappe la pierre : +${formatRate(clickGain)} par coup`}
+            {paused ? `🔨 Marteau confisqué encore ${Math.ceil((snap.state.clickPausedUntil - game.serverNow()) / 1000)} s` : snap.s2 ? "Frappe pour l'élan : +25 % de production tant qu'il dure" : `Frappe la pierre : +${formatRate(clickGain)} par coup`}
           </div>
         </div>
         <div className="hammer-zone">
