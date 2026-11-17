@@ -3,6 +3,7 @@
 import { createContext, useContext, useEffect, useId, useRef, useState } from "react";
 import { s2Enabled, setS2Map } from "@/lib/game/s2/rules";
 import { S2Domain, S2MapScreen } from "@/components/s2-map";
+import { S2Tutorial } from "@/components/s2-tutorial";
 import { setIronArmy } from "@/lib/game/companies";
 import { signOut } from "@/app/(auth)/actions";
 import {
@@ -203,6 +204,7 @@ export function Game({ userId }: { userId: string }) {
     } }}>
     <div className="game">
       <WhatsNew season={snap.season.number} />
+      {snap.s2 && <S2Tutorial seasonId={snap.season.id} />}
       {game.away && <AwayModal away={game.away} event={snap.event} onClose={game.dismissAway} />}
       <TopBar snap={snap} now={now} />
       <Movements snap={snap} live={live} now={now} run={game.run} />

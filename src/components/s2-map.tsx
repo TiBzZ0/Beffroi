@@ -2,7 +2,9 @@
 
 // Saison 2 : la grande carte (41 × 41, zoom, glisser, filtres), la pose du château, et l'onglet du domaine
 // (concessions, bâtiments d'appui, marché). Tout se lit dans `snap.s2` et dans l'état prévu `live`.
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
+import { openTutorial } from "@/components/s2-tutorial";
+import { drawBelfry, drawCastle, drawFort, drawLord, drawMap, drawRift, drawSite, toCell, type Layers, type View } from "@/components/s2-canvas";
 import { UNITS } from "@/lib/game/config";
 import { formatNumber } from "@/lib/game/format";
 import { lin, LIN_GENERATOR_DISCOUNT } from "@/lib/game/lineage";
@@ -31,13 +33,11 @@ import {
   upgradeConcessionBlocker,
   type BuildingId,
 } from "@/lib/game/s2/economy";
-import { castleBlocker, cheb, inCentre, RANKS, REGIONS, S2_BELFRY, S2_FORTRESSES, S2_FORTRESSES_OPEN, S2_RIFTS, S2_SIZE, type Pos, type Resource } from "@/lib/game/s2/map";
+import { castleBlocker, cheb, inCentre, RANKS, REGIONS, S2_SIZE, type Pos, type Resource } from "@/lib/game/s2/map";
 
 type Run = (action: GameAction) => Promise<unknown>;
 type Pick = { kind: "cell"; pos: Pos } | { kind: "site"; id: number } | { kind: "lord"; id: string } | { kind: "castle"; id: string };
 
-const REGION_FILL = ["#9fb7c9", "#b9a68a", "#c9c27a", "#c7a777", "#d9c08a", "#8fb3a8", "#8ea56f"];
-const RES_COLOR: Record<Resource, string> = { pierre: "#8c8172", fer: "#56677a", or: "#c49a2c" };
 const unitOf = (id: string) => UNITS.find((u) => u.id === id);
 const minutes = (ms: number) => Math.max(0, Math.round(ms / 60_000));
 
@@ -50,45 +50,83 @@ export function S2MapScreen({ snap, live, now, run }: { snap: GameSnapshot; live
   const s2 = live.s2;
   const castle = s2?.castle ?? null;
   const [zoom, setZoom] = useState(castle ? 2 : 1);
-  const [center, setCenter] = useState<[number, number]>(castle ? [castle[0], castle[1]] : [20, 20]);
-  const [filters, setFilters] = useState({ sites: true, lords: true, castles: true, convoys: true });
+  const [center, setCenter] = useState<[number, number]>(castle ? [castle[0] + 0.5, castle[1] + 0.5] : [S2_SIZE / 2, S2_SIZE / 2]);
+  const [layers, setLayers] = useState<Layers>({ sites: true, lords: true, zones: false, castles: true, convoys: true, free: !castle, grid: false });
   const [picked, setPicked] = useState<Pick | null>(null);
+  const [hover, setHover] = useState<[number, number] | null>(null);
   const [busy, setBusy] = useState(false);
+  const [width, setWidth] = useState(600);
   const drag = useRef<{ x: number; y: number; c: [number, number]; moved: boolean } | null>(null);
-  const svg = useRef<SVGSVGElement>(null);
-  if (!s2) return <p className="empty">La carte de la saison 2 n&apos;est pas encore ouverte.</p>;
+  const canvas = useRef<HTMLCanvasElement>(null);
+  const box = useRef<HTMLDivElement>(null);
 
   const span = S2_SIZE / zoom;
   const clamp = (v: number) => Math.min(S2_SIZE - span / 2, Math.max(span / 2, v));
-  const cx = zoom === 1 ? S2_SIZE / 2 : clamp(center[0] + 0.5);
-  const cy = zoom === 1 ? S2_SIZE / 2 : clamp(center[1] + 0.5);
-  const viewBox = `${cx - span / 2} ${cy - span / 2} ${span} ${span}`;
-  const setZ = (z: number) => setZoom(Math.min(4, Math.max(1, z)));
+  const view: View = { w: width, cx: zoom === 1 ? S2_SIZE / 2 : clamp(center[0]), cy: zoom === 1 ? S2_SIZE / 2 : clamp(center[1]), span };
+  const castlesOthers = world.castles.filter((c) => !c.me).map((c) => c.pos as Pos);
+  const pickedPos: Pos | null = !s2 || !picked
+    ? null
+    : picked.kind === "cell" ? picked.pos : picked.kind === "site" ? world.map.sites[picked.id]?.pos ?? null : picked.kind === "lord" ? world.lords.find((l) => l.id === picked.id)?.pos ?? null : world.castles.find((c) => c.id === picked.id)?.pos ?? null;
+
+  // Largeur du conteneur suivie en direct : la carte reste carrée et nette sur tous les écrans.
+  useEffect(() => {
+    const el = box.current;
+    if (!el) return;
+    const ro = new ResizeObserver(() => setWidth(Math.max(240, Math.floor(el.clientWidth))));
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, []);
+  useEffect(() => {
+    const el = canvas.current;
+    if (!el || !s2) return;
+    const dpr = window.devicePixelRatio || 1;
+    el.width = Math.round(width * dpr);
+    el.height = Math.round(width * dpr);
+    const c = el.getContext("2d");
+    if (!c) return;
+    c.setTransform(dpr, 0, 0, dpr, 0, 0);
+    drawMap(c, {
+      world,
+      now,
+      view,
+      layers,
+      mineSites: new Set(s2.conc.map((x) => x.site)),
+      routes: s2.conc.flatMap((x) => (world.map.sites[x.site] ? [[world.map.sites[x.site].pos]] : [])),
+      myCastle: castle,
+      picked: pickedPos,
+      hover,
+      isFree: castle ? undefined : (x, y) => !castleBlocker(world.map, [x, y], castlesOthers),
+    });
+  });
+  if (!s2) return <p className="empty">La carte de la saison 2 n&apos;est pas encore ouverte.</p>;
+
+  const setZ = (z: number) => setZoom(Math.min(5, Math.max(1, z)));
   const act = async (a: GameAction) => {
     setBusy(true);
     await run(a);
     setBusy(false);
   };
-
   const cellAt = (clientX: number, clientY: number): Pos | null => {
-    const el = svg.current;
+    const el = canvas.current;
     if (!el) return null;
     const r = el.getBoundingClientRect();
-    const x = Math.floor(cx - span / 2 + ((clientX - r.left) / r.width) * span);
-    const y = Math.floor(cy - span / 2 + ((clientY - r.top) / r.height) * span);
+    const [x, y] = toCell(view, clientX - r.left, clientY - r.top);
     return x >= 0 && y >= 0 && x < S2_SIZE && y < S2_SIZE ? [x, y] : null;
   };
   const onDown = (e: React.PointerEvent) => {
-    drag.current = { x: e.clientX, y: e.clientY, c: [cx - 0.5, cy - 0.5], moved: false };
+    drag.current = { x: e.clientX, y: e.clientY, c: [view.cx, view.cy], moved: false };
   };
   const onMove = (e: React.PointerEvent) => {
     const d = drag.current;
-    const el = svg.current;
-    if (!d || !el || zoom === 1) return;
-    const scale = span / el.getBoundingClientRect().width;
+    if (!d) {
+      if (e.pointerType === "mouse") setHover(cellAt(e.clientX, e.clientY));
+      return;
+    }
+    if (zoom === 1) return;
+    const scale = span / width;
     const dx = (e.clientX - d.x) * scale;
     const dy = (e.clientY - d.y) * scale;
-    if (Math.abs(dx) + Math.abs(dy) > 0.3) d.moved = true;
+    if (Math.abs(e.clientX - d.x) + Math.abs(e.clientY - d.y) > 6) d.moved = true;
     if (d.moved) setCenter([d.c[0] - dx, d.c[1] - dy]);
   };
   const onUp = (e: React.PointerEvent) => {
@@ -102,85 +140,108 @@ export function S2MapScreen({ snap, live, now, run }: { snap: GameSnapshot; live
     const other = world.castles.find((c) => c.pos[0] === p[0] && c.pos[1] === p[1]);
     setPicked(site ? { kind: "site", id: site.id } : lord ? { kind: "lord", id: lord.id } : other ? { kind: "castle", id: other.id } : { kind: "cell", pos: p });
   };
-
-  const mineSites = new Set(s2.conc.map((c) => c.site));
-  const castlesOthers = world.castles.filter((c) => !c.me).map((c) => c.pos as Pos);
-  const pickedPos: Pos | null =
-    picked?.kind === "cell" ? picked.pos : picked?.kind === "site" ? world.map.sites[picked.id]?.pos ?? null : picked?.kind === "lord" ? world.lords.find((l) => l.id === picked.id)?.pos ?? null : picked?.kind === "castle" ? world.castles.find((c) => c.id === picked.id)?.pos ?? null : null;
+  const toggles: [keyof Layers, string][] = [
+    ["sites", "Sites"],
+    ["lords", "Seigneurs"],
+    ["zones", "Zones des seigneurs"],
+    ["castles", "Châteaux"],
+    ["convoys", "Convois"],
+    ["free", "Cases libres"],
+    ["grid", "Grille"],
+  ];
 
   return (
     <div className="s2-map">
       {!castle && (
-        <p className="s2-hint">🏰 Choisis où poser ton château : touche une case libre hors du centre, à 2 cases au moins des sites, des seigneurs et des autres châteaux. Ta première concession sera une carrière proche.</p>
+        <p className="s2-hint">🏰 Choisis où poser ton château : touche une case marquée d&apos;un point blanc, hors du centre et à 2 cases au moins des sites, des seigneurs et des autres châteaux. Ta première concession sera une carrière proche.</p>
       )}
-      <div className="map-tools">
-        <button className="btn btn-small" onClick={() => setZ(zoom + 1)} aria-label="Zoomer">＋</button>
-        <button className="btn btn-small" onClick={() => setZ(zoom - 1)} aria-label="Dézoomer">－</button>
-        {castle && (
-          <button className="btn btn-small" onClick={() => { setZ(Math.max(zoom, 2)); setCenter([castle[0], castle[1]]); }}>Mon château</button>
-        )}
-        {(["sites", "lords", "castles", "convoys"] as const).map((k) => (
-          <button key={k} className="btn btn-small" aria-pressed={filters[k]} onClick={() => setFilters({ ...filters, [k]: !filters[k] })}>
-            {{ sites: "⛏️ Sites", lords: "🛡️ Seigneurs", castles: "🏰 Châteaux", convoys: "🐎 Convois" }[k]}
-          </button>
+      <div className="s2-board" ref={box}>
+        <canvas
+          ref={canvas}
+          className="s2-canvas"
+          style={{ width, height: width }}
+          onPointerDown={onDown}
+          onPointerMove={onMove}
+          onPointerUp={onUp}
+          onPointerLeave={() => {
+            drag.current = null;
+            setHover(null);
+          }}
+          onWheel={(e) => setZ(zoom + (e.deltaY < 0 ? 1 : -1))}
+          role="img"
+          aria-label="Carte du royaume : régions, sites, seigneurs, châteaux et convois"
+        />
+        <div className="s2-zoom">
+          <button className="btn btn-small" onClick={() => setZ(zoom + 1)} aria-label="Zoomer">＋</button>
+          <button className="btn btn-small" onClick={() => setZ(zoom - 1)} aria-label="Dézoomer">－</button>
+          {castle && (
+            <button className="btn btn-small" onClick={() => { setZ(Math.max(zoom, 2)); setCenter([castle[0] + 0.5, castle[1] + 0.5]); }} aria-label="Centrer sur mon château">🏰</button>
+          )}
+          <button className="btn btn-small" onClick={openTutorial} aria-label="Comment jouer">?</button>
+        </div>
+      </div>
+      <div className="s2-toggles">
+        {toggles.map(([k, label]) => (
+          <label key={k}>
+            <input type="checkbox" checked={layers[k]} onChange={() => setLayers({ ...layers, [k]: !layers[k] })} /> {label}
+          </label>
         ))}
       </div>
-      <svg
-        ref={svg}
-        className="s2-svg"
-        viewBox={viewBox}
-        onPointerDown={onDown}
-        onPointerMove={onMove}
-        onPointerUp={onUp}
-        onPointerLeave={() => (drag.current = null)}
-        onWheel={(e) => setZ(zoom + (e.deltaY < 0 ? 1 : -1))}
-        role="img"
-        aria-label="Carte du royaume"
-      >
-        <rect x={0} y={0} width={S2_SIZE} height={S2_SIZE} className="s2-paper" />
-        {world.map.regions.map((row, y) =>
-          row.map((r, x) => (r >= 0 ? <rect key={`${x}-${y}`} x={x} y={y} width={1} height={1} fill={REGION_FILL[r % REGION_FILL.length]} fillOpacity={0.35} /> : null)),
-        )}
-        <circle cx={20.5} cy={20.5} r={7.5} className="s2-centre" />
-        {zoom >= 2 && Array.from({ length: S2_SIZE + 1 }, (_, i) => <path key={i} d={`M${i} 0V${S2_SIZE}M0 ${i}H${S2_SIZE}`} className="s2-grid" />)}
-        {/* Routes de mes concessions. */}
-        {castle && s2.conc.map((c) => {
-          const p = world.map.sites[c.site]?.pos;
-          return p ? <line key={c.id} x1={p[0] + 0.5} y1={p[1] + 0.5} x2={castle[0] + 0.5} y2={castle[1] + 0.5} className="s2-road" /> : null;
-        })}
-        {/* Centre : beffroi, failles, forteresses. */}
-        <text x={S2_BELFRY[0] + 0.5} y={S2_BELFRY[1] + 0.8} className="s2-glyph s2-big">🔔</text>
-        {S2_RIFTS.map((r) => (
-          <text key={r.id} x={r.pos[0] + 0.5} y={r.pos[1] + 0.75} className="s2-glyph" opacity={r.id === "normale" ? 1 : 0.4}>🌀</text>
-        ))}
-        {S2_FORTRESSES.map((f, i) => (
-          <text key={i} x={f[0] + 0.5} y={f[1] + 0.75} className="s2-glyph" opacity={i < S2_FORTRESSES_OPEN ? 1 : 0.35}>🏯</text>
-        ))}
-        {filters.sites && world.map.sites.map((s) => (
-          <g key={s.id}>
-            <rect x={s.pos[0] + 0.08} y={s.pos[1] + 0.08} width={0.84} height={0.84} rx={0.2} fill={RES_COLOR[s.type]} className={mineSites.has(s.id) ? "s2-site s2-mine" : "s2-site"} />
-            <text x={s.pos[0] + 0.5} y={s.pos[1] + 0.72} className="s2-glyph s2-small">{RESOURCE_ICON[s.type]}</text>
-          </g>
-        ))}
-        {filters.lords && world.lords.map((l) => (
-          <g key={l.id}>
-            <circle cx={l.pos[0] + 0.5} cy={l.pos[1] + 0.5} r={0.46} className={`s2-lord s2-${l.rank}`} />
-            <text x={l.pos[0] + 0.5} y={l.pos[1] + 0.72} className="s2-glyph s2-small">🛡️</text>
-          </g>
-        ))}
-        {filters.castles && world.castles.map((c) => (
-          <text key={c.id} x={c.pos[0] + 0.5} y={c.pos[1] + 0.78} className={`s2-glyph${c.me ? " s2-big" : ""}`}>{c.me ? "🏰" : "🏠"}</text>
-        ))}
-        {filters.convoys && world.convoys.map((v, i) => {
-          const f = Math.min(1, Math.max(0, (now - v.depart) / Math.max(1, v.arrive - v.depart)));
-          const x = v.from[0] + (v.to[0] - v.from[0]) * f + 0.5;
-          const y = v.from[1] + (v.to[1] - v.from[1]) * f + 0.5;
-          return <circle key={i} cx={x} cy={y} r={v.size === "grosse" ? 0.3 : v.size === "moyenne" ? 0.22 : 0.15} fill={RES_COLOR[v.res]} className={v.mine ? "s2-convoy s2-mine" : "s2-convoy"} />;
-        })}
-        {pickedPos && <rect x={pickedPos[0]} y={pickedPos[1]} width={1} height={1} className="s2-pick" />}
-      </svg>
       <S2Panel snap={snap} live={live} now={now} world={world} picked={picked} busy={busy} act={act} castlesOthers={castlesOthers} />
+      <S2Legend />
     </div>
+  );
+}
+
+/** Légende dessinée avec les mêmes fonctions que la carte. */
+function S2Legend() {
+  const items: [string, (c: CanvasRenderingContext2D) => void][] = [
+    ["Carrière (pierre)", (c) => drawSite(c, 14, 14, 24, "pierre", 6)],
+    ["Mine (fer)", (c) => drawSite(c, 14, 14, 24, "fer", 6)],
+    ["Filon (or)", (c) => drawSite(c, 14, 14, 24, "or", 4)],
+    ["Hobereau ou baron", (c) => drawLord(c, 14, 16, 24, 1)],
+    ["Comte ou duc", (c) => drawLord(c, 14, 18, 22, 3)],
+    ["Château d'un joueur", (c) => drawCastle(c, 14, 17, 24, "#4f8fd9")],
+    ["Le beffroi", (c) => drawBelfry(c, 14, 14, 24)],
+    ["Faille", (c) => drawRift(c, 14, 14, 24, "#9b6bd6")],
+    ["Forteresse", (c) => drawFort(c, 14, 14, 24)],
+  ];
+  return (
+    <details className="s2-legend">
+      <summary>Légende et régions</summary>
+      <div className="s2-legend-grid">
+        {items.map(([label, fn]) => (
+          <LegendIcon key={label} label={label} draw={fn} />
+        ))}
+      </div>
+      <ul className="s2-regions">
+        {REGIONS.map((r) => (
+          <li key={r.id}>
+            <b>{r.icon} {r.name}</b> · {r.bonus}
+          </li>
+        ))}
+      </ul>
+    </details>
+  );
+}
+
+function LegendIcon({ label, draw }: { label: string; draw: (c: CanvasRenderingContext2D) => void }) {
+  const ref = useRef<HTMLCanvasElement>(null);
+  useEffect(() => {
+    const el = ref.current;
+    const c = el?.getContext("2d");
+    if (!el || !c) return;
+    const dpr = window.devicePixelRatio || 1;
+    el.width = 28 * dpr;
+    el.height = 28 * dpr;
+    c.setTransform(dpr, 0, 0, dpr, 0, 0);
+    draw(c);
+  }, [draw]);
+  return (
+    <>
+      <canvas ref={ref} style={{ width: 28, height: 28 }} aria-hidden />
+      <span>{label}</span>
+    </>
   );
 }
 
@@ -276,6 +337,7 @@ export function S2Domain({ snap, live, now, run }: { snap: GameSnapshot; live: P
   const exWhy = exchangeBlocker(have, from, to, amount);
   return (
     <div className="s2-domain">
+      <button className="btn btn-small s2-howto" onClick={openTutorial}>📖 Comment jouer</button>
       <div className="s2-purse">
         <span>🪨 {formatNumber(live.stone)}</span>
         <span>⚔️ {formatNumber(s2.iron)} fer</span>
