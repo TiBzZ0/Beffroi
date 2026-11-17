@@ -749,7 +749,16 @@ export const LORD_POSITIONS: Record<LordKey, MapPos> = {
   orgemont: [1, 15],
 };
 
+/** Saison 2 : carte 41 × 41, distance de Tchebychev (8 directions), trajets plafonnés à 45 min. */
+let s2Geometry = false;
+export function setS2Geometry(on: boolean): void {
+  s2Geometry = on;
+}
+export function travelMaxMin(): number {
+  return s2Geometry ? 45 : TRAVEL_MAX_MIN;
+}
 export function mapDistance(a: MapPos, b: MapPos): number {
+  if (s2Geometry) return Math.max(Math.abs(a[0] - b[0]), Math.abs(a[1] - b[1]));
   return Math.hypot(a[0] - b[0], a[1] - b[1]);
 }
 

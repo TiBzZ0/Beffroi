@@ -76,6 +76,7 @@ import {
   STAGE_MIN_SIZE,
   stageHours,
   setSeasonRules,
+  setS2Geometry,
   MAX_TITHE,
   NEW_PLAYER_TITHE,
   DONOR_TIER_BONUS,
@@ -260,11 +261,11 @@ import { recordContribution } from "@/lib/redis";
 import { addRelics, assignCaptain, assignRelic, captainOf, CAPTAIN_COST, cleanCaptains, cleanOffer, cleanRelics, drawTraits, dropRelic, addCaptain, HUNT_TARGETS, expeditionSpeed, makeCaptain, makeRelic, RARITY_LABEL, RELICS, TRAIT_IDS, TRAITS, type Relic, type TraitId } from "./captains";
 import { applyRiftFight, cleanRift, expeditionOpts, floorRenown, floorTrain, guardianBattle, isGuardian, splitLosses, riftFightBlocker, riftFloor, riftOf, riftReturn, riftSend, riftWeek, RIFT_CHEST_EVERY, RIFT_CHEST_SECONDS } from "./rift";
 import { COMPANY_VALUE, FIXED_EVENT_COMPANIES, FIXED_TRAIN, FORTRESS_COMPANIES, LORD_COMPANIES, LORD_RAID_SHARE, LORD_TRAIN, trainLevels, buildBarracks, buildFort, combatLevels, cleanCompanies, cleanFortLevels, cleanRecruits, cleanWorks, createCompany, dissolveCompany, recruit, retypeCompany, startTraining } from "./companies";
-import { generateMap, type S2Map } from "./s2/map";
+import { castleBlocker, generateMap, regionAt, type Resource, type S2Map } from "./s2/map";
 import { s2Map, setS2Map, s2Enabled } from "./s2/rules";
-import { cleanS2 } from "./s2/economy";
+import { build, buyConcession, cleanS2, dropConcession, exchangeBlocker, firstConcessionSites, marketQuote, takeConcession, upgradeConcession, type BuildingId } from "./s2/economy";
 import { cleanLordS2 } from "./s2/lords";
-import { buyNode, cleanLineage, lin, lineageMark, LIN_MOLE, LIN_SPY_CATCH, NODE_BY_ID, parisDay, RENOWN, RENOWN_GIFT_SEASON, renownAvailable, respec, type RenownSource } from "./lineage";
+import { buyNode, cleanLineage, lin, lineageMark, LIN_GENERATOR_DISCOUNT, LIN_MOLE, LIN_SPY_CATCH, NODE_BY_ID, parisDay, RENOWN, RENOWN_GIFT_SEASON, renownAvailable, respec, type RenownSource } from "./lineage";
 import { notify, notifyEach, type PushMessage } from "@/lib/push";
 
 // Toute la logique qui fait foi : charger l'état, le recalculer, appliquer l'intention
@@ -532,6 +533,7 @@ let seasonCache: { season: SeasonView; until: number } | null = null;
  */
 let mapSeason = -1;
 async function ensureSeasonMap(admin: SupabaseClient, season: SeasonView): Promise<void> {
+  setS2Geometry(s2Enabled(season.number));
   if (!s2Enabled(season.number)) {
     setS2Map(null);
     mapSeason = season.id;
@@ -2385,7 +2387,84 @@ interface Outcome {
   message?: string;
 }
 
-function applySimpleAction(state: PlayerState, action: GameAction, now: number, world: WorldState, eventId?: number): Result<Outcome> {
+/** Saison 2 : ce que le serveur sait des autres (places prises sur les sites, châteaux posés). */
+interface S2Others {
+  taken: (siteId: number) => number;
+  castles: MapPos[];
+}
+function s2Others(entities: Map<string, Entity>, meId: string): S2Others {
+  const map = s2Map();
+  const count = new Map<number, number>();
+  for (const l of map?.lords ?? []) for (const c of l.conc) count.set(c, (count.get(c) ?? 0) + 1);
+  const castles: MapPos[] = [];
+  for (const e of entities.values()) {
+    if (e.id === meId || !e.state.s2) continue;
+    for (const c of e.state.s2.conc) count.set(c.site, (count.get(c.site) ?? 0) + 1);
+    if (e.state.s2.castle) castles.push(e.state.s2.castle);
+  }
+  return { taken: (id) => count.get(id) ?? 0, castles };
+}
+
+/** Saison 2 : pose du château, concessions, bâtiments d'appui, marché. */
+function applyS2Action(state: PlayerState, action: Extract<GameAction, { type: "s2" }>, now: number, world: WorldState, others: S2Others): Result<Outcome> {
+  const map = s2Map();
+  const s2 = state.s2;
+  if (!map || !s2) return { ok: false, error: "La carte de la saison 2 n'est pas encore ouverte." };
+  const ctx = { map, stageConcessions: stagesDoneAt(world, now) >= 1 ? 1 : 0 };
+  const done = (next: PlayerState, op: string, details: Record<string, unknown>, message?: string): Result<Outcome> => ({ ok: true, value: { state: next, ...(message ? { message } : {}), log: { action: `s2_${op}`, details } } });
+  switch (action.op) {
+    case "place": {
+      if (s2.castle) return { ok: false, error: "Ton château est déjà posé." };
+      const p: MapPos = [Math.floor(Number(action.x)), Math.floor(Number(action.y))];
+      const why = castleBlocker(map, p as [number, number], others.castles as [number, number][]);
+      if (why) return { ok: false, error: why };
+      const firsts = firstConcessionSites(map, p as [number, number], others.taken);
+      const site = firsts.includes(Number(action.site)) ? Number(action.site) : firsts[0];
+      if (site === undefined) return { ok: false, error: "Aucune place libre sur une carrière : choisis une autre case." };
+      const placed = { ...s2, castle: p as [number, number], region: regionAt(map, p as [number, number]), at: now };
+      const r = takeConcession(placed, ctx, site, { taken: others.taken }, now);
+      if (!r.ok) return r;
+      return done({ ...state, s2: r.value }, "place", { x: p[0], y: p[1], site }, `🏰 Ton château est posé. Première concession : ${map.sites[site].name}.`);
+    }
+    case "take": {
+      const r = takeConcession(s2, ctx, Number(action.site), { taken: others.taken }, now);
+      return r.ok ? done({ ...state, s2: r.value }, "take", { site: action.site }, `⛏️ Nouvelle concession : ${map.sites[Number(action.site)].name}.`) : r;
+    }
+    case "drop": {
+      const r = dropConcession(s2, String(action.id));
+      return r.ok ? done({ ...state, s2: r.value }, "drop", { id: action.id }) : r;
+    }
+    case "upgrade": {
+      const r = upgradeConcession(s2, String(action.id), state.stone, now);
+      return r.ok ? done({ ...state, stone: state.stone - r.value.cost, s2: r.value.s }, "upgrade", { id: action.id, cost: r.value.cost }) : r;
+    }
+    case "build": {
+      const discount = lin(state, "main_oeuvre") ? 1 - LIN_GENERATOR_DISCOUNT : 1;
+      const r = build(s2, action.building as BuildingId, state.stone, now, discount);
+      return r.ok ? done({ ...state, stone: state.stone - r.value.cost, s2: r.value.s }, "build", { building: action.building, cost: r.value.cost }) : r;
+    }
+    case "buy": {
+      const r = buyConcession(s2);
+      return r.ok ? done({ ...state, s2: r.value }, "buy", {}, "🪙 Une concession de plus : choisis sa place sur la carte.") : r;
+    }
+    case "exchange": {
+      const from = action.from as Resource;
+      const to = action.to as Resource;
+      const amount = Math.floor(Number(action.amount));
+      const have = { pierre: state.stone, fer: s2.iron, or: s2.gold };
+      if (!(from in have) || !(to in have)) return { ok: false, error: "Monnaie inconnue." };
+      const why = exchangeBlocker(have, from, to, amount);
+      if (why) return { ok: false, error: why };
+      const got = marketQuote(from, to, amount);
+      const next = { ...have, [from]: have[from] - amount };
+      next[to] += got;
+      return done({ ...state, stone: next.pierre, s2: { ...s2, iron: next.fer, gold: next.or } }, "exchange", { from, to, amount, got }, `⚖️ Échange : ${amount.toLocaleString("fr-FR")} ${from} contre ${got.toLocaleString("fr-FR")} ${to}.`);
+    }
+  }
+  return { ok: false, error: "Action inconnue." };
+}
+
+function applySimpleAction(state: PlayerState, action: GameAction, now: number, world: WorldState, eventId?: number, others?: S2Others): Result<Outcome> {
   switch (action.type) {
     case "sync":
       // Le joueur est là : on programme sa prochaine veine d'or si besoin.
@@ -2425,6 +2504,8 @@ function applySimpleAction(state: PlayerState, action: GameAction, now: number, 
       const r = buyArmy(state, kind, String(action.id), Number(action.qty));
       return r.ok ? { ok: true, value: { state: r.value, log: { action: "army", details: { kind, id: action.id, qty: action.qty } } } } : r;
     }
+    case "s2":
+      return others ? applyS2Action(state, action, now, world, others) : { ok: false, error: "Action indisponible." };
     case "company": {
       // C1 à C4 : compagnies, recrutement, entraînement, caserne et fortifications.
       if (!state.companyModel) return { ok: false, error: "Les compagnies arrivent avec la saison 1." };
@@ -3037,7 +3118,7 @@ export async function runAction(admin: SupabaseClient, userId: string, action: G
         if ((data as { conflict?: boolean } | null)?.conflict) continue;
       }
     } else {
-      const outcome = applySimpleAction(current, action, now, world, events.active?.kind === "marchand" ? events.active.id : undefined);
+      const outcome = applySimpleAction(current, action, now, world, events.active?.kind === "marchand" ? events.active.id : undefined, action.type === "s2" ? s2Others(entities, userId) : undefined);
       if (outcome.ok) finalState = outcome.value.state;
       else error = outcome.error;
       if (outcome.ok && outcome.value.message) message = outcome.value.message;
@@ -3728,6 +3809,14 @@ let positionsCache: { seasonId: number; byId: Map<string, MapPos> } | null = nul
 
 /** Positions de tous les lieux de la saison ; place les joueurs qui n'en ont pas encore. */
 async function loadPositions(admin: SupabaseClient, seasonId: number, entities: Map<string, Entity>): Promise<Map<string, MapPos>> {
+  // Saison 2 : chacun pose son château lui-même (pas de case tirée) ; les seigneurs sont sur la carte de la saison.
+  const map = s2Map();
+  if (map) {
+    const out = new Map<string, MapPos>();
+    for (const e of entities.values()) if (e.state.s2?.castle) out.set(e.id, e.state.s2.castle);
+    for (const l of map.lords) out.set(l.id, l.pos);
+    return out;
+  }
   const missing = () => [...entities.values()].filter((e) => !e.lord && !e.isLord && !positionsCache?.byId.has(e.id));
   if (!positionsCache || positionsCache.seasonId !== seasonId || missing().length > 0) {
     const { data } = await admin.from("map_positions").select("user_id, x, y").eq("season_id", seasonId);

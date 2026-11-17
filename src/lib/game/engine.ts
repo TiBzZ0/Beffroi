@@ -156,7 +156,7 @@ import {
   MAX_MARCHES,
   BATTLE_FORTUNE,
   TRAVEL_BASE_MIN,
-  TRAVEL_MAX_MIN,
+  travelMaxMin,
   TRAVEL_MIN_MIN,
   TRAVEL_PER_CELL_MIN,
   UNIT_SPEED,
@@ -449,7 +449,7 @@ export function travelMs(army: Army, distance: number, speedBonus = 0): number {
   const speeds = (Object.entries(army) as [string, number][]).filter(([, n]) => n > 0).map(([id]) => UNIT_SPEED[id] ?? 1);
   const speed = speeds.length ? Math.min(...speeds) : 1;
   // Halle : écuries (et salle d'armes pour les renforts) raccourcissent la route.
-  const minutes = Math.min(TRAVEL_MAX_MIN, Math.max(TRAVEL_MIN_MIN, TRAVEL_BASE_MIN + (TRAVEL_PER_CELL_MIN * distance) / speed) / (1 + Math.max(0, speedBonus)));
+  const minutes = Math.min(travelMaxMin(), Math.max(TRAVEL_MIN_MIN, TRAVEL_BASE_MIN + (TRAVEL_PER_CELL_MIN * distance) / speed) / (1 + Math.max(0, speedBonus)));
   return Math.round(minutes * 60_000);
 }
 
