@@ -268,7 +268,8 @@ import { applyRiftFight, cleanRift, expeditionOpts, floorRenown, floorTrain, gua
 import { COMPANY_CAP, COMPANY_VALUE, FIXED_EVENT_COMPANIES, FIXED_TRAIN, FORTRESS_COMPANIES, LORD_COMPANIES, LORD_RAID_SHARE, LORD_TRAIN, trainLevels, buildBarracks, buildFort, combatLevels, cleanCompanies, cleanFortLevels, cleanRecruits, cleanWorks, createCompany, dissolveCompany, recruit, retypeCompany, setIronArmy, startTraining } from "./companies";
 import { castleBlocker, generateMap, regionAt, type Resource, type S2Map } from "./s2/map";
 import { s2Map, setS2Map, s2Enabled } from "./s2/rules";
-import { REF, VALUE, build, buyConcession, cleanS2, dropConcession, exchangeBlocker, firstConcessionSites, marketQuote, takeConcession, upgradeConcession, type BuildingId } from "./s2/economy";
+import { REF, VALUE, build, buyConcession, cleanS2, dropConcession, supplyBlocker, supplyConcession,
+  setConcession, exchangeBlocker, firstConcessionSites, marketQuote, takeConcession, upgradeConcession, type BuildingId } from "./s2/economy";
 import { afterDefeat, cleanLordS2, companiesHome, fiefLoot, garrison, lordTrain, patrolUnit, REFORM_MS, settleFief } from "./s2/lords";
 import { buyNode, cleanLineage, lin, lineageMark, LIN_GENERATOR_DISCOUNT, LIN_MOLE, LIN_SPY_CATCH, NODE_BY_ID, nodeEffect, parisDay, RENOWN, RENOWN_GIFT_SEASON, renownAvailable, respec, type RenownSource } from "./lineage";
 import { notify, notifyEach, type PushMessage } from "@/lib/push";
@@ -2501,13 +2502,27 @@ function applyS2Action(state: PlayerState, action: Extract<GameAction, { type: "
       const r = takeConcession(s2, ctx, Number(action.site), { taken: others.taken }, now);
       return r.ok ? done({ ...state, s2: r.value }, "take", { site: action.site }, `⛏️ Nouvelle concession : ${map.sites[Number(action.site)].name}.`) : r;
     }
+    case "set": {
+      const r = setConcession(s2, String(action.id), action.pace, action.dest);
+      return r.ok ? done({ ...state, s2: r.value }, "set", { id: action.id, pace: action.pace, dest: action.dest }) : r;
+    }
     case "drop": {
       const r = dropConcession(s2, String(action.id));
       return r.ok ? done({ ...state, s2: r.value }, "drop", { id: action.id }) : r;
     }
     case "upgrade": {
-      const r = upgradeConcession(s2, String(action.id), state.stone, now);
-      return r.ok ? done({ ...state, stone: state.stone - r.value.cost, s2: r.value.s }, "upgrade", { id: action.id, cost: r.value.cost }) : r;
+      const r = upgradeConcession(s2, String(action.id), map, now);
+      return r.ok ? done({ ...state, s2: r.value.s }, "upgrade", { id: action.id, cost: r.value.cost }) : r;
+    }
+    case "supply": {
+      const amount = Math.floor(Number(action.amount));
+      const have = { pierre: state.stone, fer: s2.iron, or: s2.gold };
+      const why = supplyBlocker(s2, String(action.id), have, action.from, amount);
+      if (why) return { ok: false, error: why };
+      const res = action.from as Resource;
+      const sent = supplyConcession(s2, String(action.id), map, res, amount, now);
+      const paid = { ...have, [res]: have[res] - amount };
+      return done({ ...state, stone: paid.pierre, s2: { ...sent, iron: paid.fer, gold: paid.or } }, "supply", { id: action.id, res, amount }, `🛒 Convoi de ravitaillement parti vers la concession.`);
     }
     case "build": {
       const discount = lin(state, "main_oeuvre") ? 1 - LIN_GENERATOR_DISCOUNT : 1;
@@ -3206,7 +3221,10 @@ export async function runAction(admin: SupabaseClient, userId: string, action: G
       const myGuild = guildOf(me, guildsOf.get(entities) ?? []);
       const toHall = myGuild ? Math.floor(paid.paid * (finalState.hallTithe ?? HALL_TITHE_DEFAULT)) : 0;
       if (toHall > 0) finalState = { ...finalState, totalContributed: finalState.totalContributed - toHall };
-      const contribution = (outcome.ok ? (outcome.value.contribution ?? 0) : 0) + paid.paid - toHall;
+      // Convois livrés au beffroi : un don entier, sans part pour la halle.
+      const convoyGift = Math.floor(finalState.s2?.giftOwed ?? 0);
+      if (convoyGift > 0) finalState = { ...finalState, totalContributed: finalState.totalContributed + convoyGift, s2: { ...finalState.s2!, giftOwed: finalState.s2!.giftOwed! - convoyGift } };
+      const contribution = (outcome.ok ? (outcome.value.contribution ?? 0) : 0) + paid.paid - toHall + convoyGift;
       // V4 : pendant la fête des bâtisseurs, les dons comptent double pour les paliers et les lots.
       const feast = eventActive(finalState, "fete", now) ? FEAST_GIFT_FACTOR : 1;
       const gift = recordGift(finalState, contribution * feast);

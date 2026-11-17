@@ -23,6 +23,11 @@ import {
   concessionSlots,
   convoyIntervalMs,
   convoyLoad,
+  concessionBudget,
+  supplyBlocker,
+  VALUE,
+  PACES,
+  type Pace,
   exchangeBlocker,
   localCap,
   marketQuote,
@@ -323,6 +328,7 @@ export function S2Domain({ snap, live, now, run }: { snap: GameSnapshot; live: P
   const [from, setFrom] = useState<Resource>("pierre");
   const [to, setTo] = useState<Resource>("fer");
   const [amount, setAmount] = useState(1000);
+  const [supply, setSupply] = useState<{ res: Resource; amount: number }>({ res: "pierre", amount: 500 });
   if (!s2) return <p className="empty">La saison 2 n&apos;est pas encore ouverte.</p>;
   const act = async (a: GameAction) => {
     setBusy(true);
@@ -352,7 +358,9 @@ export function S2Domain({ snap, live, now, run }: { snap: GameSnapshot; live: P
           const rate = concessionRate(s2, c, map);
           const cap = localCap(s2, c, map);
           const full = stockFull(s2, c, map);
-          const upWhy = upgradeConcessionBlocker(s2, c.id, live.stone, now);
+          const upWhy = upgradeConcessionBlocker(s2, c.id, map, now);
+          const budget = concessionBudget(c, map);
+          const incoming = s2.convoys.filter((v) => v.dest === "concession" && v.conc === c.id);
           return (
             <div key={c.id} className="row">
               <div>
@@ -361,13 +369,61 @@ export function S2Domain({ snap, live, now, run }: { snap: GameSnapshot; live: P
                   {formatNumber(rate)} {RESOURCE_LABEL[site.type]}/h · convoi de {formatNumber(convoyLoad(s2, c, map))} toutes les {minutes(convoyIntervalMs(s2))} min, prochain dans {minutes(c.next - now)} min.
                 </div>
                 <div className="bar bar-thin"><span style={{ width: `${Math.min(100, (c.stock / Math.max(1, cap)) * 100)}%` }} /></div>
+                {(() => {
+                  const load = convoyLoad(s2, c, map);
+                  const per = rate * (convoyIntervalMs(s2) / 3_600_000);
+                  return (
+                    <div className={`row-desc${per > load ? " s2-over" : ""}`}>
+                      Charge {formatNumber(load)} / production par intervalle {formatNumber(per)}
+                      {per > load && " : la charge ne suit pas, le stock va se remplir. Améliore ta charronnerie."}
+                    </div>
+                  );
+                })()}
+                <div className="s2-settings">
+                  <span>Rythme</span>
+                  {(Object.keys(PACES) as Pace[]).map((k) => (
+                    <button key={k} className={`btn btn-small${(c.pace ?? "normal") === k ? " btn-primary" : ""}`} disabled={busy || (c.pace ?? "normal") === k} title={PACES[k].text} onClick={() => void act({ type: "s2", op: "set", id: c.id, pace: k })}>
+                      {PACES[k].name}
+                    </button>
+                  ))}
+                </div>
+                <div className="s2-settings">
+                  <span>Convois vers</span>
+                  {(["chateau", "beffroi"] as const).map((k) => (
+                    <button key={k} className={`btn btn-small${(c.dest ?? "chateau") === k ? " btn-primary" : ""}`} disabled={busy || (c.dest ?? "chateau") === k} title={k === "beffroi" ? "Chaque convoi arrivé compte entièrement comme un don au beffroi (paliers, part de chantier, classement), en plus de la dîme. L'or de 3 % te revient." : "Ton château."} onClick={() => void act({ type: "s2", op: "set", id: c.id, dest: k })}>
+                      {k === "beffroi" ? "🔔 Beffroi" : "🏰 Château"}
+                    </button>
+                  ))}
+                  <button className="btn btn-small" disabled title="Bientôt : envoyer les convois à un membre de ton alliance.">🤝 Allié</button>
+                </div>
+                <div className="row-desc">
+                  🧱 Réserve de chantier {formatNumber(c.fund ?? 0)} · avec le stock, {formatNumber(budget)} disponibles pour ses travaux (valeur pierre).
+                  {incoming.length > 0 && ` Ravitaillement en route : ${formatNumber(incoming.reduce((a, v) => a + v.load * VALUE[v.res], 0))}, arrivée dans ${minutes(Math.min(...incoming.map((v) => v.arrive)) - now)} min.`}
+                </div>
+                <div className="s2-settings">
+                  <span>Ravitailler</span>
+                  <input type="number" min={1} step={100} value={supply.amount} onChange={(e) => setSupply({ ...supply, amount: Math.max(1, Math.floor(Number(e.target.value) || 0)) })} style={{ width: "6em" }} />
+                  <select value={supply.res} onChange={(e) => setSupply({ ...supply, res: e.target.value as Resource })}>
+                    <option value="pierre">🪨 pierre</option>
+                    <option value="fer">⚔️ fer (×2)</option>
+                    <option value="or">🪙 or (×4)</option>
+                  </select>
+                  {(() => {
+                    const why = supplyBlocker(s2, c.id, have, supply.res, supply.amount);
+                    return (
+                      <button className="btn btn-small" disabled={busy || !!why} title={why ?? "Un convoi part du château et remplit la réserve de la concession à l'arrivée."} onClick={() => void act({ type: "s2", op: "supply", id: c.id, from: supply.res, amount: supply.amount })}>
+                        Envoyer
+                      </button>
+                    );
+                  })()}
+                </div>
                 {full && <div className="row-desc">⚠️ Stock plein : améliore ta charronnerie ou ton relais.</div>}
                 {c.upUntil && c.upUntil > now && <div className="row-desc">🔨 Niveau {c.level + 1} dans {minutes(c.upUntil - now)} min.</div>}
               </div>
               <div className="s2-actions">
                 {c.level < CONCESSION_MAX_LEVEL && (
                   <button className="btn btn-small btn-primary" disabled={busy || !!upWhy} title={upWhy ?? undefined} onClick={() => void act({ type: "s2", op: "upgrade", id: c.id })}>
-                    Améliorer · 🪨 {formatNumber(concessionCost(c.level + 1))}
+                    Améliorer · 🧱 {formatNumber(concessionCost(c.level + 1))}
                   </button>
                 )}
                 {s2.conc.length > 1 && (

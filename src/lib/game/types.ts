@@ -386,7 +386,7 @@ export type GameAction =
   | { type: "rift"; op: "send" | "fight" | "return"; ids?: string[] }
   | { type: "captain"; op: "draw" | "pick" | "assign" | "relic" | "drop"; id?: string; company?: string | null; trait?: string; target?: string }
   | { type: "company"; op: "create" | "dissolve" | "retype" | "recruit" | "train" | "barracks" | "fort"; id?: string; unit?: string; qty?: number }
-  | { type: "s2"; op: "place" | "take" | "drop" | "upgrade" | "build" | "buy" | "exchange"; x?: number; y?: number; site?: number; id?: string; building?: string; from?: string; to?: string; amount?: number }
+  | { type: "s2"; op: "place" | "take" | "drop" | "upgrade" | "build" | "buy" | "exchange" | "set" | "supply"; x?: number; y?: number; site?: number; id?: string; building?: string; from?: string; to?: string; amount?: number; pace?: string; dest?: string }
   | { type: "click"; count: number }
   | { type: "buy"; generator: string; qty: number }
   | { type: "upgrade"; upgrade: string }

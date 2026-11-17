@@ -2775,3 +2775,7 @@ use.g-enemy {
 .guide-text {
   margin: 4px 0 8px;
 }
+
+.s2-settings { display: flex; flex-wrap: wrap; align-items: center; gap: 4px; margin-top: 4px; font-size: 0.85em; }
+.s2-settings > span { color: var(--muted, #8a8070); margin-right: 4px; min-width: 6.5em; }
+.s2-over { color: #d9822b; }

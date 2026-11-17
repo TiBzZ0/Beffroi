@@ -2,7 +2,7 @@
 // Le domaine ne produit plus rien : chaque concession produit dans un stock local, et un convoi part vers le château
 // à chaque intervalle. Tout se calcule à la lecture (comme `advance`), sans tâche de fond.
 
-import { cheb, siteFactor, type Pos, type RegionId, type Resource, type S2Map } from "./map";
+import { cheb, S2_BELFRY, siteFactor, type Pos, type RegionId, type Resource, type S2Map } from "./map";
 
 // ---------------------------------------------------------------------------
 // Monnaies et courbe de référence
@@ -94,7 +94,22 @@ export interface Concession {
   next: number;
   /** Amélioration en cours vers `level + 1`. */
   upUntil?: number;
+  /** Rythme : prudent (−20 %, stock ×2) ou intensif (+25 %, 5 % de la valeur en or à chaque convoi). Absent : normal. */
+  pace?: Pace;
+  /** Destination des convois : absent pour le château. */
+  dest?: Dest;
+  /** Réserve de chantier, en valeur pierre : ce que le château lui a envoyé, pour ses améliorations. */
+  fund?: number;
 }
+export type Pace = "prudent" | "normal" | "intensif";
+export type Dest = "chateau" | "beffroi";
+export const PACES: Record<Pace, { name: string; prod: number; stock: number; text: string }> = {
+  prudent: { name: "Prudent", prod: 0.8, stock: 2, text: "Production −20 %, stock local ×2 : pour s'absenter." },
+  normal: { name: "Normal", prod: 1, stock: 1, text: "Le rythme de base." },
+  intensif: { name: "Intensif", prod: 1.25, stock: 1, text: "Production +25 %, mais chaque convoi coûte 5 % de sa valeur en or. Sans or, retour en normal." },
+};
+/** Intensif : part de la valeur d'un convoi payée en or au départ. */
+export const INTENSIVE_GOLD = 0.05;
 export interface Convoy {
   conc: string;
   res: Resource;
@@ -103,6 +118,8 @@ export interface Convoy {
   arrive: number;
   from: Pos;
   to: Pos;
+  /** Convoi parti vers le beffroi (sa charge compte comme un don à l'arrivée), ou du château vers la concession `conc` (sa réserve). */
+  dest?: "beffroi" | "concession";
 }
 export interface S2Work {
   id: BuildingId;
@@ -124,6 +141,8 @@ export interface S2State {
   at: number;
   /** Production livrée sur la saison, en valeur pierre (classement de richesse). */
   produced: number;
+  /** Convois livrés au beffroi, en valeur pierre, pas encore versés au chantier. */
+  giftOwed?: number;
   /** S10, Lignée (fixés à chaque calcul, jamais lus de la base) : Cave profonde, heures de stock local en plus. */
   stockBonusHours?: number;
   /** Charpentiers : convois plus rapides (part). */
@@ -145,6 +164,8 @@ export interface S2Context {
   multiplier?: (t: number) => number;
   /** Instants où ce multiplicateur change. */
   breakpoints?: number[];
+  /** Beffroi achevé : les convois qui devaient y aller rentrent au château. */
+  belfryDone?: boolean;
 }
 
 export function concessionSlots(s: S2State, ctx: Pick<S2Context, "stageConcessions">): number {
@@ -158,7 +179,7 @@ const regionBonus = (s: S2State, res: Resource) =>
 export function concessionRate(s: S2State, c: Concession, map: S2Map): number {
   const site = map.sites[c.site];
   if (!site) return 0;
-  return BASE_PROD[site.type] * siteFactor(site.places) * concessionLevelFactor(c.level) * (1 + 0.05 * s.bld.outils) * regionBonus(s, site.type);
+  return BASE_PROD[site.type] * siteFactor(site.places) * concessionLevelFactor(c.level) * (1 + 0.05 * s.bld.outils) * regionBonus(s, site.type) * PACES[c.pace ?? "normal"].prod;
 }
 /** Charge d'un convoi : 60 min de production de base de la concession, +10 % par niveau de charronnerie. */
 export function convoyLoad(s: S2State, c: Concession, map: S2Map): number {
@@ -169,7 +190,7 @@ export function convoyIntervalMs(s: S2State): number {
   return Math.max(20, 60 - 2 * s.bld.relais) * 60_000;
 }
 export function localCap(s: S2State, c: Concession, map: S2Map): number {
-  return concessionRate(s, c, map) * (LOCAL_STOCK_HOURS + 0.5 * s.bld.entrepot + (s.stockBonusHours ?? 0));
+  return concessionRate(s, c, map) * (LOCAL_STOCK_HOURS + 0.5 * s.bld.entrepot + (s.stockBonusHours ?? 0)) * PACES[c.pace ?? "normal"].stock;
 }
 /** Trajet d'un convoi : 2 min par case (Tchebychev), plafonné à 45 min, plus rapide avec le relais et en Plaine. */
 export function convoyTravelMs(s: S2State, from: Pos, to: Pos): number {
@@ -199,14 +220,16 @@ export interface Arrivals {
   pierre: number;
   fer: number;
   or: number;
+  /** Livré au beffroi, en valeur pierre (compte comme un don). */
+  beffroi?: number;
 }
 
 /**
  * Fait avancer la saison 2 du joueur jusqu'à `now` : production des concessions, départs et arrivées de convois,
  * chantiers finis. Renvoie le nouvel état et ce qui est arrivé au château (à verser dans la pierre, le fer et l'or).
  */
-export function settleS2(s: S2State, ctx: S2Context, now: number): { s: S2State; arrived: Arrivals } {
-  const arrived: Arrivals = { pierre: 0, fer: 0, or: 0 };
+export function settleS2(s: S2State, ctx: S2Context, now: number): { s: S2State; arrived: Required<Arrivals> } {
+  const arrived: Required<Arrivals> = { pierre: 0, fer: 0, or: 0, beffroi: 0 };
   if (now <= s.at || !s.castle) return { s: s.castle ? s : { ...s, at: Math.max(s.at, now) }, arrived };
   let st: S2State = { ...s, bld: { ...s.bld }, conc: s.conc.map((c) => ({ ...c })), convoys: [...s.convoys], works: [...s.works] };
   const castle = st.castle!;
@@ -221,8 +244,8 @@ export function settleS2(s: S2State, ctx: S2Context, now: number): { s: S2State;
     for (const c of st.conc) {
       const site = ctx.map.sites[c.site];
       if (!site) continue;
-      const rate = (concessionRate(st, c, ctx.map) * m) / 3_600_000;
-      const cap = localCap(st, c, ctx.map);
+      let rate = (concessionRate(st, c, ctx.map) * m) / 3_600_000;
+      let cap = localCap(st, c, ctx.map);
       const load = convoyLoad(st, c, ctx.map);
       let t = cursor;
       // Départs dans le segment.
@@ -233,7 +256,18 @@ export function settleS2(s: S2State, ctx: S2Context, now: number): { s: S2State;
         const take = Math.min(c.stock, load);
         if (take >= 1) {
           c.stock -= take;
-          st.convoys.push({ conc: c.id, res: site.type, load: take, depart: dep, arrive: dep + convoyTravelMs(st, site.pos, castle), from: site.pos, to: castle });
+          const to = c.dest === "beffroi" && !ctx.belfryDone ? S2_BELFRY : castle;
+          st.convoys.push({ conc: c.id, res: site.type, load: take, depart: dep, arrive: dep + convoyTravelMs(st, site.pos, to), from: site.pos, to, ...(to === castle ? {} : { dest: "beffroi" as const }) });
+          if (c.pace === "intensif") {
+            const fee = (take * VALUE[site.type] * INTENSIVE_GOLD) / VALUE.or;
+            if (st.gold >= fee) st.gold -= fee;
+            else {
+              // Plus d'or : la concession repasse en normal.
+              c.pace = undefined;
+              rate = (concessionRate(st, c, ctx.map) * m) / 3_600_000;
+              cap = localCap(st, c, ctx.map);
+            }
+          }
         }
         c.next = dep + interval;
       }
@@ -251,7 +285,13 @@ export function settleS2(s: S2State, ctx: S2Context, now: number): { s: S2State;
   let produced = 0;
   for (const v of st.convoys) {
     if (v.arrive <= now) {
-      arrived[v.res] += v.load;
+      if (v.dest === "concession") {
+        // Ravitaillement : la réserve de la concession grossit, rien n'arrive au château.
+        st.conc = st.conc.map((c) => (c.id === v.conc ? { ...c, fund: (c.fund ?? 0) + v.load * VALUE[v.res] } : c));
+        continue;
+      }
+      if (v.dest === "beffroi") arrived.beffroi += v.load * VALUE[v.res];
+      else arrived[v.res] += v.load;
       produced += v.load * VALUE[v.res];
       arrived.or += (v.load * VALUE[v.res] * CONVOY_GOLD) / VALUE.or;
     } else still.push(v);
@@ -293,27 +333,70 @@ export function takeConcession(s: S2State, ctx: S2Context, siteId: number, occ: 
 }
 
 /** Abandonner une concession : sans remboursement, niveau perdu, la place se libère. */
+/** Règle le rythme et la destination d'une concession ; l'effet vaut dès le convoi suivant. */
+export function setConcession(s: S2State, id: string, pace: unknown, dest: unknown): R<S2State> {
+  const c = s.conc.find((x) => x.id === id);
+  if (!c) return fail("Concession inconnue.");
+  if (pace !== undefined && !(typeof pace === "string" && pace in PACES)) return fail("Rythme inconnu.");
+  if (dest !== undefined && dest !== "chateau" && dest !== "beffroi") return fail("Destination inconnue.");
+  if (pace === "intensif" && s.gold <= 0) return fail("Il faut de l'or pour le rythme intensif.");
+  const next: Concession = { ...c };
+  if (pace !== undefined) {
+    if (pace === "normal") delete next.pace;
+    else next.pace = pace as Pace;
+  }
+  if (dest !== undefined) {
+    if (dest === "chateau") delete next.dest;
+    else next.dest = "beffroi";
+  }
+  return { ok: true, value: { ...s, conc: s.conc.map((x) => (x.id === id ? next : x)) } };
+}
+
 export function dropConcession(s: S2State, id: string): R<S2State> {
   if (!s.conc.some((c) => c.id === id)) return fail("Concession inconnue.");
   if (s.conc.length <= 1) return fail("Garde au moins une concession.");
   return { ok: true, value: { ...s, conc: s.conc.filter((c) => c.id !== id), convoys: s.convoys } };
 }
 
-export function upgradeConcessionBlocker(s: S2State, id: string, stone: number, now: number): string | null {
+/** Ce qu'une concession peut mettre dans ses travaux, en valeur pierre : sa réserve, puis son stock local. */
+export function concessionBudget(c: Concession, map: S2Map): number {
+  return (c.fund ?? 0) + c.stock * VALUE[map.sites[c.site]?.type ?? "pierre"];
+}
+
+export function upgradeConcessionBlocker(s: S2State, id: string, map: S2Map, now: number): string | null {
   const c = s.conc.find((x) => x.id === id);
   if (!c) return "Concession inconnue.";
   if (c.upUntil && c.upUntil > now) return "Déjà en travaux.";
   if (c.level >= CONCESSION_MAX_LEVEL) return "Niveau maximal.";
-  if (concessionCost(c.level + 1) > stone) return "Pas assez de pierre.";
+  if (concessionCost(c.level + 1) > concessionBudget(c, map) + 1e-6) return "Réserve et stock de la concession insuffisants : envoie-lui des ressources.";
   return null;
 }
 
-export function upgradeConcession(s: S2State, id: string, stone: number, now: number): R<{ s: S2State; cost: number }> {
-  const why = upgradeConcessionBlocker(s, id, stone, now);
+/** L'amélioration se paie sur place : d'abord la réserve envoyée par le château, puis le stock local. */
+export function upgradeConcession(s: S2State, id: string, map: S2Map, now: number): R<{ s: S2State; cost: number }> {
+  const why = upgradeConcessionBlocker(s, id, map, now);
   if (why) return fail(why);
   const c = s.conc.find((x) => x.id === id)!;
   const cost = concessionCost(c.level + 1);
-  return { ok: true, value: { s: { ...s, conc: s.conc.map((x) => (x.id === id ? { ...x, upUntil: now + concessionBuildMs(c.level + 1) } : x)) }, cost } };
+  const fromFund = Math.min(c.fund ?? 0, cost);
+  const value = VALUE[map.sites[c.site]?.type ?? "pierre"];
+  const next: Concession = { ...c, fund: (c.fund ?? 0) - fromFund, stock: Math.max(0, c.stock - (cost - fromFund) / value), upUntil: now + concessionBuildMs(c.level + 1) };
+  return { ok: true, value: { s: { ...s, conc: s.conc.map((x) => (x.id === id ? next : x)) }, cost } };
+}
+
+/** Ravitaille une concession depuis le château : un convoi part tout de suite et remplit sa réserve à l'arrivée. */
+export function supplyBlocker(s: S2State, id: string, have: Record<Resource, number>, res: unknown, amount: number): string | null {
+  if (!s.castle) return "Pose d'abord ton château.";
+  if (!s.conc.some((c) => c.id === id)) return "Concession inconnue.";
+  if (res !== "pierre" && res !== "fer" && res !== "or") return "Ressource inconnue.";
+  if (!Number.isInteger(amount) || amount < 1) return "Quantité invalide.";
+  if (amount > have[res]) return "Pas assez au château.";
+  return null;
+}
+export function supplyConcession(s: S2State, id: string, map: S2Map, res: Resource, amount: number, now: number): S2State {
+  const c = s.conc.find((x) => x.id === id)!;
+  const to = map.sites[c.site]?.pos ?? s.castle!;
+  return { ...s, convoys: [...s.convoys, { conc: id, res, load: amount, depart: now, arrive: now + convoyTravelMs(s, s.castle!, to), from: s.castle!, to, dest: "concession" }] };
 }
 
 export function buyConcessionBlocker(s: S2State): string | null {
@@ -390,13 +473,13 @@ export function cleanS2(raw: unknown, now: number): S2State {
       .slice(0, CONCESSIONS_MAX)
       .map((c) => {
         const x = c as Record<string, unknown>;
-        return { id: String(x.id), site: Math.floor(num(x.site)), level: Math.min(CONCESSION_MAX_LEVEL, Math.max(1, Math.floor(num(x.level, 1)))), stock: num(x.stock), next: num(x.next) || now, ...(num(x.upUntil) > 0 ? { upUntil: num(x.upUntil) } : {}) };
+        return { id: String(x.id), site: Math.floor(num(x.site)), level: Math.min(CONCESSION_MAX_LEVEL, Math.max(1, Math.floor(num(x.level, 1)))), stock: num(x.stock), next: num(x.next) || now, ...(num(x.upUntil) > 0 ? { upUntil: num(x.upUntil) } : {}), ...(x.pace === "prudent" || x.pace === "intensif" ? { pace: x.pace } : {}), ...(x.dest === "beffroi" ? { dest: "beffroi" as const } : {}), ...(num(x.fund) > 0 ? { fund: num(x.fund) } : {}) };
       }),
     convoys: (Array.isArray(r.convoys) ? r.convoys : [])
       .filter((v) => v && typeof v === "object" && RES.includes((v as Convoy).res))
       .map((v) => {
         const x = v as Record<string, unknown>;
-        return { conc: String(x.conc), res: x.res as Resource, load: num(x.load), depart: num(x.depart), arrive: num(x.arrive), from: pos(x.from) ?? [0, 0], to: pos(x.to) ?? [0, 0] };
+        return { conc: String(x.conc), res: x.res as Resource, load: num(x.load), depart: num(x.depart), arrive: num(x.arrive), from: pos(x.from) ?? [0, 0], to: pos(x.to) ?? [0, 0], ...(x.dest === "beffroi" || x.dest === "concession" ? { dest: x.dest } : {}) };
       }),
     bld: Object.fromEntries(BUILDING_IDS.map((id) => [id, Math.min(BUILDING_MAX, Math.floor(num(bld[id])))])) as Record<BuildingId, number>,
     works: (Array.isArray(r.works) ? r.works : [])
@@ -406,5 +489,6 @@ export function cleanS2(raw: unknown, now: number): S2State {
     bought: Math.min(CONCESSION_GOLD.length, Math.floor(num(r.bought))),
     at: num(r.at) || now,
     produced: num(r.produced),
+    ...(num(r.giftOwed) > 0 ? { giftOwed: num(r.giftOwed) } : {}),
   };
 }

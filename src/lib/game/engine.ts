@@ -800,12 +800,12 @@ export function advance(state: PlayerState, now: number, world: WorldState, opts
     const multiplier = (t: number) => (base > 0 ? rateAt(state, world, t, opts) / base : 1);
     // S10 : Cave profonde (+30 min de stock local), Charpentiers (convois 10 % plus rapides), Grands chariots (charge +25 %).
     const perked = { ...state.s2, stockBonusHours: lin(state, "cave") ? 0.5 : 0, convoySpeed: lin(state, "charpentiers") ? 0.1 : 0, loadBonus: lin(state, "fondations") ? 0.25 : 0 };
-    const { s: s2, arrived } = settleS2(perked, { map, stageConcessions: stagesDoneAt(world, now) >= 1 ? 1 : 0, multiplier, breakpoints: events.filter((t) => t > state.s2!.at && t < now) }, now);
+    const { s: s2, arrived } = settleS2(perked, { map, stageConcessions: stagesDoneAt(world, now) >= 1 ? 1 : 0, multiplier, breakpoints: events.filter((t) => t > state.s2!.at && t < now), belfryDone: stagesDoneAt(world, now) >= TOTAL_STAGES }, now);
     const toBelfry = stagesDoneAt(world, now) < TOTAL_STAGES ? arrived.pierre * tithe : 0;
     const value = arrived.pierre + arrived.fer * 2 + arrived.or * 4;
     return {
       ...state,
-      s2: { ...s2, iron: s2.iron + arrived.fer, gold: s2.gold + arrived.or },
+      s2: { ...s2, iron: s2.iron + arrived.fer, gold: s2.gold + arrived.or, ...(arrived.beffroi > 0 || s2.giftOwed ? { giftOwed: (s2.giftOwed ?? 0) + arrived.beffroi } : {}) },
       stone: state.stone + arrived.pierre - toBelfry,
       totalProduced: state.totalProduced + value,
       titheOwed: (state.titheOwed ?? 0) + toBelfry,

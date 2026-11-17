@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { generateMap, type S2Map } from "./map";
-import { build, buyConcession, concessionRate, convoyLoad, firstConcessionSites, marketQuote, newS2State, REF, settleS2, stockFull, takeConcession, upgradeConcession, type S2State } from "./economy";
+import { build, buyConcession, localCap, setConcession, concessionRate, convoyLoad, firstConcessionSites, marketQuote, newS2State, REF, settleS2, stockFull, takeConcession, supplyConcession, upgradeConcession, VALUE, type S2State } from "./economy";
 
 const T0 = Date.parse("2026-12-07T15:00:00Z");
 const H = 3_600_000;
@@ -57,18 +57,49 @@ describe("S2 : économie", () => {
     expect(stockFull(after, after.conc[0], map)).toBe(true);
   });
 
+  it("rythme et destination par concession", () => {
+    const s = start();
+    const id = s.conc[0].id;
+    expect(setConcession(s, id, "intensif", undefined).ok).toBe(false);
+    const rich = setConcession({ ...s, gold: 1e6 }, id, "intensif", "beffroi");
+    expect(rich.ok).toBe(true);
+    if (!rich.ok) return;
+    expect(concessionRate(rich.value, rich.value.conc[0], map)).toBeCloseTo(concessionRate(s, s.conc[0], map) * 1.25, 6);
+    const { s: after, arrived } = settleS2(rich.value, ctx(), T0 + 5 * H);
+    expect(arrived.pierre).toBe(0);
+    expect(arrived.beffroi).toBeGreaterThan(0);
+    expect(arrived.or).toBeGreaterThan(0);
+    expect(after.gold).toBeLessThan(1e6);
+    // Plus d'or : retour en normal au premier convoi.
+    const poor = settleS2({ ...rich.value, gold: 0 }, ctx(), T0 + 2 * H).s;
+    expect(poor.conc[0].pace).toBeUndefined();
+    const careful = setConcession(s, id, "prudent", "chateau");
+    expect(careful.ok && localCap(careful.value, careful.value.conc[0], map)).toBeCloseTo(localCap(s, s.conc[0], map) * 2 * 0.8, 6);
+  });
+
   it("améliorations, bâtiments et concessions achetées", () => {
     let s = start();
-    const up = upgradeConcession(s, s.conc[0].id, 1e6, T0);
+    // Rien en réserve ni en stock : il faut ravitailler la concession.
+    s = { ...s, conc: s.conc.map((c) => ({ ...c, stock: 0 })) };
+    expect(upgradeConcession(s, s.conc[0].id, map, T0).ok).toBe(false);
+    s = supplyConcession(s, s.conc[0].id, map, "pierre", 300, T0);
+    const arrive = s.convoys[s.convoys.length - 1].arrive;
+    s = settleS2(s, ctx(), arrive).s;
+    expect(s.conc[0].fund).toBe(300);
+    // La réserve paie d'abord, le stock local le reste.
+    s = { ...s, conc: s.conc.map((c) => ({ ...c, stock: 1_000 })) };
+    const up = upgradeConcession(s, s.conc[0].id, map, arrive);
     expect(up.ok).toBe(true);
     if (!up.ok) return;
     expect(up.value.cost).toBe(450);
+    expect(up.value.s.conc[0].fund).toBe(0);
+    expect(up.value.s.conc[0].stock).toBeCloseTo(1_000 - 150 / VALUE[map.sites[s.conc[0].site].type], 6);
     s = up.value.s;
-    const b = build(s, "outils", 1e6, T0);
+    const b = build(s, "outils", 1e6, arrive);
     expect(b.ok && b.value.cost).toBe(500);
     if (!b.ok) return;
     s = b.value.s;
-    const later = settleS2(s, ctx(), T0 + H).s;
+    const later = settleS2(s, ctx(), arrive + H).s;
     expect(later.conc[0].level).toBe(2);
     expect(later.bld.outils).toBe(1);
     expect(buyConcession({ ...later, gold: 1_000 }).ok).toBe(false);
