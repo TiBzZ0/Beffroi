@@ -6,7 +6,7 @@ export const S2_SEASON = 2;
  * Interrupteur de la saison 2 : tant qu'il est à false, une saison numérotée 2 tourne avec les règles de la saison 1
  * (filet de sécurité si la vague A n'est pas prête à l'ouverture).
  */
-export const S2_READY = false;
+export const S2_READY = true;
 export function s2Enabled(seasonNumber: number): boolean {
   return S2_READY && seasonNumber >= S2_SEASON;
 }
