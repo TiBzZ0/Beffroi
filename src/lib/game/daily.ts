@@ -1,5 +1,5 @@
 // Quêtes du jour : tirage, progression, récompenses, coffre et série.
-import { DAILY_CHEST_BASE, DAILY_CHEST_MS, DAILY_CHEST_STEP, DAILY_FAMILIES, DAILY_QUESTS, DAILY_RESET_HOUR_UTC, DAILY_REWARD_SECONDS, DAILY_STREAK_MAX, UPGRADES, type DailyQuestId } from "./config";
+import { DAILY_CHEST_BASE, DAILY_CHEST_MS, DAILY_CHEST_STEP, DAILY_FAMILIES, DAILY_QUESTS, DAILY_RESET_HOUR_UTC, DAILY_REWARD_SECONDS, DAILY_STREAK_MAX, type DailyQuestId } from "./config";
 import type { Result } from "./engine";
 
 export interface DailyQuest {
@@ -158,4 +158,3 @@ export function openChest<S extends DailyHolder>(state: S, now: number): Result<
   return { ok: true, value: { bonus, state: { ...state, dailyBoostUntil: now + DAILY_CHEST_MS, dailyBoost: bonus, daily: { ...d, chest: true, streak, lastFull: d.day } } } };
 }
 
-export const UPGRADE_COUNT = UPGRADES.length;

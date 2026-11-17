@@ -260,7 +260,6 @@ export function embellishmentOf(n: number): number {
   return n < STAGES.length ? 0 : n - STAGES.length + 1;
 }
 
-export const STAGE_BASES = STAGES.map((s) => s.basePerPlayer);
 /** Taille d'une étape à son ouverture : tant d'heures de la production cumulée des joueurs actifs. */
 export const STAGE_SIZE_HOURS = 4;
 /** Durée de chaque étape en heures de production (taille, parts de chantier, lots et paliers) : on ralentit la fin du beffroi. */
@@ -640,8 +639,6 @@ export const EVENT_GAP_MS = 60 * 60 * 1000;
 export const CARAVAN_MS = 60 * 60 * 1000;
 /** Une victoire rapporte 45 min de sa propre production. */
 export const CARAVAN_PRIZE_SECONDS = 45 * 60;
-/** Ancienne règle (caravanes lancées avant A14) : part du chargement commun emportée par un assaut. */
-export const CARAVAN_TAKE = 0.25;
 /** Escorte : 60 % de la valeur de sa propre armée (à la création : troupes médianes × ce facteur). */
 export const CARAVAN_ESCORT_POWER = 0.6;
 export const CARAVAN_ESCORT: Partial<Record<CombatantId, number>> = { milicien: 0.3, piquier: 0.3, arbaletrier: 0.4 };
@@ -687,10 +684,8 @@ export const RESEARCH_TIME_GROWTH = 1.6;
 export const ACADEMY_SPEED = 0.1;
 export const ACADEMY_BASE_COST = 50_000;
 export const ACADEMY_COST_GROWTH = 3;
-/** Sabotage de l'académie d'un rival : la moitié du prix du niveau visé, et au moins 3 min de sa propre production (1 000 au minimum). */
 /** R2 : une recherche annulée rend la moitié de son prix. */
 export const RESEARCH_REFUND = 0.5;
-export const SABOTAGE_LEVEL_SHARE = 0.5;
 /** E4 : un sabotage coûte 10 minutes de production de base. */
 export const SABOTAGE_COST_SECONDS = 600;
 export const SABOTAGE_MIN_COST = 1_000;

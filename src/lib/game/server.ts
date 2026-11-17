@@ -25,11 +25,9 @@ import {
   EVENT_GAP_MS,
   EVENT_DURATIONS_MS,
   EVENT_NOTICE_MS,
-  EVENT_WEIGHTS,
   MERCHANT_PRICE_SECONDS,
   BANDIT_ARMY_SHARE,
   BANDIT_PRIZE_SECONDS,
-  MINE_SLICE_MS,
   TREASURE_PRIZE_SECONDS,
   CONVOY_ATTACK_SHARE,
   CONVOY_PRIZE_SECONDS,
@@ -56,11 +54,9 @@ import {
   MERCHANT_OFFERS,
   type EventKind,
   type MerchantChoice,
-  CARAVAN_MS,
   CARAVAN_PRIZE_SECONDS,
   CARAVAN_ESCORT_POWER,
   CARAVAN_ESCORT,
-  COLOSSUS_MS,
   COLOSSUS_POWER,
   COLOSSUS_ARMY,
   COLOSSUS_BOUNTY,
@@ -97,7 +93,6 @@ import {
   type MasterBonusKind,
   WOUNDED_WINNER,
   WOUNDED_ATTACKER_BEATEN,
-  STAGES,
   LEGACY,
   CLOSE_PODIUM_ECUS,
   TOTAL_STAGES,
@@ -109,7 +104,6 @@ import {
   BELFRY_POS,
   FORTRESS_POS,
   LORD_POSITIONS,
-  MAP_MIN_GAP,
   MAP_SIZE,
   MAP_SPAWN_RADIUS,
   mapDistance,
@@ -150,11 +144,9 @@ import {
   goldView,
   fromGold,
   attackArmy,
-  defenseArmy,
   newPlayerState,
   splitTroopLosses,
   recallReinforcements,
-  sendReinforcements,
   spyRisk,
   spyTravelMs,
   type SpyMission,
@@ -168,7 +160,6 @@ import {
   buyRumor,
   moleCost,
   type ResearchId,
-
   productionPerSecond,
   catchUpBonus,
   raidArmies,
@@ -263,12 +254,13 @@ import {
 } from "./types";
 import { armyForChance, armyFromBudget, armySize, armyValue, battle, cleanArmy, estimateChance, seededRng, type Army, type Levels } from "./battle";
 import { recordContribution } from "@/lib/redis";
-import { addRelics, assignCaptain, assignRelic, captainOf, CAPTAIN_COST, cleanCaptains, cleanOffer, cleanRelics, drawTraits, dropRelic, addCaptain, HUNT_TARGETS, expeditionSpeed, makeCaptain, makeRelic, RARITY_LABEL, RELICS, TRAIT_IDS, TRAITS, type Relic, type TraitId } from "./captains";
+import { addRelics, assignCaptain, assignRelic, CAPTAIN_COST, cleanCaptains, cleanOffer, cleanRelics, drawTraits, dropRelic, addCaptain, HUNT_TARGETS, expeditionSpeed, makeCaptain, makeRelic, RARITY_LABEL, RELICS, TRAIT_IDS, TRAITS, type Relic, type TraitId } from "./captains";
 import { applyRiftFight, cleanRift, expeditionOpts, floorRenown, floorTrain, guardianBattle, isGuardian, splitLosses, riftFightBlocker, riftFloor, riftOf, riftReturn, riftSend, riftWeek, RIFT_CHEST_EVERY, RIFT_CHEST_SECONDS } from "./rift";
-import { COMPANY_VALUE, FIXED_EVENT_COMPANIES, FIXED_TRAIN, FORTRESS_COMPANIES, LORD_COMPANIES, LORD_RAID_SHARE, LORD_TRAIN, trainLevels, buildBarracks, buildFort, combatLevels, cleanCompanies, cleanFortLevels, cleanRecruits, cleanWorks, createCompany, dissolveCompany, recruit, retypeCompany, setIronArmy, startTraining } from "./companies";
-import { castleBlocker, generateMap, type S2Map } from "./s2/map";
+import { COMPANY_VALUE, FIXED_EVENT_COMPANIES, FIXED_TRAIN, FORTRESS_COMPANIES, LORD_COMPANIES, LORD_RAID_SHARE, LORD_TRAIN, trainLevels, combatLevels, cleanCompanies, cleanFortLevels, cleanRecruits, cleanWorks, setIronArmy } from "./companies";
+import { castleBlocker, generateMap, REGION_BONUS, type S2Map } from "./s2/map";
 import { s2Map, setS2Map, s2Enabled } from "./s2/rules";
 import { applyS2Action, type S2Others } from "./s2/apply";
+import { applyCompanyOp } from "./company-ops";
 import { REF, VALUE, cleanS2 } from "./s2/economy";
 import { afterDefeat, cleanLordS2, companiesHome, fiefLoot, garrison, lordTrain, patrolUnit, REFORM_MS, settleFief } from "./s2/lords";
 import { buyNode, cleanLineage, lin, lineageMark, LIN_MOLE, LIN_SPY_CATCH, NODE_BY_ID, nodeEffect, parisDay, RENOWN, RENOWN_GIFT_SEASON, renownAvailable, respec, type RenownSource } from "./lineage";
@@ -537,17 +529,6 @@ let seasonCache: { season: SeasonView; until: number } | null = null;
  * Saison 2 : la carte de la saison, tirée une fois (graine = identifiant de la saison) et gardée en base, pour qu'un
  * changement du tirage ne déplace jamais les sites d'une saison en cours.
  */
-/**
- * Saison 2 (S9) : le recrutement et l'entraînement se paient en fer. Les fonctions de companies.ts comptent en
- * « stone » ; on leur prête le fer à la place, puis on remet chaque monnaie à sa place.
- */
-function ironPaid(state: PlayerState, f: (s: PlayerState) => { ok: true; value: PlayerState } | { ok: false; error: string }): { ok: true; value: PlayerState } | { ok: false; error: string } {
-  if (!state.s2) return f(state);
-  const r = f({ ...state, stone: state.s2.iron });
-  if (!r.ok) return { ok: false, error: r.error.replace("pierre", "fer") };
-  return { ok: true, value: { ...r.value, stone: state.stone, s2: { ...r.value.s2!, iron: r.value.stone } } };
-}
-
 let mapSeason = -1;
 async function ensureSeasonMap(admin: SupabaseClient, season: SeasonView): Promise<void> {
   setS2Geometry(s2Enabled(season.number));
@@ -2487,6 +2468,8 @@ function applySimpleAction(state: PlayerState, action: GameAction, now: number, 
       };
     }
     case "click": {
+      // Saison 2 : plus de marteau.
+      if (state.s2) return { ok: true, value: { state } };
       const r = applyClicks(state, Number(action.count), now, world);
       if (r.paused && !(state.clickPausedUntil > now)) {
         return { ok: true, value: { state: r.state, log: { action: "click_pause", details: { requested: Number(action.count) } } } };
@@ -2511,19 +2494,9 @@ function applySimpleAction(state: PlayerState, action: GameAction, now: number, 
     case "s2":
       return others ? applyS2Action(state, action, now, world, others) : { ok: false, error: "Action indisponible." };
     case "company": {
-      // C1 à C4 : compagnies, recrutement, entraînement, caserne et fortifications.
-      if (!state.companyModel) return { ok: false, error: "Les compagnies arrivent avec la saison 1." };
       const op = String(action.op);
       const id = String(action.id ?? "");
-      const r =
-        op === "create" ? createCompany(state, String(action.unit), now)
-        : op === "dissolve" ? dissolveCompany(state, id)
-        : op === "retype" ? retypeCompany(state, id, String(action.unit))
-        : op === "recruit" ? ironPaid(state, (s) => recruit(s, id, Number(action.qty), now, captainOf(s, id)?.trait === "recruteur" ? 2 : 1))
-        : op === "train" ? ironPaid(state, (s) => startTraining(s, id, now))
-        : op === "barracks" ? buildBarracks(state, now)
-        : op === "fort" ? buildFort(state, String(action.unit), now)
-        : ({ ok: false, error: "Action inconnue." } as const);
+      const r = applyCompanyOp(state, action, now);
       return r.ok ? { ok: true, value: { state: r.value, log: { action: `company_${op}`, details: { id, unit: action.unit ?? null, qty: action.qty ?? null } } } } : r;
     }
     case "research": {
@@ -2951,7 +2924,7 @@ export async function runAction(admin: SupabaseClient, userId: string, action: G
         const positions = await loadPositions(admin, season.id, entities);
         const from = positions.get(me.id);
         const to = positions.get(target.id);
-        const spotted = !success || Math.random() < spyRisk(gap, from && to ? mapDistance(from, to) : MAP_SPAWN_RADIUS) + (lin(target.state, "sentinelles") ? LIN_SPY_CATCH : 0);
+        const spotted = !success || Math.random() < spyRisk(gap, from && to ? mapDistance(from, to) : MAP_SPAWN_RADIUS) + (lin(target.state, "sentinelles") ? LIN_SPY_CATCH : 0) - forestSpies(current);
         const named = spotted && defenseSpyLevel(target, now) >= spyLevelOf(me) - 1;
         const mine = fromGold(current, { ...goldView(current), stone: goldView(current).stone - cost });
         const list = success ? [{ e: me, state: mine }, { e: target, state: applySabotage(targetState, now, aim) }] : [{ e: me, state: mine }];
@@ -3046,6 +3019,8 @@ export async function runAction(admin: SupabaseClient, userId: string, action: G
       const victim = entities.get(String(action.target));
       if (!victim) {
         error = "Cible inconnue.";
+      } else if (s2Map() && !victim.isLord) {
+        error = "En saison 2, on ne pille pas les autres joueurs : ces raids reviendront avec la prochaine vague.";
       } else {
         const wanted = (action.troops && typeof action.troops === "object" ? action.troops : current.troops) as Army;
         const sending = sendTroops(current, wanted);
@@ -3129,7 +3104,7 @@ export async function runAction(admin: SupabaseClient, userId: string, action: G
       }
     } else {
       // Coups de marteau en attente joints à l'action : un seul aller-retour au lieu de deux.
-      const joined = action.type !== "click" ? Math.floor(Number((action as { clicks?: unknown }).clicks) || 0) : 0;
+      const joined = action.type !== "click" && !current.s2 ? Math.floor(Number((action as { clicks?: unknown }).clicks) || 0) : 0;
       const base = joined > 0 ? applyClicks(current, joined, now, world).state : current;
       finalState = base;
       const outcome = applySimpleAction(base, action, now, world, events.active?.kind === "marchand" ? events.active.id : undefined, action.type === "s2" ? s2Others(entities, userId) : undefined);
@@ -4724,7 +4699,7 @@ async function placeMole(
   const from = positions.get(me.id);
   const to = positions.get(key);
   const distance = from && to ? mapDistance(from, to) : MAP_SPAWN_RADIUS;
-  const caught = Math.random() < spyRisk(gap, distance) / 2 + (lin(target.state, "sentinelles") ? LIN_SPY_CATCH : 0);
+  const caught = Math.random() < spyRisk(gap, distance) / 2 + (lin(target.state, "sentinelles") ? LIN_SPY_CATCH : 0) - forestSpies(current);
   const paid = fromGold(current, { ...goldView(current), stone: goldView(current).stone - cost, moles });
   if (caught) return { cost, caught, target, state: paid, message: `🐀 Ta taupe a été démasquée en s'installant chez ${target.name}.` };
   const t = target.state;
@@ -4784,6 +4759,11 @@ async function settleMoles(admin: SupabaseClient, seasonId: number, entities: Ma
   return "none";
 }
 
+/** Saison 2 : un château en forêt a des espions plus discrets (10 % de risque d'être repéré en moins). */
+function forestSpies(state: PlayerState): number {
+  return state.s2?.region === "foret" ? REGION_BONUS : 0;
+}
+
 /** E3 à E5 : un espion arrive. Il peut être repéré ; le rapport est livré dans tous les cas. */
 async function settleSpy(
   admin: SupabaseClient,
@@ -4799,7 +4779,7 @@ async function settleSpy(
   const entity = entities.get(sp.target);
   // L2 : Sentinelles chez la cible (+10 % de chance de le surprendre) ; Maître des ombres, une fois par jour, jamais surpris.
   const watch = entity && !entity.isLord && lin(entity.state, "sentinelles") ? LIN_SPY_CATCH : 0;
-  const rolled = Math.random() < spyRisk(mine - theirs, sp.distance) + watch;
+  const rolled = Math.random() < spyRisk(mine - theirs, sp.distance) + watch - forestSpies(owner.state);
   const day = parisDay(sp.arriveAt);
   const shadow = rolled && lin(owner.state, "maitre_ombres") && owner.state.lineage?.shadowDay !== day;
   const caught = rolled && !shadow;

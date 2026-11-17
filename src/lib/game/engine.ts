@@ -60,7 +60,6 @@ import {
   FAIRNESS_SLOPE,
   RUIN_IMMUNITY_MS,
   RESEARCH_QUEUE_MAX,
-  SABOTAGE_LEVEL_SHARE,
   SABOTAGE_BASE_SUCCESS,
   SABOTAGE_PER_GAP,
   SABOTAGE_MAX_SUCCESS,
@@ -747,8 +746,9 @@ export function elanMaxMs(state: PlayerState): number {
 }
 
 export function elanBonus(state: PlayerState): number {
-  // Saison 2 : l'élan est offert à tous dès le départ (+25 %), sans savoir à acheter.
-  return (state.s2 ? 0.25 : 0) + ownedUpgrades(state).reduce((sum, u) => sum + (u.effect.kind === "elan" ? u.effect.bonus : 0), 0);
+  // Saison 2 : plus de marteau, donc plus d'élan.
+  if (state.s2) return 0;
+  return ownedUpgrades(state).reduce((sum, u) => sum + (u.effect.kind === "elan" ? u.effect.bonus : 0), 0);
 }
 
 export interface AdvanceOptions {
@@ -1037,7 +1037,8 @@ export function questProgress(state: PlayerState, id: QuestId, extra: { alliance
 /** Valide la quête en cours si elle est remplie : récompense et passage à la suivante. */
 export function claimQuest(state: PlayerState, world: WorldState, now: number, extra: { alliance?: boolean } = {}): { state: PlayerState; done: number | null; ecus: number } {
   const i = state.quest;
-  if (i === null || i === undefined || i >= QUESTS.length) return { state, done: null, ecus: 0 };
+  // Saison 2 : l'accueil en quêtes est remplacé par le guide pas à pas (côté navigateur).
+  if (state.s2 || i === null || i === undefined || i >= QUESTS.length) return { state, done: null, ecus: 0 };
   const q = questDef(i);
   if (questProgress(state, q.id, extra) < q.goal) return { state, done: null, ecus: 0 };
   const reward = Math.max(QUEST_MIN_REWARD, productionPerSecond(state, world, stagesDoneAt(world, now)) * QUEST_REWARD_SECONDS);
@@ -1176,13 +1177,6 @@ export function rebuildRuin(state: PlayerState, id: GeneratorId): Result<PlayerS
 // Troupes et défenses
 // ---------------------------------------------------------------------------
 
-export function unitCount(state: PlayerState, id: UnitId): number {
-  return state.troops[id] ?? 0;
-}
-
-export function defenseCount(state: PlayerState, id: DefenseId): number {
-  return state.defenses[id] ?? 0;
-}
 
 /** Troupes présentes : les siennes plus les renforts d'alliés. */
 export function troopsHere(state: PlayerState): Army {
@@ -1541,7 +1535,8 @@ export function rampartStrength(victim: PlayerState): number {
 
 /** Halle : vitesse en plus d'une armée (écuries, et salle d'armes pour des renforts). */
 export function armySpeedBonus(state: PlayerState, reinforce = false): number {
-  return WING_ARMY_SPEED[wingLevel(state.hall, "ecuries")] + (reinforce ? WING_REINFORCE_SPEED[wingLevel(state.hall, "armes")] : 0) + (lin(state, "marche") ? LIN_SPEED : 0);
+  // Saison 2 : un château en plaine a des armées 10 % plus rapides.
+  return WING_ARMY_SPEED[wingLevel(state.hall, "ecuries")] + (reinforce ? WING_REINFORCE_SPEED[wingLevel(state.hall, "armes")] : 0) + (lin(state, "marche") ? LIN_SPEED : 0) + (state.s2?.region === "plaine" ? 0.1 : 0);
 }
 
 /** Vérifie qu'un raid est permis. Renvoie un message d'erreur, ou null. */

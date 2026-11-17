@@ -1,5 +1,5 @@
 // Ce qui change : chaque mise en ligne qui touche une règle ajoute une entrée ici (la plus récente en dernier).
-// Le panneau s'affiche une fois à la connexion suivante ; c'est le seul moyen de prévenir les joueurs.
+// Une pastille sur le bouton 📜 signale les nouvelles entrées ; c'est le seul moyen de prévenir les joueurs.
 
 export interface ChangeEntry {
   id: number;
@@ -621,6 +621,20 @@ export const CHANGELOG: ChangeEntry[] = [
     minSeason: 1,
     items: [
       "🔔 Beffroi : la huitième étape, le beffroi légendaire, vaut maintenant 48 heures de la production des joueurs actifs au lieu de 24. Le beffroi doit rester un objectif de toute la saison.",
+    ],
+  },
+  {
+    id: 72,
+    date: "18 novembre",
+    minSeason: 2,
+    items: [
+      "🏰 Nouveau domaine : « Mes terres » liste ton château et tes concessions. Touche un lieu pour le gérer ; la barre du haut montre alors ses ressources (stock, production, réserve, prochain convoi).",
+      "🔨 Le marteau disparaît de la saison 2, et avec lui l'élan, les veines d'or et la quête « Prends 5 veines d'or ».",
+      "⚔️ La fiche d'un seigneur affiche ta chance de victoire. Sous 60 %, il faut confirmer l'attaque.",
+      "🛑 Plus de raids entre joueurs en saison 2 : ils reviendront avec la prochaine vague, sur les concessions.",
+      "🌍 Régions : la plaine accélère aussi les armées, la forêt rend les espions, saboteurs et taupes moins souvent repérés. Froid et désert serviront avec les raids entre joueurs.",
+      "📜 L'accueil en quêtes est remplacé par le guide pas à pas (une quête était impossible : acheter un savoir).",
+      "⚡ Les boutons répondent tout de suite : le serveur parle à sa base en direct et les actions s'affichent avant sa réponse.",
     ],
   },
 ];

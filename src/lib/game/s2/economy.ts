@@ -80,7 +80,7 @@ export const BUILDINGS: Record<BuildingId, { name: string; icon: string; base: n
   outils: { name: "Outils", icon: "🛠️", base: 500, text: "+3 % de production de toutes les concessions par niveau" },
   charronnerie: { name: "Charronnerie", icon: "🛞", base: 400, text: "Charge d'un convoi : un intervalle de production de base, +10 % par niveau" },
   relais: { name: "Relais", icon: "🐎", base: 400, text: "Un convoi toutes les 15 min, 20 s de moins par niveau ; convois 3 % plus rapides par niveau" },
-  entrepot: { name: "Entrepôt", icon: "🏚️", base: 300, text: "Stock local +30 min par niveau ; stock à l'abri au château +15 min par niveau" },
+  entrepot: { name: "Entrepôt", icon: "🏚️", base: 300, text: "Stock local de toutes les concessions +30 min de production par niveau" },
 };
 export const BUILDING_IDS = Object.keys(BUILDINGS) as BuildingId[];
 export function buildingCost(id: BuildingId, level: number): number {
@@ -262,10 +262,6 @@ export function convoyTravelMs(s: S2State, from: Pos, to: Pos): number {
   const base = Math.min(15, 0.5 * cheb(from, to)) * 60_000;
   return Math.round(base / ((1 + 0.03 * s.bld.relais) * (s.region === "plaine" ? 1.1 : 1) * (1 + (s.convoySpeed ?? 0))));
 }
-/** Stock du château à l'abri des raids : 15 min de production par niveau d'entrepôt (au moins 30 min). */
-export function safeHours(s: S2State): number {
-  return 0.5 + 0.25 * s.bld.entrepot;
-}
 
 /** Production horaire totale, en valeur pierre (sert aux plafonds de butin, aux quêtes, aux classements). */
 export function productionValue(s: S2State, map: S2Map): number {
@@ -297,7 +293,6 @@ export function settleS2(s: S2State, ctx: S2Context, now: number): { s: S2State;
   const arrived: Required<Arrivals> = { pierre: 0, fer: 0, or: 0, beffroi: 0 };
   if (now <= s.at || !s.castle) return { s: s.castle ? s : { ...s, at: Math.max(s.at, now) }, arrived };
   let st: S2State = { ...s, bld: { ...s.bld }, conc: s.conc.map((c) => ({ ...c })), convoys: [...s.convoys], works: [...s.works] };
-  const castle = st.castle!;
   const mult = ctx.multiplier ?? (() => 1);
   // Instants où quelque chose change : chantiers finis, bonus communs.
   const cuts = [...st.works.map((w) => w.until), ...st.conc.map((c) => c.upUntil ?? 0), ...st.conc.map((c) => c.cwork?.until ?? 0), st.launchUntil ?? 0, ...(ctx.breakpoints ?? [])].filter((t) => t > st.at && t < now);

@@ -36,7 +36,7 @@ const PAGES: { icon: string; title: string; text: string[] }[] = [
     text: [
       "Touche une case marquée d'un point blanc sur la carte : hors du tourbillon central, à deux cases au moins des sites, des seigneurs et des autres châteaux.",
       "Tu reçois une carrière proche, 1 000 pierre pour bâtir tout de suite et une compagnie de miliciens.",
-      "La région compte : ❄️ Froid +10 % de défense, ⛰️ Montagne +10 % sur les carrières, 🌾 Plaine armées et convois 10 % plus rapides, ⛏️ Collines +10 % sur les mines, 🏜️ Désert +10 % de butin sur les convois, ⚓ Côte +10 % d'or, 🌲 Forêt espions plus sûrs.",
+      "La région compte : ⛰️ Montagne +10 % sur les carrières, ⛏️ Collines +10 % sur les mines, ⚓ Côte +10 % d'or, 🌾 Plaine armées et convois 10 % plus rapides, 🌲 Forêt espions moins souvent repérés. ❄️ Froid (défense) et 🏜️ Désert (butin sur les convois) serviront quand les raids entre joueurs reviendront.",
       "Reste près de plusieurs sites : tes convois feront moins de route (30 secondes par case).",
     ],
   },
@@ -87,7 +87,7 @@ const PAGES: { icon: string; title: string; text: string[] }[] = [
     text: [
       "Choisis ton château dans « Mes terres ». Ses bâtiments se paient en pierre, deux chantiers à la fois, jusqu'au niveau 20, et valent pour toutes tes concessions.",
       "🛠️ Outils : +3 % de production par niveau. 🛞 Charronnerie : +10 % de charge par niveau. 🐎 Relais : un convoi 20 s plus tôt par niveau (5 min au plus court), et 3 % plus rapide.",
-      "🏚️ Entrepôt : +30 min de stock local par niveau, et plus de pierre à l'abri au château en cas de raid.",
+      "🏚️ Entrepôt : +30 min de stock local par niveau dans toutes tes concessions.",
     ],
   },
   {
@@ -96,7 +96,7 @@ const PAGES: { icon: string; title: string; text: string[] }[] = [
     text: [
       "Onglet Armée. Une compagnie a un type d'unité (miliciens, piquiers, arbalétriers, chevaliers, béliers) et un plafond d'hommes. La caserne ajoute des compagnies et des files de recrutement.",
       "Recruter coûte du fer et prend quelques secondes par homme. L'entraînement (🎯, 10 niveaux) rend la compagnie plus forte : +8 % d'attaque et de vie par niveau.",
-      "Les fortifications défendent ton château. Les blessés reviennent avec le temps.",
+      "Les blessés reviennent avec le temps. Personne n'attaque ton château en saison 2 : ni fortifications ni couvre-feu à gérer.",
     ],
   },
   {

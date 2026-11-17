@@ -76,7 +76,6 @@ import {
   clickValue,
   generatorCost,
   generatorRate,
-  baseRate,
   tributeLeft,
   spyRisk,
   spyTravelMs,
@@ -100,7 +99,6 @@ import {
   stagesDoneAt,
   upgradeCost,
   upgradeUnlocked,
-  attackArmy,
   travelMs,
   counterCost,
   spyBase,
@@ -223,7 +221,7 @@ export function Game({ userId }: { userId: string }) {
     } }}>
     <div className="game">
       {snap.s2 && <S2Tutorial seasonId={snap.season.id} />}
-      {game.away && <AwayModal away={game.away} event={snap.event} onClose={game.dismissAway} />}
+      {game.away && <AwayModal away={game.away} event={snap.event} onClose={game.dismissAway} s2={!!snap.s2} />}
       <TopBar snap={snap} now={now} />
       {snap.s2 && <S2Guide seasonId={snap.season.id} live={live} tab={tab} stages={stagesDone} />}
       <Movements snap={snap} live={live} now={now} run={game.run} />
@@ -297,7 +295,8 @@ export function Game({ userId }: { userId: string }) {
 /** B4 : accueil guidé, une quête à la fois. */
 function QuestCard({ snap }: { snap: GameSnapshot }) {
   const i = snap.state.quest;
-  if (i === null || i === undefined || i >= QUESTS.length) return null;
+  // Saison 2 : le guide pas à pas remplace l'accueil en quêtes.
+  if (snap.s2 || i === null || i === undefined || i >= QUESTS.length) return null;
   const q = questDef(i);
   const done = Math.min(q.goal, questProgress(snap.state, q.id, { alliance: snap.alliance !== null && snap.alliance !== undefined }));
   return (
@@ -412,9 +411,9 @@ function Vein({ veinAt, now, run }: { veinAt: number; now: number; run: ReturnTy
 }
 
 /** B3 : ce qui s'est passé pendant l'absence (30 minutes ou plus). */
-function AwayModal({ away, event, onClose }: { away: AwaySummary; event: EventView | null | undefined; onClose: () => void }) {
+function AwayModal({ away, event, onClose, s2 = false }: { away: AwaySummary; event: EventView | null | undefined; onClose: () => void; s2?: boolean }) {
   const lines: string[] = [];
-  lines.push(`⛏️ Tes ateliers ont produit ${formatNumber(away.produced)} pierres.`);
+  lines.push(s2 ? `⛏️ Tes concessions ont livré ${formatNumber(away.produced)} en valeur pierre.` : `⛏️ Tes ateliers ont produit ${formatNumber(away.produced)} pierres.`);
   if (away.tithe >= 1) lines.push(`⛪ Ta dîme a versé ${formatNumber(away.tithe)} pierres au chantier.`);
   for (const r of away.raidsLost) {
     const troops = Object.values(r.troops).reduce((a, b) => a + b, 0);
@@ -427,7 +426,7 @@ function AwayModal({ away, event, onClose }: { away: AwaySummary; event: EventVi
   for (const sb of away.sabotages) lines.push(sb.success ? `🧨 ${sb.by} a saboté ton académie.` : `🧨 Un saboteur de ${sb.by} a été arrêté.`);
   for (const r of away.research) lines.push(`🔬 Recherche terminée : ${COMBATANTS.get(r.id)?.name ?? r.id}${r.levels > 1 ? ` (+${r.levels} niveaux)` : ""}.`);
   for (const i of away.stages) lines.push(`🏗️ Étape franchie : ${stageDef(i).name}.`);
-  if (event) lines.push(event.kind === "colosse" ? "🗿 Un colosse est en cours, va le frapper dans Raids." : "🐫 Une caravane passe, va la piller dans Raids.");
+  if (event) lines.push(event.kind === "colosse" ? "🗿 Un colosse est en cours, va le frapper dans Carte › Cibles." : "🐫 Une caravane passe, va la piller dans Carte › Cibles.");
   return (
     <div className="modal-backdrop" role="dialog" aria-modal="true" aria-label="Pendant ton absence">
       <div className="modal panel">
@@ -1656,9 +1655,9 @@ function Army({ snap, live, now, run }: { snap: GameSnapshot; live: PlayerState;
             de la cible. Chaque unité a ses forces et ses faiblesses, compose ton armée selon ce que tu vois en face. Tu gagnes si plus personne ne
             riposte en face. Une partie des troupes perdues revient de l&apos;infirmerie au bout de 30 minutes.
           </Info>
-          <TributeGauge live={live} now={now} />
+          {!live.s2 && <TributeGauge live={live} now={now} />}
           {live.companyModel ? <Companies live={live} now={now} run={run} renown={snap.renown?.available ?? 0} /> : <Garrison live={live} run={run} />}
-          <CurfewCard live={live} now={now} run={run} />
+          {!live.s2 && <CurfewCard live={live} now={now} run={run} />}
         </>
       )}
       {view === "espionnage" && <Spies snap={snap} live={live} now={now} run={run} />}
@@ -1776,7 +1775,10 @@ function Raids({ snap, live, now, run, focus }: { snap: GameSnapshot; live: Play
           <div className="list">{lords.map(row)}</div>
         </>
       )}
-      {view === "joueurs" && (
+      {view === "joueurs" && snap.s2 && (
+        <p className="empty">En saison 2, on ne pille pas les autres joueurs : les raids entre joueurs reviendront avec la prochaine vague, sur les concessions. Espionnage et alliances restent ouverts.</p>
+      )}
+      {view === "joueurs" && !snap.s2 && (
         <div className="list">
           {players.length === 0 && <p className="empty">Aucun joueur à piller (tes alliés sont dans l&apos;onglet Alliance).</p>}
           {players.map(row)}
@@ -2080,7 +2082,6 @@ const SABOTAGE_AIMS: [SabotageAim, string, string][] = [
 function SendArmy({
   me,
   r,
-  intel,
   distance,
   chosen,
   setChosen,
@@ -4739,6 +4740,9 @@ export function Companies({ live, now, run, renown = 0 }: { live: PlayerState; n
         </div>
       )}
       <CaptainsPanel live={live} run={run} renown={renown} />
+      {/* Saison 2 : personne n'attaque le château (seigneurs passifs, pas de raids entre joueurs) : pas de fortifications. */}
+      {!live.s2 && (
+        <>
       <div className="block-head">
         <h3 className="section-title">🧱 Fortifications</h3>
       </div>
@@ -4774,6 +4778,8 @@ export function Companies({ live, now, run, renown = 0 }: { live: PlayerState; n
           );
         })}
       </div>
+        </>
+      )}
     </>
   );
 }

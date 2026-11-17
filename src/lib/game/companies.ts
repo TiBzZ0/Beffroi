@@ -272,9 +272,6 @@ let ironArmy = false;
 export function setIronArmy(on: boolean): void {
   ironArmy = on;
 }
-export function ironArmyOn(): boolean {
-  return ironArmy;
-}
 /** Concessions d'un joueur actif selon l'âge de la saison (1, 2 dès la première étape, puis achetées en or). */
 function s2Concessions(hours: number): number {
   return hours < 12 ? 1 : hours < 48 ? 2 : hours < 120 ? 3 : hours < 216 ? 4 : 5;
@@ -397,11 +394,6 @@ export function settleArmy<S extends ArmyHolder>(s: S, now: number): S {
   return { ...s, troops: troops as S["troops"], recruits, companies, works, barracks, fortLevels, defenses };
 }
 
-/** Prochaine échéance (pour découper le calcul hors ligne si besoin). */
-export function armyBreakpoints(s: ArmyHolder): number[] {
-  if (!companiesOn(s)) return [];
-  return [...(s.companies ?? []).map((c) => c.trainUntil), s.works?.barracks?.until ?? 0, s.works?.fort?.until ?? 0].filter((t) => t > 0);
-}
 
 // ---------------------------------------------------------------------------
 // Actions

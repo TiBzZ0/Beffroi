@@ -3,9 +3,10 @@ import type { ChatChannel, ChatView } from "@/lib/game/chat-config";
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { MAX_CLICKS_PER_SECOND } from "@/lib/game/config";
-import { advance, type WorldState, buyAcademy, buyArmy, buyGenerator, buyUpgrade, clickValue, stagesDoneAt, setTithe, startResearch, type PlayerState } from "@/lib/game/engine";
+import { advance, researchBase, type WorldState, buyAcademy, buyArmy, buyGenerator, buyUpgrade, clickValue, stagesDoneAt, setTithe, startResearch, type PlayerState } from "@/lib/game/engine";
 import type { GeneratorId } from "@/lib/game/config";
 import { applyS2Action } from "@/lib/game/s2/apply";
+import { applyCompanyOp } from "@/lib/game/company-ops";
 import { worksiteFromRow, worldFrom, type ActionResponse, type AwaySummary, type GameAction, type GameSnapshot, type Leaderboards } from "@/lib/game/types";
 import { getBrowserClient } from "@/lib/supabase/client";
 
@@ -383,12 +384,14 @@ function applyLocal(state: PlayerState, action: GameAction, world?: WorldState):
         : action.type === "upgrade"
           ? buyUpgrade(state, action.upgrade)
           : action.type === "academy"
-            ? buyAcademy(state)
+            ? buyAcademy(state, state.lastUpdate, world ? researchBase(state, world, state.lastUpdate) : 0)
             : action.type === "research"
-              ? startResearch(state, action.id, state.lastUpdate)
+              ? startResearch(state, action.id, state.lastUpdate, world ? stagesDoneAt(world, state.lastUpdate) : 0, world ? researchBase(state, world, state.lastUpdate) : 0)
               : action.type === "tithe"
                 ? setTithe(state, Number(action.percent))
-                : action.type === "s2" && action.op !== "place" && action.op !== "take" && world
+                : action.type === "company"
+                  ? applyCompanyOp(state, action, state.lastUpdate)
+                  : action.type === "s2" && action.op !== "place" && action.op !== "take" && world
                   ? s2Local(state, action, world)
                   : null;
   return r && r.ok ? r.value : null;

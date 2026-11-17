@@ -41,16 +41,3 @@ export async function recordContribution(seasonId: number, userId: string, total
     // Le classement Postgres sert de repli.
   }
 }
-
-export async function topContributors(seasonId: number, limit: number): Promise<{ userId: string; total: number }[] | null> {
-  if (!redis) return null;
-  try {
-    const raw = await redis.zrange<(string | number)[]>(leaderboardKey(seasonId), 0, limit - 1, { rev: true, withScores: true });
-    if (raw.length === 0) return null;
-    const rows: { userId: string; total: number }[] = [];
-    for (let i = 0; i < raw.length; i += 2) rows.push({ userId: String(raw[i]), total: Number(raw[i + 1]) });
-    return rows;
-  } catch {
-    return null;
-  }
-}
