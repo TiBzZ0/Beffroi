@@ -302,7 +302,7 @@ export function barracksCost(s: ArmyHolder): number {
 }
 
 export function trainCost(c: Pick<Company, "train">): number {
-  if (ironArmy) return Math.round(5_000 * 1.6 ** c.train);
+  if (ironArmy) return Math.round(5_000 * 1.35 ** c.train);
   // Moment habituel : une demi-heure pour lever la compagnie, puis les entraînements précédents.
   let at = 0.5;
   for (let k = 0; k < c.train; k++) at += trainMs({ train: k }) / HOUR;
