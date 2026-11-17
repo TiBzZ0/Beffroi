@@ -1,8 +1,9 @@
 "use client";
 
-// Saison 2 : tutoriel en quelques pages, ouvert à la première visite de la saison et rouvrable par le bouton
-// « Comment jouer ». Le fait de l'avoir vu est gardé dans le navigateur (simple confort, rien d'important).
+// Saison 2 : un guide pas à pas pour le début (S2Guide), et les règles en quelques pages, ouvertes par
+// « Règles », « ? » ou « Comment jouer ». Ce qui a été fait est gardé dans le navigateur (simple confort).
 import { useEffect, useState } from "react";
+import type { PlayerState } from "@/lib/game/engine";
 
 const OPEN_EVENT = "beffroi:tutoriel";
 
@@ -85,13 +86,9 @@ const PAGES: { icon: string; title: string; text: string[] }[] = [
 export function S2Tutorial({ seasonId }: { seasonId: number }) {
   const key = `beffroi-tutoriel-s2-${seasonId}`;
   // L'écran de jeu ne se rend qu'une fois l'instantané reçu, côté navigateur : on peut lire le stockage tout de suite.
-  const [open, setOpen] = useState(() => {
-    try {
-      return localStorage.getItem(key) !== "1";
-    } catch {
-      return true;
-    }
-  });
+  // Les règles ne s'ouvrent plus d'elles-mêmes : le guide pas à pas mène le début, ce bouton sert de référence.
+  void key;
+  const [open, setOpen] = useState(false);
   const [page, setPage] = useState(0);
   useEffect(() => {
     const reopen = () => {
@@ -133,6 +130,154 @@ export function S2Tutorial({ seasonId }: { seasonId: number }) {
           </span>
         </div>
       </div>
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Guide pas à pas : une étape à la fois, qui avance quand le joueur l'a faite.
+// ---------------------------------------------------------------------------
+
+
+interface GuideStep {
+  id: string;
+  title: string;
+  text: string;
+  /** Onglet où se fait l'étape (null : partout). */
+  tab: "carte" | "ateliers" | "armee" | "chantier" | null;
+  go: string;
+  done: (s: PlayerState, visited: Set<string>) => boolean;
+}
+
+const STEPS: GuideStep[] = [
+  {
+    id: "castle",
+    title: "Pose ton château",
+    text: "Ouvre la carte et touche une case marquée d'un point blanc, puis « Poser mon château ici ». Ta première carrière et une compagnie de miliciens te sont données.",
+    tab: "carte",
+    go: "Ouvrir la carte",
+    done: (s) => !!s.s2?.castle,
+  },
+  {
+    id: "concession",
+    title: "Regarde ta carrière",
+    text: "Dans Concessions, ta carrière remplit son stock et envoie un convoi de pierre vers ton château toutes les heures. Tu y verras aussi tes bâtiments d'appui et le marché.",
+    tab: "ateliers",
+    go: "Voir mes concessions",
+    done: (_, v) => v.has("ateliers"),
+  },
+  {
+    id: "hammer",
+    title: "Frappe le marteau",
+    text: "Le marteau allume l'élan : +25 % de production tant qu'il dure. Quelques coups suffisent, reviens le raviver de temps en temps.",
+    tab: null,
+    go: "",
+    done: (s) => (s.elanUntil ?? 0) > 0,
+  },
+  {
+    id: "build",
+    title: "Bâtis un bâtiment d'appui",
+    text: "Dans Concessions, lance la charronnerie (convois plus chargés) ou les outils (+5 % de production). Ils se paient en pierre.",
+    tab: "ateliers",
+    go: "Bâtir",
+    done: (s) => !!s.s2 && (Object.values(s.s2.bld).some((n) => n > 0) || s.s2.works.length > 0),
+  },
+  {
+    id: "army",
+    title: "Renforce ton armée",
+    text: "Dans Armée, recrute des hommes ou crée une deuxième compagnie. L'armée se paie en fer : tu en as 3 000 pour commencer.",
+    tab: "armee",
+    go: "Ouvrir l'armée",
+    done: (s) => (s.recruits?.length ?? 0) > 0 || (s.companies?.length ?? 0) > 1 || (s.companies ?? []).some((c) => c.train > 0 || c.trainUntil > 0),
+  },
+  {
+    id: "belfry",
+    title: "Aide à bâtir le beffroi",
+    text: "Dans Chantier, verse un peu de pierre ou règle ta dîme. Chaque étape achevée donne un bonus à tout le royaume, dont une concession de plus.",
+    tab: "chantier",
+    go: "Ouvrir le chantier",
+    done: (s) => s.totalContributed > 0 || !!s.titheSet,
+  },
+  {
+    id: "lord",
+    title: "Attaque un hobereau",
+    text: "Sur la carte, touche un écu rouge sans couronne, loin du centre, puis « Attaquer ». Une victoire rapporte 60 % de son fief et du fer.",
+    tab: "carte",
+    go: "Choisir un hobereau",
+    done: (s) => (s.marches ?? []).some((m) => m.kind === "raid") || (s.questFlags ?? []).includes("lord"),
+  },
+];
+
+function readSet(key: string): Set<string> {
+  try {
+    return new Set(JSON.parse(localStorage.getItem(key) ?? "[]") as string[]);
+  } catch {
+    return new Set();
+  }
+}
+function writeSet(key: string, set: Set<string>) {
+  try {
+    localStorage.setItem(key, JSON.stringify([...set]));
+  } catch {
+    /* simple confort */
+  }
+}
+
+export function S2Guide({ seasonId, live, tab, go }: { seasonId: number; live: PlayerState; tab: string; go: (tab: string) => void }) {
+  const doneKey = `beffroi-guide-s2-${seasonId}`;
+  const seenKey = `beffroi-guide-onglets-${seasonId}`;
+  const hideKey = `beffroi-guide-masque-${seasonId}`;
+  // Ce qui est fait et les onglets vus restent acquis (une armée rentrée ne défait pas l'étape) : gardés à part.
+  const [stored] = useState(() => ({ done: readSet(doneKey), visited: readSet(seenKey) }));
+  const [hidden, setHidden] = useState(() => readSet(hideKey).has("1"));
+  const visited = new Set(stored.visited).add(tab);
+  const done = stored.done;
+  const newly = STEPS.filter((st) => !done.has(st.id) && st.done(live, visited)).map((st) => st.id);
+  useEffect(() => {
+    const st = stored;
+    if (!st.visited.has(tab)) {
+      st.visited.add(tab);
+      writeSet(seenKey, st.visited);
+    }
+    if (newly.length) {
+      for (const id of newly) st.done.add(id);
+      writeSet(doneKey, st.done);
+    }
+  });
+  const isDone = (st: GuideStep) => done.has(st.id) || newly.includes(st.id);
+  const step = STEPS.find((st) => !isDone(st));
+  const count = STEPS.filter(isDone).length;
+  const hide = () => {
+    writeSet(hideKey, new Set(["1"]));
+    setHidden(true);
+  };
+  if (hidden) return null;
+  if (!step) {
+    return (
+      <div className="guide guide-done">
+        <div>
+          <b>🎉 Tu connais l&apos;essentiel.</b> Le reste se découvre en jouant : bonne saison !
+        </div>
+        <button className="btn btn-small" onClick={hide}>Fermer</button>
+      </div>
+    );
+  }
+  const here = step.tab === null || step.tab === tab;
+  return (
+    <div className="guide" role="status">
+      <div className="guide-head">
+        <span className="guide-count num">Guide · étape {count + 1}/{STEPS.length}</span>
+        <span className="guide-links">
+          <button className="btn-link" onClick={openTutorial}>Règles</button>
+          <button className="btn-link" onClick={hide}>Masquer</button>
+        </span>
+      </div>
+      <div className="bar bar-thin"><span style={{ width: `${(count / STEPS.length) * 100}%` }} /></div>
+      <div className="guide-title">{step.title}</div>
+      <p className="guide-text">{step.text}</p>
+      {!here && step.go && (
+        <button className="btn btn-primary btn-small" onClick={() => go(step.tab!)}>{step.go}</button>
+      )}
     </div>
   );
 }

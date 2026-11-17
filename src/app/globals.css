@@ -2731,3 +2731,47 @@ use.g-enemy {
   align-items: center;
   gap: 8px;
 }
+.guide {
+  margin: 8px 0;
+  padding: 10px 14px;
+  background: var(--panel);
+  border: 1px solid var(--gold);
+  border-left: 4px solid var(--gold);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow);
+}
+.guide-done {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 10px;
+}
+.guide-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 8px;
+  font-size: 0.85rem;
+  color: var(--ink-soft);
+  margin-bottom: 4px;
+}
+.guide-links {
+  display: flex;
+  gap: 12px;
+}
+.guide-links .btn-link {
+  background: none;
+  border: 0;
+  padding: 0;
+  color: var(--ink-soft);
+  text-decoration: underline;
+  cursor: pointer;
+  font: inherit;
+}
+.guide-title {
+  font-weight: 700;
+  margin-top: 6px;
+}
+.guide-text {
+  margin: 4px 0 8px;
+}
