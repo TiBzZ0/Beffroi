@@ -38,8 +38,9 @@ describe("S2 : économie", () => {
     const rate = concessionRate(s, c, map);
     const { s: after, arrived } = settleS2(s, ctx(), T0 + 10 * H);
     const inFlight = after.convoys.reduce((a, v) => a + v.load, 0);
-    // Tout ce qui a été produit est au château, en route, ou dans le stock local.
-    expect(arrived.pierre + inFlight + after.conc[0].stock).toBeCloseTo(rate * 10, 3);
+    // Tout ce qui a été produit (plus la première charge offerte) est au château, en route, ou dans le stock local.
+    expect(arrived.pierre + inFlight + after.conc[0].stock).toBeCloseTo(rate * 10 + c.stock, 3);
+    expect(c.next).toBe(s.at);
     expect(arrived.pierre).toBeGreaterThan(rate * 8);
     expect(arrived.or).toBeCloseTo((arrived.pierre * 0.03) / 4, 6);
     // Calcul paresseux : deux pas ou un seul, même résultat.

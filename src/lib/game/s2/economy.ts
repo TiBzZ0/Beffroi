@@ -286,7 +286,9 @@ export function takeConcessionBlocker(s: S2State, ctx: S2Context, siteId: number
 export function takeConcession(s: S2State, ctx: S2Context, siteId: number, occ: SiteOccupancy, now: number): R<S2State> {
   const why = takeConcessionBlocker(s, ctx, siteId, occ);
   if (why) return fail(why);
-  const c: Concession = { id: newId(now), site: siteId, level: 1, stock: 0, next: now + convoyIntervalMs(s) };
+  // Le premier convoi part tout de suite, déjà chargé : on voit arriver sa première pierre sans attendre une heure.
+  const c: Concession = { id: newId(now), site: siteId, level: 1, stock: 0, next: now };
+  c.stock = convoyLoad(s, c, ctx.map);
   return { ok: true, value: { ...s, conc: [...s.conc, c] } };
 }
 
