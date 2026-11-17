@@ -265,7 +265,7 @@ import { castleBlocker, generateMap, regionAt, type Resource, type S2Map } from 
 import { s2Map, setS2Map, s2Enabled } from "./s2/rules";
 import { build, buyConcession, cleanS2, dropConcession, exchangeBlocker, firstConcessionSites, marketQuote, takeConcession, upgradeConcession, type BuildingId } from "./s2/economy";
 import { afterDefeat, cleanLordS2, fiefLoot, garrison, settleFief } from "./s2/lords";
-import { buyNode, cleanLineage, lin, lineageMark, LIN_GENERATOR_DISCOUNT, LIN_MOLE, LIN_SPY_CATCH, NODE_BY_ID, parisDay, RENOWN, RENOWN_GIFT_SEASON, renownAvailable, respec, type RenownSource } from "./lineage";
+import { buyNode, cleanLineage, lin, lineageMark, LIN_GENERATOR_DISCOUNT, LIN_MOLE, LIN_SPY_CATCH, NODE_BY_ID, nodeEffect, parisDay, RENOWN, RENOWN_GIFT_SEASON, renownAvailable, respec, type RenownSource } from "./lineage";
 import { notify, notifyEach, type PushMessage } from "@/lib/push";
 
 // Toute la logique qui fait foi : charger l'état, le recalculer, appliquer l'intention
@@ -1745,7 +1745,7 @@ async function loadEventInner(admin: SupabaseClient, seasonId: number, now: numb
   const nextAt = last ? ms(last.ends_at as string) + EVENT_GAP_MS : now;
   // Le tirage est figé à l'annonce : ce qui a été annoncé est ce qui arrive.
   const { data: notice } = last && now >= nextAt - EVENT_NOTICE_MS ? await admin.from("event_notices").select("kind").eq("season_id", seasonId).eq("after_event", Number(last.id)).maybeSingle() : { data: null };
-  const nextKind: EventKind = notice ? (notice.kind as EventKind) : last ? drawNextEvent(last.kind as string, Number(last.id) * 7919 + seasonId, online, nextAt) : "caravane";
+  const nextKind: EventKind = notice ? (notice.kind as EventKind) : last ? drawNextEvent(last.kind as string, Number(last.id) * 7919 + seasonId, online, nextAt) : s2Map() ? "colosse" : "caravane";
   const humans = [...entities.values()].filter((e) => !e.isLord);
   if (last && !notice && now >= nextAt - EVENT_NOTICE_MS && now < nextAt) void announceNext(admin, seasonId, Number(last.id), nextKind);
   if (now < nextAt || humans.length === 0) return { active: null, levels: {}, nextAt, nextKind };
@@ -2330,7 +2330,8 @@ function rivalsFor(
 async function questFlagsFromDb(admin: SupabaseClient, seasonId: number, userId: string, state: PlayerState): Promise<PlayerState> {
   const id = state.quest !== null ? QUESTS[state.quest]?.id : undefined;
   if (id === "lord") {
-    const easy = LORDS.filter((l) => l.difficulty === 1).map((l) => l.id);
+    const map = s2Map();
+    const easy = map ? map.lords.filter((l) => l.rank === "hobereau").map((l) => l.id) : LORDS.filter((l) => l.difficulty === 1).map((l) => l.id);
     const { data } = await admin.from("chronicle").select("details").eq("season_id", seasonId).eq("kind", "raid").eq("actor_id", userId).in("target_id", easy).limit(20);
     if ((data ?? []).some((r) => (r.details as { success?: boolean } | null)?.success)) return flagQuest(state, "lord");
   }
@@ -2930,7 +2931,7 @@ export async function runAction(admin: SupabaseClient, userId: string, action: G
         const { data } = await admin.rpc("commit_state", { p_season: season.id, p_state: toJson(me, finalState, {}), p_touch: true, p_contribution: 0, p_stage_bases: stageSizes, p_active_window_days: ACTIVE_WINDOW_DAYS, p_action: action.type, p_details: nodeId ? { node: nodeId } : null });
         if ((data as { conflict?: boolean } | null)?.conflict) continue;
         const node = NODE_BY_ID.get(nodeId);
-        message = action.type === "lineage_buy" ? `🎖️ ${node?.icon ?? ""} ${node?.name ?? "Nœud"} acquis : ${node?.effect ?? ""}` : "🎖️ Tu changes de voie : ton renom t'est rendu, moins 10.";
+        message = action.type === "lineage_buy" ? `🎖️ ${node?.icon ?? ""} ${node?.name ?? "Nœud"} acquis : ${node ? nodeEffect(node) : ""}` : "🎖️ Tu changes de voie : ton renom t'est rendu, moins 10.";
       }
     } else if (action.type === "master_choice") {
       const choice = String(action.choice);
@@ -4059,6 +4060,7 @@ function dailyContextOf(me: Entity, state: PlayerState, entities: Map<string, En
     troops: armySize(attackArmy(state)),
     allies: me.allianceId === null ? 0 : [...entities.values()].filter((e) => !e.isLord && e.id !== me.id && e.allianceId === me.allianceId).length,
     upgradesLeft: UPGRADES.filter((u) => !state.upgrades.includes(u.id)).length,
+    s2: !!state.s2,
     levels: levelSum(state),
     spyLevel: state.spyLevel ?? 0,
   };

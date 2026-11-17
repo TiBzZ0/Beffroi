@@ -132,6 +132,7 @@ import {
   CURFEW_MINUTES,
   CURFEW_DELAY_MS,
   QUESTS,
+  questDef,
   QUEST_REWARD_SECONDS,
   QUEST_MIN_REWARD,
   QUEST_FINAL_ECUS,
@@ -789,7 +790,9 @@ export function advance(state: PlayerState, now: number, world: WorldState, opts
     // Saison 2 : les concessions produisent, les convois rapportent ; un multiplicateur commun (élan, bonus…) par segment.
     const base = productionValue(state.s2, map) / 3600;
     const multiplier = (t: number) => (base > 0 ? rateAt(state, world, t, opts) / base : 1);
-    const { s: s2, arrived } = settleS2(state.s2, { map, stageConcessions: stagesDoneAt(world, now) >= 1 ? 1 : 0, multiplier, breakpoints: events.filter((t) => t > state.s2!.at && t < now) }, now);
+    // S10 : Cave profonde (+30 min de stock local) et Charpentiers (convois 10 % plus rapides).
+    const perked = { ...state.s2, stockBonusHours: lin(state, "cave") ? 0.5 : 0, convoySpeed: lin(state, "charpentiers") ? 0.1 : 0 };
+    const { s: s2, arrived } = settleS2(perked, { map, stageConcessions: stagesDoneAt(world, now) >= 1 ? 1 : 0, multiplier, breakpoints: events.filter((t) => t > state.s2!.at && t < now) }, now);
     const toBelfry = stagesDoneAt(world, now) < TOTAL_STAGES ? arrived.pierre * tithe : 0;
     const value = arrived.pierre + arrived.fer * 2 + arrived.or * 4;
     return {
@@ -999,6 +1002,11 @@ export function catchVein(state: PlayerState, now: number, world: WorldState, rn
 /** Progression de la quête `id` d'après l'état (les quêtes notées à part valent 0 ou 1). */
 export function questProgress(state: PlayerState, id: QuestId, extra: { alliance?: boolean } = {}): number {
   const sum = (o: Partial<Record<string, number>>) => Object.values(o).reduce<number>((a, b) => a + (b ?? 0), 0);
+  if (state.s2) {
+    if (id === "clicks") return state.s2.castle ? 1 : 0;
+    if (id === "workshop") return Math.max(0, state.s2.conc.length - 1);
+    if (id === "workshops") return Object.values(state.s2.bld).some((n) => n > 0) || state.s2.works.length > 0 ? 1 : 0;
+  }
   switch (id) {
     case "clicks":
       return state.totalClicks;
@@ -1022,7 +1030,7 @@ export function questProgress(state: PlayerState, id: QuestId, extra: { alliance
 export function claimQuest(state: PlayerState, world: WorldState, now: number, extra: { alliance?: boolean } = {}): { state: PlayerState; done: number | null; ecus: number } {
   const i = state.quest;
   if (i === null || i === undefined || i >= QUESTS.length) return { state, done: null, ecus: 0 };
-  const q = QUESTS[i];
+  const q = questDef(i);
   if (questProgress(state, q.id, extra) < q.goal) return { state, done: null, ecus: 0 };
   const reward = Math.max(QUEST_MIN_REWARD, productionPerSecond(state, world, stagesDoneAt(world, now)) * QUEST_REWARD_SECONDS);
   return {

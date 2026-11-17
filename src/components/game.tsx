@@ -29,6 +29,7 @@ import {
   MASTER_BONUSES,
   type MasterBonusKind,
   QUESTS,
+  questDef,
   VEIN_VISIBLE_MS,
   ACADEMY_SPEED,
   RESEARCH_QUEUE_MAX,
@@ -107,7 +108,7 @@ import { formatNumber, formatRate } from "@/lib/game/format";
 import { armySize, armyValue, battle, cleanArmy, estimateChance, seededRng, type Army } from "@/lib/game/battle";
 import { worldFrom, type AwaySummary, type LotView, type AllianceSummary, type ChronicleEntry, type EventView, type GameSnapshot, type RivalView } from "@/lib/game/types";
 import { useChat, useGame, useLeaderboard, usePush, useTick } from "./use-game";
-import { BRANCHES, lineageMark, NODE_BY_ID, NODES, nodeBlocker, RANK_COST, RANK_REQUIRED, RENOWN, RENOWN_CAPPED, RESPEC_FEE, respecBlocker, spentIn, type BranchId } from "@/lib/game/lineage";
+import { BRANCHES, lineageMark, NODE_BY_ID, NODES, nodeBlocker, nodeEffect, RANK_COST, RANK_REQUIRED, RENOWN, RENOWN_CAPPED, RESPEC_FEE, respecBlocker, spentIn, type BranchId } from "@/lib/game/lineage";
 import { allocation, BARRACKS_MAX, companyEta, BARRACKS_MS, barracksBlocker, barracksCost, barracksLevel, COMPANY_CAP, fortBlocker, fortCost, fortCount, fortMs, FORT_MAX, maxCompanies, RECRUIT_MS, recruitPrice, recruitSlots, trainBlocker, trainCost, trainMs, TRAIN_MAX } from "@/lib/game/companies";
 import { CAPTAIN_COST, CAPTAINS_MAX, captainLevel, captainOf, HUNT_TARGETS, RARITY_LABEL, RELICS, RELICS_MAX, relicOf, TRAITS } from "@/lib/game/captains";
 import { ALTERATIONS, riftCompanyBlocker, riftFightBlocker, riftOf, RIFT_IDLE_MS, RIFT_MAX_COMPANIES, SHAPES, type AlterationId } from "@/lib/game/rift";
@@ -258,7 +259,7 @@ export function Game({ userId }: { userId: string }) {
 function QuestCard({ snap }: { snap: GameSnapshot }) {
   const i = snap.state.quest;
   if (i === null || i === undefined || i >= QUESTS.length) return null;
-  const q = QUESTS[i];
+  const q = questDef(i);
   const done = Math.min(q.goal, questProgress(snap.state, q.id, { alliance: snap.alliance !== null && snap.alliance !== undefined }));
   return (
     <div className="quest">
@@ -734,7 +735,7 @@ export function Lineage({ snap, now, run }: { snap: GameSnapshot; now: number; r
                       </button>
                       {isOpen && (
                         <div className="lin-node-body">
-                          <p className="row-desc">{n.effect}</p>
+                          <p className="row-desc">{nodeEffect(n)}</p>
                           {!owned && (
                             <Btn className="btn btn-primary btn-small" busy={busy} reason={why} onClick={() => void act({ type: "lineage_buy", node: n.id })}>
                               Prendre <span className="cost num">{RANK_COST[rank]} 🎖️</span>

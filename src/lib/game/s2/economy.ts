@@ -124,6 +124,10 @@ export interface S2State {
   at: number;
   /** Production livrée sur la saison, en valeur pierre (classement de richesse). */
   produced: number;
+  /** S10, Lignée (fixés à chaque calcul, jamais lus de la base) : Cave profonde, heures de stock local en plus. */
+  stockBonusHours?: number;
+  /** Charpentiers : convois plus rapides (part). */
+  convoySpeed?: number;
 }
 
 export function newS2State(now: number): S2State {
@@ -163,12 +167,12 @@ export function convoyIntervalMs(s: S2State): number {
   return Math.max(20, 60 - 2 * s.bld.relais) * 60_000;
 }
 export function localCap(s: S2State, c: Concession, map: S2Map): number {
-  return concessionRate(s, c, map) * (LOCAL_STOCK_HOURS + 0.5 * s.bld.entrepot);
+  return concessionRate(s, c, map) * (LOCAL_STOCK_HOURS + 0.5 * s.bld.entrepot + (s.stockBonusHours ?? 0));
 }
 /** Trajet d'un convoi : 2 min par case (Tchebychev), plafonné à 45 min, plus rapide avec le relais et en Plaine. */
 export function convoyTravelMs(s: S2State, from: Pos, to: Pos): number {
   const base = Math.min(45, 2 * cheb(from, to)) * 60_000;
-  return Math.round(base / ((1 + 0.03 * s.bld.relais) * (s.region === "plaine" ? 1.1 : 1)));
+  return Math.round(base / ((1 + 0.03 * s.bld.relais) * (s.region === "plaine" ? 1.1 : 1) * (1 + (s.convoySpeed ?? 0))));
 }
 /** Stock du château à l'abri des raids : 15 min de production par niveau d'entrepôt (au moins 30 min). */
 export function safeHours(s: S2State): number {

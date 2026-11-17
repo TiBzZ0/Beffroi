@@ -2,6 +2,8 @@
 // Le renom se gagne par des actions et ne grossit pas avec la production. Il repart de zéro à chaque saison.
 // La Lignée : trois branches de neuf nœuds sur quatre rangs, achetés en renom ; un seul nœud de rang 4 en tout.
 
+import { s2GeometryOn } from "./config";
+
 export type RenownSource = "raid" | "defense" | "lord" | "recon" | "quest" | "event" | "podium" | "stage" | "gift" | "rift";
 
 /** Renom par action, et limite par jour (heure de Paris). */
@@ -38,6 +40,18 @@ export interface LineageNode {
   icon: string;
   name: string;
   effect: string;
+}
+
+/** S10 : texte des nœuds dont le sens change en saison 2 (plus d'ateliers ni de ruines d'ateliers). */
+const EFFECT_S2: Record<string, string> = {
+  main_oeuvre: "Bâtiments d'appui 5 % moins chers.",
+  cave: "+30 min de stock local sur tes concessions.",
+  charpentiers: "Convois 10 % plus rapides.",
+  fondations: "Sans effet en saison 2 (les concessions ne tombent pas en ruine).",
+  architecte: "Une fois par jour, un convoi ne peut pas être attaqué (avec les combats de convois).",
+};
+export function nodeEffect(n: Pick<LineageNode, "id" | "effect">): string {
+  return (s2GeometryOn() && EFFECT_S2[n.id]) || n.effect;
 }
 
 export const NODES: LineageNode[] = [

@@ -33,6 +33,8 @@ export interface DailyContext {
   levels: number;
   /** E4 : niveau d'espionnage (la quête « reconnaissance » le demande). */
   spyLevel?: number;
+  /** S10 : en saison 2, plus d'ateliers à acheter. */
+  s2?: boolean;
 }
 
 const DAY_MS = 86_400_000;
@@ -64,6 +66,7 @@ export function seedOf(userId: string, day: number): number {
 }
 
 function feasible(id: DailyQuestId, ctx: DailyContext): boolean {
+  if (id === "ateliers") return !ctx.s2;
   if (id === "don") return ctx.shareSize !== null && ctx.shareSize > 0;
   if (id === "savoir") return ctx.upgradesLeft > 0;
   if (id === "seigneur") return ctx.troops > 0;

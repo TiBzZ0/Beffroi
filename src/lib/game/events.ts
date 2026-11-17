@@ -1,5 +1,5 @@
 // Tirage des événements du royaume.
-import { EVENT_MIN_ONLINE, EVENT_WEIGHTS, type EventKind } from "./config";
+import { EVENT_MIN_ONLINE, EVENT_WEIGHTS, s2GeometryOn, type EventKind } from "./config";
 import { battle, seededRng, type Army } from "./battle";
 
 /** Prochain événement : tiré au sort selon les poids, jamais deux fois de suite le même (tirage fixé par le précédent). */
@@ -64,6 +64,8 @@ export function isNight(t: number): boolean {
 
 /** Tirage qui saute les événements de groupe quand trop peu de joueurs sont en ligne, et les événements de combat la nuit (G4). */
 export function drawNextEvent(lastKind: string, seed: number, online: number, startAt?: number): EventKind {
+  // S10 (saison 2, vague A) : seuls le tournoi et le colosse restent, les autres supposaient une production au château.
+  if (s2GeometryOn()) return lastKind === "colosse" ? "tournoi" : "colosse";
   const night = startAt !== undefined && isNight(startAt);
   const ok = (k: EventKind) => (EVENT_MIN_ONLINE[k] ?? 0) <= online && (!night || NIGHT_EVENTS.includes(k));
   let kind = pickNextEvent(lastKind, seed);

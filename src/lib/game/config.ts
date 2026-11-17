@@ -331,6 +331,17 @@ export const QUESTS = [
   { id: "push", label: "Active les notifications", goal: 1 },
 ] as const;
 export type QuestId = (typeof QUESTS)[number]["id"];
+/** S10 : en saison 2, les quêtes d'ateliers et de clics deviennent des quêtes de carte, de concessions et de seigneurs. */
+const QUESTS_S2: Partial<Record<QuestId, { label: string; goal: number }>> = {
+  clicks: { label: "Pose ton château sur la carte", goal: 1 },
+  workshop: { label: "Prends une deuxième concession", goal: 1 },
+  workshops: { label: "Bâtis un bâtiment d'appui", goal: 1 },
+  lord: { label: "Bats la garnison d'un hobereau", goal: 1 },
+};
+export function questDef(i: number): { id: QuestId; label: string; goal: number } {
+  const q = QUESTS[i];
+  return { id: q.id, ...(s2Geometry && QUESTS_S2[q.id] ? QUESTS_S2[q.id]! : { label: q.label, goal: q.goal }) };
+}
 /** Quêtes du jour : trois par jour (une par famille), tirées à 4 h UTC. Aucune ne demande d'attaquer un joueur. */
 export type DailyFamily = "batir" | "combattre" | "participer";
 export const DAILY_QUESTS = [
@@ -792,6 +803,9 @@ export function stagePerkNow(key: "guardianWeak" | "companies"): number {
   let sum = 0;
   for (let i = 0; i < Math.min(stagesDoneNow, STAGES.length); i++) sum += STAGES[i].bonus[key] ?? 0;
   return sum;
+}
+export function s2GeometryOn(): boolean {
+  return s2Geometry;
 }
 export function travelMaxMin(): number {
   return s2Geometry ? 45 : TRAVEL_MAX_MIN;
