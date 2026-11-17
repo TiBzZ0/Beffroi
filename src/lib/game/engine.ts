@@ -436,6 +436,8 @@ export interface March {
   /** Butin et rançon rapportés, crédités au retour. */
   loot: number;
   ransom: number;
+  /** Saison 2 : butin d'un fief de seigneur, dans les trois monnaies, crédité au retour. */
+  lootS2?: { pierre: number; fer: number; or: number };
   /** Ce qui s'est passé à l'arrivée, pour l'affichage. */
   outcome?: "won" | "lost" | "turned" | "recalled";
   /** R3 : renforts d'alliés emmenés en raid, par propriétaire ; ils rentrent chez l'hôte au retour. */
@@ -507,11 +509,13 @@ export function landMarch(state: PlayerState, id: string): PlayerState {
     for (const [u, n] of Object.entries(group) as [string, number][]) if (n > 0) g[u] = (g[u] ?? 0) + n;
     if (Object.keys(g).length > 0) stationed[owner] = g as PlayerState["stationed"][string];
   }
+  const s2 = m.lootS2 && state.s2 ? { ...state.s2, iron: state.s2.iron + m.lootS2.fer, gold: state.s2.gold + m.lootS2.or } : state.s2;
   return {
     ...state,
     stationed,
     troops: troops as PlayerState["troops"],
-    stone: state.stone + gain,
+    ...(s2 ? { s2 } : {}),
+    stone: state.stone + gain + (m.lootS2 && state.s2 ? m.lootS2.pierre : 0),
     totalPlundered: state.totalPlundered + m.loot,
     marches: (state.marches ?? []).filter((x) => x.id !== id),
   };
@@ -1421,6 +1425,8 @@ export interface RaidContext {
   lordLootCap?: number;
   /** Saison 1 : butin fixe pris à un seigneur (minutes de production de base selon son niveau, bornées par le tribut). */
   lordLootFixed?: number;
+  /** Saison 2 : niveaux de combat de la garnison d'un seigneur (sinon ceux de la victime). */
+  defenderLevels?: Levels;
   /** Tirages aléatoires entre 0 et 1 (fournis pour des tests reproductibles). */
   rng: () => number;
 }
@@ -1460,11 +1466,11 @@ export function withAllies(own: Army, allies?: Record<string, Army>): Army {
   return cleanArmy(out as Army);
 }
 
-export function raidArmies(attacker: PlayerState, victim: PlayerState, ctx: Pick<RaidContext, "attackerArmy" | "defenderArmy" | "victimId" | "now" | "stagesDone" | "allyArmies" | "attackerIsLord">) {
+export function raidArmies(attacker: PlayerState, victim: PlayerState, ctx: Pick<RaidContext, "attackerArmy" | "defenderArmy" | "victimId" | "now" | "stagesDone" | "allyArmies" | "attackerIsLord" | "defenderLevels">) {
   // Le coup de pouce de la victime rend ses défenseurs plus durs à abattre.
   const sturdy = (masterActive(victim, "defense", ctx.now) ? 1 + MASTER_BONUSES.defense.value : 1) * (ctx.defenderArmy ? 1 : 1 + stagePerk(ctx.stagesDone ?? 0, "defenseHp")) * (ctx.defenderArmy ? 1 : reinforcementStrength(victim) * rampartStrength(victim));
   const attackBonus = ((hasRevenge(attacker, ctx.victimId, ctx.now) ? REVENGE_ATTACK_BONUS : 1) + (ctx.attackerIsLord ? 0 : warAttack(attacker))) / (1 + (victim.catchUp ?? 0)) / sturdy;
-  const opts: BattleOptions = { ...(ctx.attackerIsLord ? {} : warOpts(attacker)), attackBonus, attackerLevels: combatLevels(attacker), defenderLevels: combatLevels(victim), fortune: ctx.attackerIsLord ? false : warFortune(attacker), attackerBoost: armyBoost(attacker, "attack"), defenderBoost: armyBoost(victim, "defense") };
+  const opts: BattleOptions = { ...(ctx.attackerIsLord ? {} : warOpts(attacker)), attackBonus, attackerLevels: combatLevels(attacker), defenderLevels: ctx.defenderLevels ?? combatLevels(victim), fortune: ctx.attackerIsLord ? false : warFortune(attacker), attackerBoost: armyBoost(attacker, "attack"), defenderBoost: armyBoost(victim, "defense") };
   return {
     attack: ctx.attackerArmy ? withAllies(ctx.attackerArmy, ctx.allyArmies) : attackArmy(attacker),
     defense: ctx.defenderArmy ?? defenseArmy(victim),

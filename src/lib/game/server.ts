@@ -264,7 +264,7 @@ import { COMPANY_CAP, COMPANY_VALUE, FIXED_EVENT_COMPANIES, FIXED_TRAIN, FORTRES
 import { castleBlocker, generateMap, regionAt, type Resource, type S2Map } from "./s2/map";
 import { s2Map, setS2Map, s2Enabled } from "./s2/rules";
 import { build, buyConcession, cleanS2, dropConcession, exchangeBlocker, firstConcessionSites, marketQuote, takeConcession, upgradeConcession, type BuildingId } from "./s2/economy";
-import { cleanLordS2 } from "./s2/lords";
+import { afterDefeat, cleanLordS2, fiefLoot, garrison, settleFief } from "./s2/lords";
 import { buyNode, cleanLineage, lin, lineageMark, LIN_GENERATOR_DISCOUNT, LIN_MOLE, LIN_SPY_CATCH, NODE_BY_ID, parisDay, RENOWN, RENOWN_GIFT_SEASON, renownAvailable, respec, type RenownSource } from "./lineage";
 import { notify, notifyEach, type PushMessage } from "@/lib/push";
 
@@ -3279,6 +3279,7 @@ function cleanMarches(raw: unknown): March[] {
       ...((WING_IDS as string[]).includes(m.wing) ? { wing: m.wing as WingId } : {}),
       loot: Math.max(0, Number(m.loot) || 0),
       ransom: Math.max(0, Number(m.ransom) || 0),
+      ...(m.lootS2 && typeof m.lootS2 === "object" ? { lootS2: { pierre: Math.max(0, Number(m.lootS2.pierre) || 0), fer: Math.max(0, Number(m.lootS2.fer) || 0), or: Math.max(0, Number(m.lootS2.or) || 0) } } : {}),
       ...(["won", "lost", "turned", "recalled"].includes(m.outcome) ? { outcome: m.outcome } : {}),
       ...(m.allies && typeof m.allies === "object"
         ? { allies: Object.fromEntries(Object.entries(m.allies as Record<string, unknown>).map(([o, g]) => [o, armyCounts((g ?? {}) as Record<string, number>, UNIT_IDS) as Army]).filter(([, g]) => armySize(g as Army) > 0)) }
@@ -3558,6 +3559,10 @@ async function settleMarches(
   const aRate = currentRate(owner, aState, at, world, flat);
   const aBase = baseRate(aState, world, at);
   const vRate = currentRate(victim, vState, at, world, flat);
+  // Saison 2 (S7) : la garnison d'un seigneur est faite de vraies compagnies ; le butin se prend dans son fief.
+  const mapLord = victim.isLord && !owner.isLord ? s2Map()?.lords.find((l) => l.id === victim.id) : undefined;
+  const fief = mapLord ? settleFief(s2Map()!, mapLord, cleanLordS2(vState.lordS2, at), currentSeasonStart, at) : undefined;
+  const held = mapLord && fief ? garrison(mapLord, fief, currentSeasonStart, at) : undefined;
   const ctx = {
     now: at,
     attackerId: owner.id,
@@ -3565,7 +3570,8 @@ async function settleMarches(
     victimRate: vRate,
     victimBaseRate: victim.isLord ? vRate : baseRate(vState, world, at),
     stagesDone: stagesDoneAt(world, at),
-    defenderArmy: victim.isLord ? lordArmies(entities, world, at, flat).get(victim.id)?.defense : undefined,
+    defenderArmy: held ? held.army : victim.isLord ? lordArmies(entities, world, at, flat).get(victim.id)?.defense : undefined,
+    defenderLevels: held?.levels,
     allied: isAllied(owner, victim),
     atWar: !!warBetween(wars, owner.allianceId, victim.allianceId, at),
     attackerRate: aRate,
@@ -3574,7 +3580,7 @@ async function settleMarches(
     allyArmies: m.allies,
     lordFairness: victim.isLord && !owner.isLord ? lordFairness(victim.id, aRate) : undefined,
     lordLootCap: victim.isLord && !owner.isLord ? lordLootCapOf(aState, aBase, at) : undefined,
-    lordLootFixed: victim.isLord && !owner.isLord && currentCompanyModel ? lordLootS1(victim.id, aState, aBase, at) : undefined,
+    lordLootFixed: held ? 0 : victim.isLord && !owner.isLord && currentCompanyModel ? lordLootS1(victim.id, aState, aBase, at) : undefined,
     attackerIsLord: owner.isLord,
     marching: true,
     allowRepeat: true,
@@ -3584,6 +3590,8 @@ async function settleMarches(
   const fight = resolveRaid(aState, vState, { ...ctx, rng: Math.random });
   if (!fight.ok) return commit(owner, replace(owner.state, turn("turned")));
   const rep = fight.value.report;
+  const lootS2 = held && fief && rep.success ? fiefLoot(fief, held.companies, currentSeasonStart, at) : undefined;
+  if (fief) fight.value.victim = { ...fight.value.victim, lordS2: rep.success ? afterDefeat(fief, at) : fief };
   // V13 : un seigneur repoussé sous la lune rouge laisse une rançon au défenseur.
   const moonRansom = owner.isLord && !rep.success && eventActive(vState, "lune", at) ? Math.floor(armyValue(m.troops) * RED_MOON_RANSOM) : 0;
   if (moonRansom > 0) fight.value.victim = { ...fight.value.victim, stone: fight.value.victim.stone + moonRansom };
@@ -3594,10 +3602,10 @@ async function settleMarches(
   const survivors = minus(m.troops, ownLost);
   const alliesBack = Object.fromEntries(Object.entries(m.allies ?? {}).map(([o, g]) => [o, minus(g, allyLost[o] ?? {})]).filter(([, g]) => armySize(g as Army) > 0)) as Record<string, Army>;
   const allyTotal = Object.values(rep.allyShares ?? {}).reduce((a, b) => a + b, 0);
-  const back: March = { ...m, troops: survivors, status: "back", returnAt: at + outMs, loot: Math.max(0, rep.stolen - allyTotal), ransom: rep.ransom, outcome: rep.success ? "won" : "lost", ...(Object.keys(alliesBack).length > 0 ? { allies: alliesBack } : { allies: undefined }) };
+  const back: March = { ...m, troops: survivors, status: "back", returnAt: at + outMs, loot: Math.max(0, rep.stolen - allyTotal), ransom: rep.ransom, outcome: rep.success ? "won" : "lost", ...(lootS2 ? { lootS2 } : {}), ...(Object.keys(alliesBack).length > 0 ? { allies: alliesBack } : { allies: undefined }) };
   // G5 : le butin pris à un seigneur vide d'autant le « Tribut des seigneurs ».
   if (victim.isLord && !owner.isLord && rep.stolen > 0) fight.value.attacker = { ...fight.value.attacker, tribute: spendTribute(aState, rep.stolen, aBase, at) };
-  const attackerAfter = replace(fight.value.attacker, armySize(survivors) > 0 || Object.keys(alliesBack).length > 0 || back.loot + back.ransom > 0 ? back : null);
+  const attackerAfter = replace(fight.value.attacker, armySize(survivors) > 0 || Object.keys(alliesBack).length > 0 || back.loot + back.ransom > 0 || !!lootS2 ? back : null);
   const allyStates = Object.keys(m.allies ?? {}).flatMap((o) => {
     const ally = entities.get(o);
     if (!ally || ally.isLord) return [];
@@ -3629,7 +3637,7 @@ async function settleMarches(
   }
   if (!owner.isLord) {
     notify(admin, [owner.id], rep.success
-      ? { title: "⚔️ Raid réussi", body: `Contre ${victim.name} : ${Math.floor(rep.stolen + rep.ransom).toLocaleString("fr-FR")} pierres rapportées au retour.`, tag: "raid" }
+      ? { title: "⚔️ Raid réussi", body: lootS2 ? `Contre ${victim.name} : ${lootS2.pierre.toLocaleString("fr-FR")} pierres, ${lootS2.fer.toLocaleString("fr-FR")} fer et ${lootS2.or.toLocaleString("fr-FR")} or rapportés au retour.` : `Contre ${victim.name} : ${Math.floor(rep.stolen + rep.ransom).toLocaleString("fr-FR")} pierres rapportées au retour.`, tag: "raid" }
       : { title: "💀 Raid repoussé", body: `${victim.name} a tenu. Tes survivants rentrent.`, tag: "raid" });
   }
   return "changed";
