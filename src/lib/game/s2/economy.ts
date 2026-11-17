@@ -128,6 +128,8 @@ export interface S2State {
   stockBonusHours?: number;
   /** Charpentiers : convois plus rapides (part). */
   convoySpeed?: number;
+  /** Grands chariots : charge des convois en plus (part, ajoutée à la charronnerie). */
+  loadBonus?: number;
 }
 
 export function newS2State(now: number): S2State {
@@ -161,7 +163,7 @@ export function concessionRate(s: S2State, c: Concession, map: S2Map): number {
 /** Charge d'un convoi : 60 min de production de base de la concession, +10 % par niveau de charronnerie. */
 export function convoyLoad(s: S2State, c: Concession, map: S2Map): number {
   const site = map.sites[c.site];
-  return site ? BASE_PROD[site.type] * siteFactor(site.places) * (1 + 0.1 * s.bld.charronnerie) : 0;
+  return site ? BASE_PROD[site.type] * siteFactor(site.places) * (1 + 0.1 * s.bld.charronnerie + (s.loadBonus ?? 0)) : 0;
 }
 export function convoyIntervalMs(s: S2State): number {
   return Math.max(20, 60 - 2 * s.bld.relais) * 60_000;

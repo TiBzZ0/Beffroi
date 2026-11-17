@@ -47,7 +47,7 @@ const EFFECT_S2: Record<string, string> = {
   main_oeuvre: "Bâtiments d'appui 5 % moins chers.",
   cave: "+30 min de stock local sur tes concessions.",
   charpentiers: "Convois 10 % plus rapides.",
-  fondations: "Sans effet en saison 2 (les concessions ne tombent pas en ruine).",
+  fondations: "Grands chariots : charge des convois +25 %.",
   architecte: "Une fois par jour, un convoi ne peut pas être attaqué (avec les combats de convois).",
 };
 export function nodeEffect(n: Pick<LineageNode, "id" | "effect">): string {

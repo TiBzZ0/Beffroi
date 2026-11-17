@@ -1740,7 +1740,7 @@ async function loadEventInner(admin: SupabaseClient, seasonId: number, now: numb
     const finished = (ms(e.ends_at) <= now || (e.kind === "colosse" && armySize(e.army) === 0)) && !(GROUP_EVENTS.includes(e.kind) && !e.data.resolved);
     const next = drawNextEvent(e.kind, e.id * 7919 + seasonId, online, ms(e.ends_at) + EVENT_GAP_MS);
     if (!finished) return { active: e, levels: medianLevels(entities), nextAt: ms(e.ends_at) + EVENT_GAP_MS, nextKind: next };
-    if (COMBAT_EVENTS.includes(e.kind)) await admin.rpc("settle_event_v2", { p_event: e.id, p_bonus: killBonus(e, entities, now, world, flat) });
+    if (COMBAT_EVENTS.includes(e.kind)) await admin.rpc("settle_event_v2", { p_event: e.id, p_bonus: killBonus(e, entities, now, world, flat), ...(s2Map() ? { p_iron: true } : {}) });
     else await admin.from("events").update({ settled: true }).eq("id", e.id).eq("settled", false);
   }
   const { data: last } = await admin.from("events").select("id, kind, ends_at").eq("season_id", seasonId).order("ends_at", { ascending: false }).limit(1).maybeSingle();
@@ -1827,7 +1827,8 @@ function killBonus(e: EventRow, entities: Map<string, Entity>, now: number, worl
   for (const id of Object.keys(e.attackers)) {
     const ent = entities.get(id);
     if (!ent) continue;
-    out[id] = Math.floor(currentRate(ent, advance(ent.state, now, world), now, world, flat) * COLOSSUS_KILL_SECONDS);
+    // Saison 2 : versé en fer (à valeur égale), voir settle_event_v2(p_iron).
+    out[id] = Math.floor((currentRate(ent, advance(ent.state, now, world), now, world, flat) * COLOSSUS_KILL_SECONDS) / (s2Map() ? VALUE.fer : 1));
   }
   return out;
 }
@@ -1856,6 +1857,7 @@ async function runEventAttack(admin: SupabaseClient, seasonId: number, me: Entit
   const pool = e.pool;
   let message: string;
   let taken = 0;
+  let ironPrize = 0;
   if (e.kind === "caravane") {
     // A14 : sa propre escorte, et 45 minutes de sa propre production en cas de victoire.
     taken = fight.success ? Math.floor(rate * CARAVAN_PRIZE_SECONDS) : 0;
@@ -1870,18 +1872,24 @@ async function runEventAttack(admin: SupabaseClient, seasonId: number, me: Entit
     attackers[me.id] = (attackers[me.id] ?? 0) + dealt;
     // A15 : prime immédiate de 2 fois les pertes infligées (sauf colosse lancé avant cette règle, à prime commune).
     taken = e.pool > 0 ? 0 : Math.floor(dealt * COLOSSUS_BOUNTY);
-    after = { ...after, stone: after.stone + taken };
+    // Saison 2 : la prime se paie en fer (à valeur égale).
+    if (after.s2) {
+      ironPrize = Math.floor(taken / VALUE.fer);
+      taken = 0;
+      after = { ...after, s2: { ...after.s2, iron: after.s2.iron + ironPrize } };
+    } else after = { ...after, stone: after.stone + taken };
+    const prizeText = ironPrize > 0 ? `${ironPrize.toLocaleString("fr-FR")} fer` : `${Math.round(taken).toLocaleString("fr-FR")} pierres`;
     message =
       armySize(army) === 0
         ? e.pool > 0
           ? `🗿 Le Colosse est abattu ! La prime de ${Math.round(pool).toLocaleString("fr-FR")} pierres est partagée selon les pertes infligées.`
-          : `🗿 Le Colosse est abattu ! +${Math.round(taken).toLocaleString("fr-FR")} pierres de prime, et chaque joueur qui l'a touché reçoit 15 minutes de sa production.`
-        : `🗿 Tu as fauché ${describeArmy(fight.defenderLost) || "personne"}${taken > 0 ? ` : +${Math.round(taken).toLocaleString("fr-FR")} pierres de prime` : ""}. Tes pertes : ${describeArmy(fight.attackerLost)}.`;
+          : `🗿 Le Colosse est abattu ! +${prizeText} de prime, et chaque joueur qui l'a touché reçoit 15 minutes de sa production${ironPrize > 0 ? " en fer" : ""}.`
+        : `🗿 Tu as fauché ${describeArmy(fight.defenderLost) || "personne"}${taken + ironPrize > 0 ? ` : +${prizeText} de prime` : ""}. Tes pertes : ${describeArmy(fight.attackerLost)}.`;
   }
   if (march) {
     // Les survivants et la prime rentrent par la route.
-    const back: March = { ...march, troops: cleanArmy(mine.troops as Army), status: "back", returnAt: now + (march.arriveAt - march.departAt), loot: taken, outcome: fight.success || e.kind === "colosse" ? "won" : "lost" };
-    const keep = armySize(back.troops) > 0 || taken > 0;
+    const back: March = { ...march, troops: cleanArmy(mine.troops as Army), status: "back", returnAt: now + (march.arriveAt - march.departAt), loot: taken, ...(ironPrize > 0 ? { lootS2: { pierre: 0, fer: ironPrize, or: 0 } } : {}), outcome: fight.success || e.kind === "colosse" ? "won" : "lost" };
+    const keep = armySize(back.troops) > 0 || taken + ironPrize > 0;
     after = addWounded({ ...current, stone: current.stone, marches: (current.marches ?? []).flatMap((x) => (x.id === march.id ? (keep ? [back] : []) : [x])) }, woundedOf(fight.attackerLost, fight.success ? WOUNDED_WINNER : WOUNDED_ATTACKER_BEATEN), now);
   }
   const { data, error } = await admin.rpc("apply_event", {
@@ -3756,7 +3764,9 @@ async function resolveGroupEvent(
       const x = entities.get(id);
       if (!x) return [];
       const s = advanceEntity(x, at, world, flat);
-      return [{ e: x, state: { ...s, stone: s.stone + Math.floor(rateOf(x, s) * TOURNEY_PRIZES_SECONDS[i]) } }];
+      const prize = rateOf(x, s) * TOURNEY_PRIZES_SECONDS[i];
+      // Saison 2 : le podium est payé en fer (à valeur égale).
+      return [{ e: x, state: s.s2 ? { ...s, s2: { ...s.s2, iron: s.s2.iron + Math.floor(prize / VALUE.fer) } } : { ...s, stone: s.stone + Math.floor(prize) } }];
     });
     const r = await write(states, { ...ev.data, resolved: true, podium });
     if (r === "changed") {

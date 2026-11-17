@@ -790,8 +790,8 @@ export function advance(state: PlayerState, now: number, world: WorldState, opts
     // Saison 2 : les concessions produisent, les convois rapportent ; un multiplicateur commun (élan, bonus…) par segment.
     const base = productionValue(state.s2, map) / 3600;
     const multiplier = (t: number) => (base > 0 ? rateAt(state, world, t, opts) / base : 1);
-    // S10 : Cave profonde (+30 min de stock local) et Charpentiers (convois 10 % plus rapides).
-    const perked = { ...state.s2, stockBonusHours: lin(state, "cave") ? 0.5 : 0, convoySpeed: lin(state, "charpentiers") ? 0.1 : 0 };
+    // S10 : Cave profonde (+30 min de stock local), Charpentiers (convois 10 % plus rapides), Grands chariots (charge +25 %).
+    const perked = { ...state.s2, stockBonusHours: lin(state, "cave") ? 0.5 : 0, convoySpeed: lin(state, "charpentiers") ? 0.1 : 0, loadBonus: lin(state, "fondations") ? 0.25 : 0 };
     const { s: s2, arrived } = settleS2(perked, { map, stageConcessions: stagesDoneAt(world, now) >= 1 ? 1 : 0, multiplier, breakpoints: events.filter((t) => t > state.s2!.at && t < now) }, now);
     const toBelfry = stagesDoneAt(world, now) < TOTAL_STAGES ? arrived.pierre * tithe : 0;
     const value = arrived.pierre + arrived.fer * 2 + arrived.or * 4;
