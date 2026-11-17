@@ -387,11 +387,23 @@ export function upgradeConcession(s: S2State, id: string, map: S2Map, now: numbe
 /** Ravitaille une concession depuis le château : un convoi part tout de suite et remplit sa réserve à l'arrivée. */
 export function supplyBlocker(s: S2State, id: string, have: Record<Resource, number>, res: unknown, amount: number): string | null {
   if (!s.castle) return "Pose d'abord ton château.";
-  if (!s.conc.some((c) => c.id === id)) return "Concession inconnue.";
+  const c = s.conc.find((x) => x.id === id);
+  if (!c) return "Concession inconnue.";
   if (res !== "pierre" && res !== "fer" && res !== "or") return "Ressource inconnue.";
   if (!Number.isInteger(amount) || amount < 1) return "Quantité invalide.";
   if (amount > have[res]) return "Pas assez au château.";
+  const room = fundRoom(s, c);
+  if (room <= 0) return c.level + (c.upUntil ? 1 : 0) >= CONCESSION_MAX_LEVEL ? "Concession au niveau maximal : plus besoin de réserve." : "Réserve pleine : elle couvre déjà les deux prochains niveaux.";
+  if (amount * VALUE[res] > room + 1e-6) return `Trop : la réserve accepte encore ${Math.floor(room / VALUE[res]).toLocaleString("fr-FR")} ${res}.`;
   return null;
+}
+/** Place restante dans la réserve, en valeur pierre : le coût des deux prochains niveaux, moins la réserve et les ravitaillements en route. */
+export function fundRoom(s: S2State, c: Concession): number {
+  const base = c.level + (c.upUntil ? 1 : 0);
+  let cap = 0;
+  for (let n = base + 1; n <= Math.min(CONCESSION_MAX_LEVEL, base + 2); n++) cap += concessionCost(n);
+  const inFlight = s.convoys.filter((v) => v.dest === "concession" && v.conc === c.id).reduce((a, v) => a + v.load * VALUE[v.res], 0);
+  return cap - (c.fund ?? 0) - inFlight;
 }
 export function supplyConcession(s: S2State, id: string, map: S2Map, res: Resource, amount: number, now: number): S2State {
   const c = s.conc.find((x) => x.id === id)!;

@@ -25,6 +25,7 @@ import {
   convoyLoad,
   concessionBudget,
   supplyBlocker,
+  fundRoom,
   VALUE,
   PACES,
   type Pace,
@@ -397,7 +398,7 @@ export function S2Domain({ snap, live, now, run }: { snap: GameSnapshot; live: P
                   <button className="btn btn-small" disabled title="Bientôt : envoyer les convois à un membre de ton alliance.">🤝 Allié</button>
                 </div>
                 <div className="row-desc">
-                  🧱 Réserve de chantier {formatNumber(c.fund ?? 0)} · avec le stock, {formatNumber(budget)} disponibles pour ses travaux (valeur pierre).
+                  🧱 Réserve de chantier {formatNumber(c.fund ?? 0)} · avec le stock, {formatNumber(budget)} disponibles pour ses travaux (valeur pierre).{c.level < CONCESSION_MAX_LEVEL && ` La réserve accepte encore ${formatNumber(Math.max(0, fundRoom(s2, c)))}.`}
                   {incoming.length > 0 && ` Ravitaillement en route : ${formatNumber(incoming.reduce((a, v) => a + v.load * VALUE[v.res], 0))}, arrivée dans ${minutes(Math.min(...incoming.map((v) => v.arrive)) - now)} min.`}
                 </div>
                 <div className="s2-settings">

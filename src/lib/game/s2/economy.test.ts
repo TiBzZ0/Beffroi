@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { generateMap, type S2Map } from "./map";
-import { build, buyConcession, localCap, setConcession, concessionRate, convoyLoad, firstConcessionSites, marketQuote, newS2State, REF, settleS2, stockFull, takeConcession, supplyConcession, upgradeConcession, VALUE, type S2State } from "./economy";
+import { build, buyConcession, localCap, setConcession, supplyBlocker, concessionRate, convoyLoad, firstConcessionSites, marketQuote, newS2State, REF, settleS2, stockFull, takeConcession, supplyConcession, upgradeConcession, VALUE, type S2State } from "./economy";
 
 const T0 = Date.parse("2026-12-07T15:00:00Z");
 const H = 3_600_000;
@@ -82,7 +82,12 @@ describe("S2 : économie", () => {
     // Rien en réserve ni en stock : il faut ravitailler la concession.
     s = { ...s, conc: s.conc.map((c) => ({ ...c, stock: 0 })) };
     expect(upgradeConcession(s, s.conc[0].id, map, T0).ok).toBe(false);
+    // Plafond : le coût des deux prochains niveaux (450 + 675).
+    const have = { pierre: 1e6, fer: 1e6, or: 1e6 };
+    expect(supplyBlocker(s, s.conc[0].id, have, "pierre", 1_126)).not.toBeNull();
+    expect(supplyBlocker(s, s.conc[0].id, have, "pierre", 1_125)).toBeNull();
     s = supplyConcession(s, s.conc[0].id, map, "pierre", 300, T0);
+    expect(supplyBlocker(s, s.conc[0].id, have, "pierre", 826)).not.toBeNull();
     const arrive = s.convoys[s.convoys.length - 1].arrive;
     s = settleS2(s, ctx(), arrive).s;
     expect(s.conc[0].fund).toBe(300);
