@@ -5,6 +5,7 @@
 // un plafond d'effectif, un entraînement et un temps de recrutement. Les hommes d'un type se répartissent entre
 // les compagnies de ce type dans l'ordre (la première se remplit d'abord).
 import type { Army, Levels } from "./battle";
+import { REF } from "./s2/economy";
 import { DEFENSES, LEVEL_BONUS, UNITS, type CombatantId, type DefenseId, type UnitId } from "./config";
 
 export interface Company {
@@ -266,7 +267,20 @@ export function fortsFromLevels(levels: Partial<Record<DefenseId, number>> | und
 const REF_RATE: [number, number][] = [
   [0, 30], [0.25, 1e3], [0.5, 1e4], [1, 1e5], [2, 6e5], [3.5, 3e6], [6, 8e6], [12, 3e7], [24, 1e8], [48, 4e8], [72, 1.6e9], [96, 7e9], [144, 1e10],
 ];
+/** Saison 2 : l'armée se paie en fer (prix en pierre ÷ 100), l'entraînement aussi ; la courbe de référence suit REF(j). */
+let ironArmy = false;
+export function setIronArmy(on: boolean): void {
+  ironArmy = on;
+}
+export function ironArmyOn(): boolean {
+  return ironArmy;
+}
+/** Concessions d'un joueur actif selon l'âge de la saison (1, 2 dès la première étape, puis achetées en or). */
+function s2Concessions(hours: number): number {
+  return hours < 12 ? 1 : hours < 48 ? 2 : hours < 120 ? 3 : hours < 216 ? 4 : 5;
+}
 export function refRate(hours: number): number {
+  if (ironArmy) return (REF(hours / 24) * s2Concessions(hours)) / 3600;
   const h = Math.max(0, hours);
   for (let i = 1; i < REF_RATE.length; i++) {
     const [h1, r1] = REF_RATE[i];
@@ -288,6 +302,7 @@ export function barracksCost(s: ArmyHolder): number {
 }
 
 export function trainCost(c: Pick<Company, "train">): number {
+  if (ironArmy) return Math.round(500 * 1.6 ** c.train);
   // Moment habituel : une demi-heure pour lever la compagnie, puis les entraînements précédents.
   let at = 0.5;
   for (let k = 0; k < c.train; k++) at += trainMs({ train: k }) / HOUR;
@@ -311,7 +326,7 @@ export function fortMs(level: number): number {
 
 export function recruitPrice(unit: UnitId, n: number, discount = 1): number {
   const def = UNITS.find((u) => u.id === unit);
-  return Math.ceil((def?.cost ?? 0) * n * discount);
+  return Math.ceil(((def?.cost ?? 0) * n * discount) / (ironArmy ? 100 : 1));
 }
 
 // ---------------------------------------------------------------------------

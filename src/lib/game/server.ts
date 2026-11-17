@@ -260,7 +260,7 @@ import { armyForChance, armyFromBudget, armySize, armyValue, battle, cleanArmy, 
 import { recordContribution } from "@/lib/redis";
 import { addRelics, assignCaptain, assignRelic, captainOf, CAPTAIN_COST, cleanCaptains, cleanOffer, cleanRelics, drawTraits, dropRelic, addCaptain, HUNT_TARGETS, expeditionSpeed, makeCaptain, makeRelic, RARITY_LABEL, RELICS, TRAIT_IDS, TRAITS, type Relic, type TraitId } from "./captains";
 import { applyRiftFight, cleanRift, expeditionOpts, floorRenown, floorTrain, guardianBattle, isGuardian, splitLosses, riftFightBlocker, riftFloor, riftOf, riftReturn, riftSend, riftWeek, RIFT_CHEST_EVERY, RIFT_CHEST_SECONDS } from "./rift";
-import { COMPANY_VALUE, FIXED_EVENT_COMPANIES, FIXED_TRAIN, FORTRESS_COMPANIES, LORD_COMPANIES, LORD_RAID_SHARE, LORD_TRAIN, trainLevels, buildBarracks, buildFort, combatLevels, cleanCompanies, cleanFortLevels, cleanRecruits, cleanWorks, createCompany, dissolveCompany, recruit, retypeCompany, startTraining } from "./companies";
+import { COMPANY_CAP, COMPANY_VALUE, FIXED_EVENT_COMPANIES, FIXED_TRAIN, FORTRESS_COMPANIES, LORD_COMPANIES, LORD_RAID_SHARE, LORD_TRAIN, trainLevels, buildBarracks, buildFort, combatLevels, cleanCompanies, cleanFortLevels, cleanRecruits, cleanWorks, createCompany, dissolveCompany, recruit, retypeCompany, setIronArmy, startTraining } from "./companies";
 import { castleBlocker, generateMap, regionAt, type Resource, type S2Map } from "./s2/map";
 import { s2Map, setS2Map, s2Enabled } from "./s2/rules";
 import { build, buyConcession, cleanS2, dropConcession, exchangeBlocker, firstConcessionSites, marketQuote, takeConcession, upgradeConcession, type BuildingId } from "./s2/economy";
@@ -531,9 +531,21 @@ let seasonCache: { season: SeasonView; until: number } | null = null;
  * Saison 2 : la carte de la saison, tirée une fois (graine = identifiant de la saison) et gardée en base, pour qu'un
  * changement du tirage ne déplace jamais les sites d'une saison en cours.
  */
+/**
+ * Saison 2 (S9) : le recrutement et l'entraînement se paient en fer. Les fonctions de companies.ts comptent en
+ * « stone » ; on leur prête le fer à la place, puis on remet chaque monnaie à sa place.
+ */
+function ironPaid(state: PlayerState, f: (s: PlayerState) => { ok: true; value: PlayerState } | { ok: false; error: string }): { ok: true; value: PlayerState } | { ok: false; error: string } {
+  if (!state.s2) return f(state);
+  const r = f({ ...state, stone: state.s2.iron });
+  if (!r.ok) return { ok: false, error: r.error.replace("pierre", "fer") };
+  return { ok: true, value: { ...r.value, stone: state.stone, s2: { ...r.value.s2!, iron: r.value.stone } } };
+}
+
 let mapSeason = -1;
 async function ensureSeasonMap(admin: SupabaseClient, season: SeasonView): Promise<void> {
   setS2Geometry(s2Enabled(season.number));
+  setIronArmy(s2Enabled(season.number));
   if (!s2Enabled(season.number)) {
     setS2Map(null);
     mapSeason = season.id;
@@ -2424,7 +2436,11 @@ function applyS2Action(state: PlayerState, action: Extract<GameAction, { type: "
       const placed = { ...s2, castle: p as [number, number], region: regionAt(map, p as [number, number]), at: now };
       const r = takeConcession(placed, ctx, site, { taken: others.taken }, now);
       if (!r.ok) return r;
-      return done({ ...state, s2: r.value }, "place", { x: p[0], y: p[1], site }, `🏰 Ton château est posé. Première concession : ${map.sites[site].name}.`);
+      // S9 : une compagnie de miliciens pleine, offerte à la pose.
+      let next: PlayerState = { ...state, s2: r.value };
+      const gift = createCompany(next, "milicien", now);
+      if (gift.ok) next = { ...gift.value, troops: { ...gift.value.troops, milicien: (gift.value.troops.milicien ?? 0) + COMPANY_CAP.milicien } };
+      return done(next, "place", { x: p[0], y: p[1], site }, `🏰 Ton château est posé. Première concession : ${map.sites[site].name}. Une compagnie de miliciens t'attend.`);
     }
     case "take": {
       const r = takeConcession(s2, ctx, Number(action.site), { taken: others.taken }, now);
@@ -2515,8 +2531,8 @@ function applySimpleAction(state: PlayerState, action: GameAction, now: number, 
         op === "create" ? createCompany(state, String(action.unit), now)
         : op === "dissolve" ? dissolveCompany(state, id)
         : op === "retype" ? retypeCompany(state, id, String(action.unit))
-        : op === "recruit" ? recruit(state, id, Number(action.qty), now, captainOf(state, id)?.trait === "recruteur" ? 2 : 1)
-        : op === "train" ? startTraining(state, id, now)
+        : op === "recruit" ? ironPaid(state, (s) => recruit(s, id, Number(action.qty), now, captainOf(s, id)?.trait === "recruteur" ? 2 : 1))
+        : op === "train" ? ironPaid(state, (s) => startTraining(s, id, now))
         : op === "barracks" ? buildBarracks(state, now)
         : op === "fort" ? buildFort(state, String(action.unit), now)
         : ({ ok: false, error: "Action inconnue." } as const);
