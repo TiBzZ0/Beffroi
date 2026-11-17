@@ -132,6 +132,14 @@ describe("S2 : économie", () => {
     expect(sent.value.conc[0].stock).toBeCloseTo(after.conc[0].stock - convoyLoad(s, s.conc[0], map), 6);
   });
 
+  it("lancement : production et charge ×3 pendant 24 h", () => {
+    const s = start();
+    const plain = settleS2(s, ctx(), T0 + 10 * H).arrived.pierre;
+    const boosted = settleS2({ ...s, launchUntil: T0 + 24 * H }, ctx(), T0 + 10 * H);
+    expect(boosted.arrived.pierre).toBeGreaterThan(plain * 2.5);
+    expect(stockFull(boosted.s, boosted.s.conc[0], map)).toBe(false);
+  });
+
   it("améliorations, bâtiments et concessions achetées", () => {
     let s = start();
     // Rien en réserve ni en stock : il faut ravitailler la concession.

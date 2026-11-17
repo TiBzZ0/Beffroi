@@ -268,7 +268,7 @@ import { applyRiftFight, cleanRift, expeditionOpts, floorRenown, floorTrain, gua
 import { COMPANY_CAP, COMPANY_VALUE, FIXED_EVENT_COMPANIES, FIXED_TRAIN, FORTRESS_COMPANIES, LORD_COMPANIES, LORD_RAID_SHARE, LORD_TRAIN, trainLevels, buildBarracks, buildFort, combatLevels, cleanCompanies, cleanFortLevels, cleanRecruits, cleanWorks, createCompany, dissolveCompany, recruit, retypeCompany, setIronArmy, startTraining } from "./companies";
 import { castleBlocker, generateMap, regionAt, type Resource, type S2Map } from "./s2/map";
 import { s2Map, setS2Map, s2Enabled } from "./s2/rules";
-import { REF, VALUE, build, buyConcession, cleanS2, dropConcession, shipNow, supplyBlocker, supplyConcession,
+import { REF, VALUE, build, buyConcession, cleanS2, dropConcession, LAUNCH_MS, LAUNCH_MULT, START_STONE, shipNow, supplyBlocker, supplyConcession,
   setConcession, exchangeBlocker, firstConcessionSites, marketQuote, takeConcession, upgradeConcession, type BuildingId } from "./s2/economy";
 import { afterDefeat, cleanLordS2, companiesHome, fiefLoot, garrison, lordTrain, patrolUnit, REFORM_MS, settleFief } from "./s2/lords";
 import { buyNode, cleanLineage, lin, lineageMark, LIN_GENERATOR_DISCOUNT, LIN_MOLE, LIN_SPY_CATCH, NODE_BY_ID, nodeEffect, parisDay, RENOWN, RENOWN_GIFT_SEASON, renownAvailable, respec, type RenownSource } from "./lineage";
@@ -2489,14 +2489,15 @@ function applyS2Action(state: PlayerState, action: Extract<GameAction, { type: "
       const firsts = firstConcessionSites(map, p as [number, number], others.taken);
       const site = firsts.includes(Number(action.site)) ? Number(action.site) : firsts[0];
       if (site === undefined) return { ok: false, error: "Aucune place libre sur une carrière : choisis une autre case." };
-      const placed = { ...s2, castle: p as [number, number], region: regionAt(map, p as [number, number]), at: now };
+      const placed = { ...s2, castle: p as [number, number], region: regionAt(map, p as [number, number]), at: now, launchUntil: now + LAUNCH_MS };
       const r = takeConcession(placed, ctx, site, { taken: others.taken }, now);
       if (!r.ok) return r;
       // S9 : une compagnie de miliciens pleine, offerte à la pose.
-      let next: PlayerState = { ...state, s2: r.value };
+      // Lancement : de la pierre pour bâtir tout de suite, et 24 h de production ×3.
+      let next: PlayerState = { ...state, stone: state.stone + START_STONE, s2: r.value };
       const gift = createCompany(next, "milicien", now);
       if (gift.ok) next = { ...gift.value, troops: { ...gift.value.troops, milicien: (gift.value.troops.milicien ?? 0) + COMPANY_CAP.milicien } };
-      return done(next, "place", { x: p[0], y: p[1], site }, `🏰 Ton château est posé. Première concession : ${map.sites[site].name}. Une compagnie de miliciens t'attend.`);
+      return done(next, "place", { x: p[0], y: p[1], site }, `🏰 Ton château est posé. Première concession : ${map.sites[site].name}. Pour bien démarrer : ${START_STONE.toLocaleString("fr-FR")} pierre, une compagnie de miliciens, et 24 h de production ×${LAUNCH_MULT}.`);
     }
     case "take": {
       const r = takeConcession(s2, ctx, Number(action.site), { taken: others.taken }, now);

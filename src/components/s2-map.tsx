@@ -25,6 +25,7 @@ import {
   convoyLoad,
   concessionBudget,
   supplyBlocker,
+  LAUNCH_MULT,
   BANDIT_HIGH,
   fundRoom,
   VALUE,
@@ -351,6 +352,9 @@ export function S2Domain({ snap, live, now, run }: { snap: GameSnapshot; live: P
         <span>⚔️ {formatNumber(s2.iron)} fer</span>
         <span>🪙 {formatNumber(s2.gold)} or</span>
       </div>
+      {(s2.launchUntil ?? 0) > now && (
+        <p className="row-desc">🚀 Lancement : production et charge des convois ×{LAUNCH_MULT} encore {Math.ceil(((s2.launchUntil ?? 0) - now) / 3_600_000)} h.</p>
+      )}
 
       <h3>Concessions ({s2.conc.length}/{slots})</h3>
       <div className="list">

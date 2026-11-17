@@ -150,6 +150,8 @@ export interface S2State {
   produced: number;
   /** Convois livrés au beffroi, en valeur pierre, pas encore versés au chantier. */
   giftOwed?: number;
+  /** Lancement : production et charge ×LAUNCH_MULT jusqu'à cet instant (24 h après la pose du château). */
+  launchUntil?: number;
   /** Ce qui s'est passé sur les concessions (brigands), pour la boîte de réception. */
   log?: { at: number; text: string }[];
   /** S10, Lignée (fixés à chaque calcul, jamais lus de la base) : Cave profonde, heures de stock local en plus. */
@@ -246,18 +248,19 @@ export function settleS2(s: S2State, ctx: S2Context, now: number): { s: S2State;
   const castle = st.castle!;
   const mult = ctx.multiplier ?? (() => 1);
   // Instants où quelque chose change : chantiers finis, bonus communs.
-  const cuts = [...st.works.map((w) => w.until), ...st.conc.map((c) => c.upUntil ?? 0), ...(ctx.breakpoints ?? [])].filter((t) => t > st.at && t < now);
+  const cuts = [...st.works.map((w) => w.until), ...st.conc.map((c) => c.upUntil ?? 0), st.launchUntil ?? 0, ...(ctx.breakpoints ?? [])].filter((t) => t > st.at && t < now);
   cuts.sort((a, b) => a - b);
   let cursor = st.at;
   for (const end of [...cuts, now]) {
-    const m = mult(cursor);
+    const launch = cursor < (st.launchUntil ?? 0) ? LAUNCH_MULT : 1;
+    const m = mult(cursor) * launch;
     const interval = convoyIntervalMs(st);
     for (const c of st.conc) {
       const site = ctx.map.sites[c.site];
       if (!site) continue;
       let rate = (concessionRate(st, c, ctx.map) * m) / 3_600_000;
       let cap = localCap(st, c, ctx.map);
-      const load = convoyLoad(st, c, ctx.map);
+      const load = convoyLoad(st, c, ctx.map) * launch;
       let t = cursor;
       const name = site.name || site.type;
       // Le stock monte jusqu'à `to` ; au passage des 90 %, un avis, et les brigands rôdent une heure plus tard.
@@ -409,6 +412,12 @@ export function shipNow(s: S2State, id: string, map: S2Map, now: number): R<S2St
 }
 
 /** Règle le rythme et la destination d'une concession ; l'effet vaut dès le convoi suivant. */
+/** Lancement : les 24 premières heures après la pose du château, production et charge des convois ×3. */
+export const LAUNCH_MULT = 3;
+export const LAUNCH_MS = 24 * 3_600_000;
+/** Pierre offerte à la pose du château, pour bâtir tout de suite. */
+export const START_STONE = 1_000;
+
 /** Brigands (dès la vague A) : une heure après que le stock local a passé 90 %, puis toutes les heures tant qu'il y est encore. */
 export const BANDIT_HIGH = 0.9;
 export const BANDIT_CLEAR = 0.7;
@@ -602,6 +611,7 @@ export function cleanS2(raw: unknown, now: number): S2State {
     at: num(r.at) || now,
     produced: num(r.produced),
     ...(num(r.giftOwed) > 0 ? { giftOwed: num(r.giftOwed) } : {}),
+    ...(num(r.launchUntil) > 0 ? { launchUntil: num(r.launchUntil) } : {}),
     ...(Array.isArray(r.log) ? { log: (r.log as { at?: unknown; text?: unknown }[]).filter((l) => l && typeof l.text === "string").slice(-LOG_MAX).map((l) => ({ at: num(l.at), text: String(l.text).slice(0, 200) })) } : {}),
   };
 }
