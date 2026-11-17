@@ -68,7 +68,7 @@ export function seedOf(userId: string, day: number): number {
 function feasible(id: DailyQuestId, ctx: DailyContext): boolean {
   if (id === "ateliers") return !ctx.s2;
   if (id === "don") return ctx.shareSize !== null && ctx.shareSize > 0;
-  if (id === "savoir") return ctx.upgradesLeft > 0;
+  if (id === "savoir") return !ctx.s2 && ctx.upgradesLeft > 0;
   if (id === "seigneur") return ctx.troops > 0;
   if (id === "renforts") return ctx.allies > 0;
   if (id === "espion") return (ctx.spyLevel ?? 0) >= 1;

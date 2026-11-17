@@ -25,6 +25,9 @@ import {
   convoyLoad,
   concessionBudget,
   supplyBlocker,
+  concessionBuildMs,
+  buildingMs,
+  concBuildingMs,
   CONC_BUILDING_IDS,
   CONC_BUILDINGS,
   CONC_BUILDING_MAX,
@@ -54,7 +57,13 @@ type Run = (action: GameAction) => Promise<unknown>;
 type Pick = { kind: "cell"; pos: Pos } | { kind: "site"; id: number } | { kind: "lord"; id: string } | { kind: "castle"; id: string };
 
 const unitOf = (id: string) => UNITS.find((u) => u.id === id);
-const minutes = (ms: number) => Math.max(0, Math.round(ms / 60_000));
+/** Durée lisible : « 12 s », « 3 min 05 », « 1 h 20 ». */
+const dur = (ms: number) => {
+  const t = Math.max(0, Math.ceil(ms / 1000));
+  if (t < 60) return `${t}\u00a0s`;
+  if (t < 3600) return `${Math.floor(t / 60)}\u00a0min\u00a0${String(t % 60).padStart(2, "0")}`;
+  return `${Math.floor(t / 3600)}\u00a0h\u00a0${String(Math.floor((t % 3600) / 60)).padStart(2, "0")}`;
+};
 
 function stageConcessions(snap: GameSnapshot, now: number): number {
   return snap.worksite.stageCompletedAt.filter((t) => t <= now).length >= 1 ? 1 : 0;
@@ -313,7 +322,7 @@ function S2Panel({ snap, live, now, world, picked, busy, act, castlesOthers }: {
         </div>
         <div className="row-desc">
           Fief : environ {formatNumber(l.fief)} en valeur pierre (une victoire en emporte 60 %, plus du fer par compagnie battue).
-          {l.reformAt > now ? ` La garnison se reforme : complète dans ${minutes(l.reformAt - now)} min.` : ""}
+          {l.reformAt > now ? ` La garnison se reforme : complète dans ${dur(l.reformAt - now)}.` : ""}
         </div>
         {castle && (
           <button className="btn btn-primary" disabled={busy} onClick={() => void act({ type: "raid", target: l.id })}>Attaquer</button>
@@ -379,7 +388,7 @@ export function S2Domain({ snap, live, now, run }: { snap: GameSnapshot; live: P
               <div>
                 <div className="row-title">{RESOURCE_ICON[site.type]} {site.name || RESOURCE_LABEL[site.type]} <span className="badge">niv. {c.level}</span> <span className="badge">{TIERS[tierOf(c.level)].name}</span></div>
                 <div className="row-desc">
-                  {formatNumber(rate)} {RESOURCE_LABEL[site.type]}/h · convoi de {formatNumber(convoyLoad(s2, c, map))}{c.manual ? ", envoyé à la main." : ` toutes les ${minutes(convoyIntervalMs(s2))} min, prochain dans ${minutes(c.next - now)} min.`} Stock {formatNumber(c.stock)} / {formatNumber(cap)}.
+                  {formatNumber(rate)} {RESOURCE_LABEL[site.type]}/h · convoi de {formatNumber(convoyLoad(s2, c, map))}{c.manual ? ", envoyé à la main." : ` toutes les ${dur(convoyIntervalMs(s2))}, prochain dans ${dur(c.next - now)}.`} Stock {formatNumber(c.stock)} / {formatNumber(cap)}.
                 </div>
                 <div className="bar bar-thin"><span style={{ width: `${Math.min(100, (c.stock / Math.max(1, cap)) * 100)}%` }} /></div>
                 {(() => {
@@ -409,7 +418,7 @@ export function S2Domain({ snap, live, now, run }: { snap: GameSnapshot; live: P
                     return (
                       <button key={b} className="btn btn-small" disabled={busy || !!why} title={`${CONC_BUILDINGS[b].text}.${why ? ` ${why}` : ""}`} onClick={() => void act({ type: "s2", op: "cbuild", id: c.id, building: b })}>
                         {CONC_BUILDINGS[b].icon} {CONC_BUILDINGS[b].name} {lvl}
-                        {working ? ` → ${lvl + 1} (${minutes(c.cwork!.until - now)} min)` : lvl < CONC_BUILDING_MAX ? ` · 🧱 ${formatNumber(concBuildingCost(lvl + 1))}` : ""}
+                        {working ? ` → ${lvl + 1} (${dur(c.cwork!.until - now)})` : lvl < CONC_BUILDING_MAX ? ` · 🧱 ${formatNumber(concBuildingCost(lvl + 1))} · ${dur(concBuildingMs(lvl + 1))}` : ""}
                       </button>
                     );
                   })}
@@ -447,7 +456,7 @@ export function S2Domain({ snap, live, now, run }: { snap: GameSnapshot; live: P
                 </div>
                 <div className="row-desc">
                   🧱 Réserve de chantier {formatNumber(c.fund ?? 0)} · avec le stock, {formatNumber(budget)} disponibles pour ses travaux (valeur pierre).{c.level < CONCESSION_MAX_LEVEL && ` La réserve accepte encore ${formatNumber(Math.max(0, fundRoom(s2, c)))}.`}
-                  {incoming.length > 0 && ` Ravitaillement en route : ${formatNumber(incoming.reduce((a, v) => a + v.load * VALUE[v.res], 0))}, arrivée dans ${minutes(Math.min(...incoming.map((v) => v.arrive)) - now)} min.`}
+                  {incoming.length > 0 && ` Ravitaillement en route : ${formatNumber(incoming.reduce((a, v) => a + v.load * VALUE[v.res], 0))}, arrivée dans ${dur(Math.min(...incoming.map((v) => v.arrive)) - now)}.`}
                 </div>
                 <div className="s2-settings">
                   <span>Ravitailler</span>
@@ -468,12 +477,12 @@ export function S2Domain({ snap, live, now, run }: { snap: GameSnapshot; live: P
                 </div>
                 {full && <div className="row-desc">⚠️ Stock plein : améliore ta charronnerie ou ton relais.</div>}
                 {c.stock >= BANDIT_HIGH * cap && c.pace !== "prudent" && <div className="row-desc s2-over">🗡️ Stock au-dessus de 90 % : des brigands rôdent. Chaque heure, 30 % de risque d&apos;en perdre 20 %. Vide-le, ou passe en prudent.</div>}
-                {c.upUntil && c.upUntil > now && <div className="row-desc">🔨 Niveau {c.level + 1} dans {minutes(c.upUntil - now)} min.</div>}
+                {c.upUntil && c.upUntil > now && <div className="row-desc">🔨 Niveau {c.level + 1} dans {dur(c.upUntil - now)}.</div>}
               </div>
               <div className="s2-actions">
                 {c.level < CONCESSION_MAX_LEVEL && (
                   <button className="btn btn-small btn-primary" disabled={busy || !!upWhy} title={upWhy ?? undefined} onClick={() => void act({ type: "s2", op: "upgrade", id: c.id })}>
-                    Améliorer · 🧱 {formatNumber(concessionCost(c.level + 1))}
+                    Niveau {c.level + 1} · 🧱 {formatNumber(concessionCost(c.level + 1))} · {dur(concessionBuildMs(c.level + 1))}
                   </button>
                 )}
                 {s2.conc.length > 1 && (
@@ -503,10 +512,10 @@ export function S2Domain({ snap, live, now, run }: { snap: GameSnapshot; live: P
               <div>
                 <div className="row-title">{def.icon} {def.name} <span className="badge">niv. {s2.bld[id]}</span></div>
                 <div className="row-desc">{def.text}</div>
-                {work.map((w) => <div key={w.level} className="row-desc">🔨 Niveau {w.level} dans {minutes(w.until - now)} min.</div>)}
+                {work.map((w) => <div key={w.level} className="row-desc">🔨 Niveau {w.level} dans {dur(w.until - now)}.</div>)}
               </div>
               <button className="btn btn-small btn-primary" disabled={busy || !!why} title={why ?? undefined} onClick={() => void act({ type: "s2", op: "build", building: id })}>
-                Niveau {next} · 🪨 {formatNumber(Math.ceil(buildingCost(id, next) * discount))}
+                Niveau {next} · 🪨 {formatNumber(Math.ceil(buildingCost(id, next) * discount))} · {dur(buildingMs(next))}
               </button>
             </div>
           );

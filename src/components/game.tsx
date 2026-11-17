@@ -5,6 +5,8 @@ import { s2Enabled, setS2Map } from "@/lib/game/s2/rules";
 import { S2Domain, S2MapScreen } from "@/components/s2-map";
 import { S2Guide, S2Tutorial } from "@/components/s2-tutorial";
 import { setIronArmy } from "@/lib/game/companies";
+import { LAUNCH_MULT } from "@/lib/game/s2/economy";
+import { RANKS } from "@/lib/game/s2/map";
 import { signOut } from "@/app/(auth)/actions";
 import {
   setSeasonRules,
@@ -213,7 +215,7 @@ export function Game({ userId }: { userId: string }) {
       <SeasonEndCard snap={snap} />
       <PushPrompt raided={(snap.chronicle ?? []).some((c) => c.kind === "raid" && c.targetId === snap.userId) || (game.away?.raidsLost.length ?? 0) > 0} />
       <div className="layout">
-        <Hero snap={snap} rate={rate} clickGain={clickValue(live, world, stagesDone)} game={game} />
+        <Hero snap={snap} live={live} rate={rate} clickGain={clickValue(live, world, stagesDone)} game={game} />
         <section className={`panel dom-${group}`}>
           <div className="tabs" role="tablist">
             <TabButton id="domaine" tab={group} setTab={selectGroup} label="🏭 Domaine" dot={affordableUpgrades > 0} />
@@ -898,7 +900,7 @@ function Belfry({ done, pct }: { done: number; pct: number }) {
   );
 }
 
-function Hero({ snap, rate, clickGain, game }: { snap: GameSnapshot; rate: number; clickGain: number; game: ReturnType<typeof useGame> }) {
+function Hero({ snap, live, rate, clickGain, game }: { snap: GameSnapshot; live: PlayerState; rate: number; clickGain: number; game: ReturnType<typeof useGame> }) {
   const counter = useRef<HTMLSpanElement>(null);
   const [floaters, setFloaters] = useState<Floater[]>([]);
   const nextId = useRef(0);
@@ -939,7 +941,19 @@ function Hero({ snap, rate, clickGain, game }: { snap: GameSnapshot; rate: numbe
             <span ref={counter}>{formatNumber(Math.floor(snap.state.stone))}</span>
           </div>
           <div className="stone-label">pierres taillées</div>
-          <div className="rate num">{formatRate(rate)} / seconde</div>
+          {live.s2 ? (
+            <>
+              <div className="rate num">
+                ⚔️ {formatNumber(Math.floor(live.s2.iron))} fer · 🪙 {formatNumber(Math.floor(live.s2.gold))} or
+              </div>
+              <div className="rate num">
+                Production : {formatNumber(rate * 3600 * ((live.s2.launchUntil ?? 0) > game.serverNow() ? LAUNCH_MULT : 1))} / h en valeur pierre
+                {live.s2.conc.length > 0 && ` · prochain convoi dans ${duration(Math.max(0, Math.min(...live.s2.conc.map((c) => c.next)) - game.serverNow()))}`}
+              </div>
+            </>
+          ) : (
+            <div className="rate num">{formatRate(rate)} / seconde</div>
+          )}
           {(snap.state.catchUp ?? 0) > 0 && (
             <div className="catch-up" title="Bonus accordé tant que tu es loin derrière le premier joueur. Il diminue à mesure que tu le rattrapes.">
               🤝 Coup de pouce : +{Math.round((snap.state.catchUp ?? 0) * 100)} % de production et de défense
@@ -1644,6 +1658,43 @@ function Army({ snap, live, now, run }: { snap: GameSnapshot; live: PlayerState;
   );
 }
 
+/** Saison 2 : les seigneurs sont sur la carte ; ici, la liste par rang, et un bouton pour aller les voir. */
+function S2LordList({ snap, now }: { snap: GameSnapshot; now: number }) {
+  const go = useContext(SnapContext)?.go;
+  const order: Record<string, number> = { hobereau: 0, baron: 1, comte: 2, duc: 3 };
+  const lords = [...(snap.s2?.lords ?? [])].sort((a, b) => order[a.rank] - order[b.rank] || a.companies - b.companies);
+  return (
+    <>
+      <Info>
+        Les seigneurs tiennent un fief sur la carte. Bats leur garnison pour emporter une part de leur fief (pierre, fer, or) et du fer par compagnie vaincue ; la
+        garnison se reforme ensuite. Ils n&apos;attaquent jamais les joueurs. Touche leur écu sur la carte pour voir leur garnison et lancer l&apos;attaque.
+      </Info>
+      <div className="list">
+        {lords.map((l) => (
+          <div key={l.id} className="row">
+            <div className="row-icon" aria-hidden>
+              🛡️
+            </div>
+            <div>
+              <div className="row-title">
+                {l.name} <span className="badge">{RANKS[l.rank].name}</span>
+              </div>
+              <div className="row-desc num">
+                {l.reformAt > now ? `Garnison en reformation : ${countdown(l.reformAt - now)}` : `${l.companies} compagnie${l.companies > 1 ? "s" : ""} en garnison`} · case ({l.pos[0]}, {l.pos[1]})
+              </div>
+            </div>
+            {go && (
+              <button className="btn btn-small" onClick={() => go("carte", l.id)}>
+                🗺️ Voir
+              </button>
+            )}
+          </div>
+        ))}
+      </div>
+    </>
+  );
+}
+
 function Raids({ snap, live, now, run, focus }: { snap: GameSnapshot; live: PlayerState; now: number; run: ReturnType<typeof useGame>["run"]; focus?: Focus | null }) {
   const fresh = focus && now - focus.at < 5000 ? focus : null;
   const [view, setView] = useState<RaidView>(() => (fresh && snap.rivals.find((r) => r.id === fresh.id && !r.isLord) ? "joueurs" : "seigneurs"));
@@ -1667,7 +1718,7 @@ function Raids({ snap, live, now, run, focus }: { snap: GameSnapshot; live: Play
     <RivalRow key={r.id} focus={fresh?.id === r.id ? fresh : undefined} r={r} now={now} busy={busy} onRaid={raid} onSpy={spy} spyPrice={spyPrice} stone={live.s2 ? live.s2.gold : live.stone} onSabotage={sabotage} onMole={mole} stagesDone={stagesDoneAt(worldFrom(snap.worksite), now)} me={live} distance={distanceTo(r.id)} />
   );
   const views: [RaidView, string][] = [
-    ["seigneurs", `Seigneurs (${snap.rivals.filter((r) => r.isLord).length})`],
+    ["seigneurs", `Seigneurs (${snap.s2 ? snap.s2.lords.length : snap.rivals.filter((r) => r.isLord).length})`],
     ["joueurs", `Joueurs (${players.length})`],
   ];
 
@@ -1690,7 +1741,8 @@ function Raids({ snap, live, now, run, focus }: { snap: GameSnapshot; live: Play
           me={snap.userId}
         />}
       {inCurfew(live, now) && <p className="raid-state">🌙 Tu es en couvre-feu : ni attaque ni sabotage, dans un sens comme dans l&apos;autre.</p>}
-      {view === "seigneurs" && (
+      {view === "seigneurs" && snap.s2 && <S2LordList snap={snap} now={now} />}
+      {view === "seigneurs" && !snap.s2 && (
         <Info>
           Un raid réussi vole 25 % (40 % en revanche) de la pierre non sécurisée (les 2 dernières heures de production sont à l&apos;abri, mais jamais plus
           de la moitié du stock), incendie les ateliers 30 min et ruine quelques bâtiments ; la victime reçoit 4 h de bouclier (10 min pour un seigneur) et un
@@ -1700,7 +1752,7 @@ function Raids({ snap, live, now, run, focus }: { snap: GameSnapshot; live: Play
           tes espions et la Forge sont dans l&apos;onglet Armée.
         </Info>
       )}
-      {view === "seigneurs" && (
+      {view === "seigneurs" && !snap.s2 && (
         <>
           <div className="qty level-filter" role="group" aria-label="Difficulté">
             <button className="btn" aria-pressed={level === null} onClick={() => setLevel(null)}>
@@ -4692,7 +4744,7 @@ export function Companies({ live, now, run, renown = 0 }: { live: PlayerState; n
                 <Btn className="btn btn-primary btn-small" busy={busy} reason={fortBlocker(live, d.id)} onClick={() => void act({ type: "company", op: "fort", unit: d.id })}>
                   🔨 Niv. {level + 1}
                   <span className="cost num">
-                    {formatNumber(fortCost(level))} · {countdown(fortMs(level))}
+                    {formatNumber(fortCost(level))} 🪨 · {countdown(fortMs(level))}
                   </span>
                 </Btn>
               )}

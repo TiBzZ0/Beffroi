@@ -188,7 +188,7 @@ const STEPS: GuideStep[] = [
   {
     id: "army",
     title: "Renforce ton armée",
-    text: "Dans Armée, recrute des hommes ou crée une deuxième compagnie. L'armée se paie en fer : tu en as 3 000 pour commencer.",
+    text: "Dans Armée, recrute des hommes ou crée une deuxième compagnie. L'armée se paie en fer : tu en as 30 000 pour commencer.",
     tab: "armee",
     go: "Ouvrir l'armée",
     done: (s) => (s.recruits?.length ?? 0) > 0 || (s.companies?.length ?? 0) > 1 || (s.companies ?? []).some((c) => c.train > 0 || c.trainUntil > 0),
