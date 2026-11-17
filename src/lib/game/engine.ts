@@ -124,6 +124,9 @@ import {
   type UpgradeDef,
   STAGE_MIN_SIZE,
   STAGE_SIZE_HOURS,
+  STAGE_END_HOURS,
+  STAGE_FLOOR_SHARE,
+  stagesSpread,
   stageHours,
   MAX_TITHE,
   CURFEW_MINUTES,
@@ -1069,6 +1072,30 @@ export function recordGift(state: PlayerState, amount: number): { state: PlayerS
 export function stageSize(activeRates: number[], hours = STAGE_SIZE_HOURS): number {
   const sum = activeRates.reduce((a, r) => a + (Number.isFinite(r) && r > 0 ? r : 0), 0);
   return Math.max(STAGE_MIN_SIZE, Math.ceil(sum * hours * 3600));
+}
+
+/** Production de référence cumulée (pierres par joueur) entre deux âges de la saison, en heures. */
+export function refStone(fromHours: number, toHours: number): number {
+  const a = Math.max(0, fromHours);
+  const b = Math.max(a, toHours);
+  const steps = Math.max(1, Math.ceil((b - a) * 4));
+  const dt = (b - a) / steps;
+  let sum = 0;
+  for (let i = 0; i < steps; i++) sum += refRate(a + (i + 0.5) * dt) * dt * 3600;
+  return sum;
+}
+
+/**
+ * B1 : plancher de la taille d'une étape (saison 2 et suivantes). Joueurs équivalents (chacun compte pour
+ * min(1, sa production / la production de référence du moment)) × 15 % × production de référence cumulée entre
+ * l'ouverture prévue de l'étape (fin visée de la précédente) et sa fin visée. 0 hors du beffroi étalé.
+ */
+export function stageFloor(stage: number, activeRates: number[], ageHours: number): number {
+  if (!stagesSpread() || stage >= STAGE_END_HOURS.length) return 0;
+  const ref = refRate(ageHours);
+  const players = activeRates.reduce((a, r) => a + (Number.isFinite(r) && r > 0 ? Math.min(1, r / ref) : 0), 0);
+  const from = stage === 0 ? 0 : STAGE_END_HOURS[stage - 1];
+  return Math.ceil(players * STAGE_FLOOR_SHARE * refStone(from, STAGE_END_HOURS[stage]));
 }
 
 // ---------------------------------------------------------------------------

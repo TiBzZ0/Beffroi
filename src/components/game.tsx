@@ -3,6 +3,7 @@
 import { createContext, useContext, useEffect, useId, useRef, useState } from "react";
 import { signOut } from "@/app/(auth)/actions";
 import {
+  setSeasonRules,
   CATEGORY_LABELS,
   MAX_ALLIANCE_SIZE,
   HALL,
@@ -177,6 +178,8 @@ export function Game({ userId }: { userId: string }) {
   const world = worldFrom(snap.worksite);
   const stagesDone = stagesDoneAt(world, now);
   // État prévu « maintenant » : sert à savoir ce qui est achetable.
+  // Règles qui dépendent de la saison (beffroi étalé à partir de la saison 2).
+  setSeasonRules(snap.season.number);
   const live: PlayerState = { ...advance(snap.state, now, world), stone: game.predictedStone() };
   const rate = rateAt(live, world, now);
   const researchDone = tab !== "armee" && researchEnds.some((e) => e <= now && e > armySeenAt);

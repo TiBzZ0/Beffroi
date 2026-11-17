@@ -243,7 +243,25 @@ export const STAGE_BASES = STAGES.map((s) => s.basePerPlayer);
 export const STAGE_SIZE_HOURS = 4;
 /** Durée de chaque étape en heures de production (taille, parts de chantier, lots et paliers) : on ralentit la fin du beffroi. */
 export const STAGE_HOURS_BY_STAGE: readonly number[] = [4, 4, 4, 4, 4, 4, 12, 24];
+/**
+ * B1 (à partir de la saison 2) : le beffroi s'étale sur toute la saison. Chaque étape a plus d'heures de production
+ * et une fin visée (heures depuis le début de la saison) qui fixe un plancher à sa taille.
+ */
+export const SPREAD_SEASON = 2;
+export const STAGE_HOURS_SPREAD: readonly number[] = [8, 12, 16, 24, 24, 36, 48, 72];
+export const STAGE_END_HOURS: readonly number[] = [12, 36, 72, 108, 144, 192, 240, 300];
+/** Part de la production de référence cumulée qui fait le plancher d'une étape. */
+export const STAGE_FLOOR_SHARE = 0.15;
+let spreadStages = false;
+/** Règles qui dépendent du numéro de saison (appelée par le serveur et le client dès qu'ils connaissent la saison). */
+export function setSeasonRules(seasonNumber: number): void {
+  spreadStages = seasonNumber >= SPREAD_SEASON;
+}
+export function stagesSpread(): boolean {
+  return spreadStages;
+}
 export function stageHours(stage: number): number {
+  if (spreadStages && stage < STAGE_HOURS_SPREAD.length) return STAGE_HOURS_SPREAD[stage];
   if (stage >= STAGE_HOURS_BY_STAGE.length && stage >= 8) return EMBELLISH_HOURS;
   return STAGE_HOURS_BY_STAGE[stage] ?? STAGE_SIZE_HOURS;
 }

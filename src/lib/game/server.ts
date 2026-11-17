@@ -75,6 +75,7 @@ import {
   SEASON_DAYS,
   STAGE_MIN_SIZE,
   stageHours,
+  setSeasonRules,
   MAX_TITHE,
   NEW_PLAYER_TITHE,
   DONOR_TIER_BONUS,
@@ -192,6 +193,7 @@ import {
   rebuildRuin,
   resolveRaid,
   stageSize,
+  stageFloor,
   setTithe,
   payTithe,
   openShare,
@@ -525,6 +527,7 @@ export async function getActiveSeason(admin: SupabaseClient): Promise<SeasonView
   const season = toSeason(Array.isArray(data) ? data[0] : data);
   currentSeasonStart = season.startsAt;
   currentCompanyModel = season.number >= COMPANY_SEASON;
+  setSeasonRules(season.number);
   seasonCache = { season, until: Math.min(now + 30_000, season.endsAt) };
   return season;
 }
@@ -899,7 +902,9 @@ function lordRates(entities: Map<string, Entity>, world: WorldState, now: number
   // Joueurs actifs : vus dans la fenêtre d'activité du chantier.
   const rates = activeHumans(entities, now).map((e) => productionPerSecond(e.state, world, stagesDoneAt(world, now))).sort((a, b) => a - b);
   // Au passage, on retient la taille d'une étape qui s'ouvrirait maintenant.
-  stageSizes = Array.from({ length: TOTAL_STAGES }, (_, i) => stageSize(rates, stageHours(i)));
+  // B1 (saison 2 et suivantes) : jamais sous le plancher fixé par la fin visée de l'étape.
+  const ageH = Math.max(0, (now - currentSeasonStart) / 3_600_000);
+  stageSizes = Array.from({ length: TOTAL_STAGES }, (_, i) => Math.max(stageSize(rates, stageHours(i)), stageFloor(i, rates, ageH)));
   const mid = median(rates);
   // Les seigneurs faciles suivent le quart le plus faible des joueurs, pour que les petits aient une cible.
   const low = rates.length === 0 ? 0 : rates[Math.floor((rates.length - 1) * 0.25)];
