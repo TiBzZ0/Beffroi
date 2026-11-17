@@ -69,8 +69,12 @@ export interface S2Map {
 
 export const cheb = (a: Pos, b: Pos) => Math.max(Math.abs(a[0] - b[0]), Math.abs(a[1] - b[1]));
 const eucl = (a: Pos, b: Pos) => Math.hypot(a[0] - b[0], a[1] - b[1]);
-/** Le centre tourbillonnant : le disque autour du beffroi et les deux cases autour de chaque forteresse. */
-export const inCentre = (p: Pos) => eucl(p, S2_CENTER) <= S2_CENTER_RADIUS || S2_FORTRESSES.some((f) => cheb(f, p) <= 2);
+/** Les deux cases qui flanquent chaque forteresse le long du cercle (à gauche et à droite de celle du nord). */
+const FLANKS = new Set(
+  S2_FORTRESSES.flatMap(([fx, fy]) => (fx === S2_CENTER[0] ? [[fx - 1, fy], [fx + 1, fy]] : [[fx, fy - 1], [fx, fy + 1]])).map(([x, y]) => `${x},${y}`),
+);
+/** Le centre tourbillonnant : le disque autour du beffroi, plus les cases qui flanquent les forteresses. */
+export const inCentre = (p: Pos) => eucl(p, S2_CENTER) <= S2_CENTER_RADIUS || FLANKS.has(`${p[0]},${p[1]}`);
 
 /** Facteur de production selon la taille du site. */
 export function siteFactor(places: number): number {
