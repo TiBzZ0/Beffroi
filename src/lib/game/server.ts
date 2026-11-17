@@ -2918,7 +2918,11 @@ export async function runAction(admin: SupabaseClient, userId: string, action: G
             if (first && f.floor % RIFT_CHEST_EVERY === 0) {
               got.chest = Math.ceil(baseRate(st, world, now) * RIFT_CHEST_SECONDS);
               got.relic = makeRelic(f.floor, guardian, Math.random, now);
-              next = addRelics({ ...next, stone: next.stone + got.chest }, [got.relic]);
+              // Saison 2 : le coffre de la faille est en fer (1 fer pour 2 pierres).
+              if (next.s2) {
+                got.chest = Math.ceil(got.chest / VALUE.fer);
+                next = addRelics({ ...next, s2: { ...next.s2, iron: next.s2.iron + got.chest } }, [got.relic]);
+              } else next = addRelics({ ...next, stone: next.stone + got.chest }, [got.relic]);
             }
             if (first && guardian) {
               // F2 : un capitaine offert (trois traits proposés, ou un trait au hasard si un choix attend déjà).
@@ -2944,7 +2948,7 @@ export async function runAction(admin: SupabaseClient, userId: string, action: G
           const fallen = mine.next.rift?.exp?.fights.at(-1)?.dead ?? [];
           const who = partners.length ? ` avec ${partners.map((p) => p.e.name).join(", ")}` : "";
           message = fight.success
-            ? `${guardian ? "👹 Gardien" : "🌀 Étage"} ${f.floor} franchi${who} !${mine.got.chest > 0 ? ` Coffre : ${mine.got.chest.toLocaleString("fr-FR")} pierres.` : ""}${relic ? ` Relique : ${RELICS[relic.kind].icon} ${RELICS[relic.kind].name} (${RARITY_LABEL[RELICS[relic.kind].rarity]}).` : ""}${mine.got.captain ? " Un capitaine te rejoint : va le choisir dans l'Armée." : ""}`
+            ? `${guardian ? "👹 Gardien" : "🌀 Étage"} ${f.floor} franchi${who} !${mine.got.chest > 0 ? ` Coffre : ${mine.got.chest.toLocaleString("fr-FR")} ${s2Map() ? "fer" : "pierres"}.` : ""}${relic ? ` Relique : ${RELICS[relic.kind].icon} ${RELICS[relic.kind].name} (${RARITY_LABEL[RELICS[relic.kind].rarity]}).` : ""}${mine.got.captain ? " Un capitaine te rejoint : va le choisir dans l'Armée." : ""}`
             : `${guardian ? "👹 Le gardien" : "🌀 L'étage"} ${f.floor} tient bon : les survivants rentrent.`;
           if (fallen.length) message += ` ⚰️ ${fallen.join(", ")} est tombé${fallen.length > 1 ? "s" : ""}.`;
           riftAfter = others;

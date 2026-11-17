@@ -717,6 +717,8 @@ export function productionPerSecond(state: PlayerState, world: WorldState, stage
 /** Pierre rapportée par un coup de marteau. */
 export function clickValue(state: PlayerState, world: WorldState, stagesDone: number): number {
   void world;
+  // Saison 2 : le marteau ne produit plus, il donne seulement de l'élan.
+  if (state.s2) return 0;
   let value = 1;
   for (const u of ownedUpgrades(state)) if (u.effect.kind === "click") value *= u.effect.multiplier;
   return value * stageMultiplier(stagesDone, "click");
@@ -745,7 +747,8 @@ export function elanMaxMs(state: PlayerState): number {
 }
 
 export function elanBonus(state: PlayerState): number {
-  return ownedUpgrades(state).reduce((sum, u) => sum + (u.effect.kind === "elan" ? u.effect.bonus : 0), 0);
+  // Saison 2 : l'élan est offert à tous dès le départ (+20 %), sans savoir à acheter.
+  return (state.s2 ? 0.2 : 0) + ownedUpgrades(state).reduce((sum, u) => sum + (u.effect.kind === "elan" ? u.effect.bonus : 0), 0);
 }
 
 export interface AdvanceOptions {
@@ -1791,7 +1794,7 @@ export function researchCost(state: PlayerState, id: ResearchId, base = 0): numb
   if (id === "espionnage") return Math.max(1, Math.ceil(SPY_LEVEL_SECONDS * base * SPY_LEVEL_GROWTH ** queuedLevel(state, id)));
   const def = COMBATANTS.get(id);
   // Saison 2 : recalé sur la production de référence du jour (`base`) : 1 h pour un piquier niveau 1, au prorata du coût de la troupe.
-  if (state.s2 && base > 0) return Math.ceil(3600 * base * ((def?.cost ?? 0) / 400) * RESEARCH_COST_GROWTH ** queuedLevel(state, id));
+  if (state.s2 && base > 0) return Math.ceil(3600 * base * ((def?.cost ?? 0) / 400) * 1.8 ** queuedLevel(state, id));
   return Math.ceil((def?.cost ?? 0) * RESEARCH_COST_FACTOR * RESEARCH_COST_GROWTH ** queuedLevel(state, id));
 }
 
@@ -1818,8 +1821,8 @@ export function startResearch(state: PlayerState, id: string, now: number, stage
 }
 
 export function academyCost(state: PlayerState, base = 0): number {
-  // Saison 2 : 2 h de production de référence du jour (`base`), ×3 par niveau.
-  if (state.s2 && base > 0) return Math.ceil(2 * 3600 * base * ACADEMY_COST_GROWTH ** (state.academy ?? 0));
+  // Saison 2 : 2 h de production de référence du jour (`base`), ×2 par niveau.
+  if (state.s2 && base > 0) return Math.ceil(2 * 3600 * base * 2 ** (state.academy ?? 0));
   return Math.ceil(ACADEMY_BASE_COST * ACADEMY_COST_GROWTH ** (state.academy ?? 0));
 }
 

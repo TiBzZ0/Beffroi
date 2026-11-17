@@ -197,6 +197,8 @@ export interface StageDef {
     guardianWeak?: number;
     /** Saison 2 : compagnies de plus au plafond. */
     companies?: number;
+    /** Saison 2 : entraînement des compagnies plus rapide (part). */
+    trainSpeed?: number;
     /** Écus versés à l'achèvement à chaque joueur qui a atteint au moins un palier de don. */
     donorEcus?: number;
   };
@@ -224,7 +226,7 @@ const STAGES_S2: readonly StageDef[] = [
   { ...STAGES_S1[3], bonusLabel: "Gardiens des failles −15 % de force", bonus: { guardianWeak: 0.15 } },
   { ...STAGES_S1[4], bonusLabel: "Règle du tiers ramenée au quart (avec les combats de convois)", bonus: {} },
   { ...STAGES_S1[5], bonusLabel: "Faille changeante : quatre cartes au choix (à venir)", bonus: {} },
-  { ...STAGES_S1[6], bonusLabel: "Une compagnie de plus et savoirs 20 % plus rapides pour tous", bonus: { companies: 1, researchSpeed: 0.2 } },
+  { ...STAGES_S1[6], bonusLabel: "Une compagnie de plus et entraînement 20 % plus rapide pour tous", bonus: { companies: 1, trainSpeed: 0.2 } },
   { ...STAGES_S1[7], bonusLabel: "Production +10 % pour tous, et 20 écus à chaque joueur qui a atteint un palier de don", bonus: { production: 1.1, donorEcus: 20 } },
 ];
 /** Étapes de la saison en cours (changées par setS2Geometry). */
@@ -799,7 +801,7 @@ export function setStagesNow(n: number): void {
   stagesDoneNow = n;
 }
 /** Somme d'un bonus additif des étapes achevées maintenant (pour les règles qui n'ont pas l'état du monde sous la main). */
-export function stagePerkNow(key: "guardianWeak" | "companies"): number {
+export function stagePerkNow(key: "guardianWeak" | "companies" | "trainSpeed"): number {
   let sum = 0;
   for (let i = 0; i < Math.min(stagesDoneNow, STAGES.length); i++) sum += STAGES[i].bonus[key] ?? 0;
   return sum;

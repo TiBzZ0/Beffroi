@@ -310,7 +310,8 @@ export function trainCost(c: Pick<Company, "train">): number {
 }
 
 export function trainMs(c: Pick<Company, "train">): number {
-  return Math.round(TRAIN_BASE_MS * TRAIN_TIME_GROWTH ** c.train);
+  // S6 (saison 2) : l'horloge astronomique accélère l'entraînement de 20 %.
+  return Math.round((TRAIN_BASE_MS * TRAIN_TIME_GROWTH ** c.train) / (1 + stagePerkNow("trainSpeed")));
 }
 
 export function fortCost(level: number): number {

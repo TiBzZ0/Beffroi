@@ -223,7 +223,7 @@ export function Game({ userId }: { userId: string }) {
           </div>
           {GROUPS[group].filter((t) => t !== "faille" || !!snap.rift).length > 1 && (
             <div className="subtabs group-subtabs" role="group" aria-label="Sections">
-              {GROUPS[group].filter((t) => t !== "faille" || !!snap.rift).map((t) => (
+              {GROUPS[group].filter((t) => (t !== "faille" || !!snap.rift) && !(snap.s2 && t === "ameliorations")).map((t) => (
                 <button key={t} className="btn btn-small" aria-pressed={tab === t} onClick={() => selectTab(t)}>
                   {snap.s2 && t === "ateliers" ? "Concessions" : SUBTAB_LABELS[t]}
                   {t === "ameliorations" && affordableUpgrades > 0 ? " •" : ""}
@@ -234,7 +234,7 @@ export function Game({ userId }: { userId: string }) {
           <div className="tab-body" role="tabpanel">
             {tab === "ateliers" && snap.s2 && <S2Domain snap={snap} live={live} now={now} run={game.run} />}
             {tab === "ateliers" && !snap.s2 && <Generators live={live} stagesDone={stagesDone} snap={snap} run={game.run} />}
-            {tab === "ameliorations" && <Upgrades live={live} run={game.run} />}
+            {tab === "ameliorations" && !snap.s2 && <Upgrades live={live} run={game.run} />}
             {tab === "chantier" && <Worksite snap={snap} live={live} run={game.run} />}
             {tab === "armee" && <Army snap={snap} live={live} now={now} run={game.run} />}
             {tab === "carte" && snap.s2 && <S2MapScreen snap={snap} live={live} now={now} run={game.run} />}
@@ -914,10 +914,10 @@ function Hero({ snap, rate, clickGain, game }: { snap: GameSnapshot; rate: numbe
 
   const onHit = (e: React.PointerEvent<HTMLButtonElement>) => {
     const gain = game.click();
-    if (gain <= 0) return;
+    if (gain <= 0 && !snap.s2) return;
     const rect = e.currentTarget.getBoundingClientRect();
     const id = nextId.current++;
-    const f = { id, x: e.clientX - rect.left || rect.width / 2, y: e.clientY - rect.top || rect.height / 2, text: `+${formatRate(gain)}` };
+    const f = { id, x: e.clientX - rect.left || rect.width / 2, y: e.clientY - rect.top || rect.height / 2, text: gain > 0 ? `+${formatRate(gain)}` : "⚡" };
     setFloaters((list) => [...list.slice(-12), f]);
     setTimeout(() => setFloaters((list) => list.filter((x) => x.id !== id)), 900);
   };
@@ -966,12 +966,12 @@ function Hero({ snap, rate, clickGain, game }: { snap: GameSnapshot; rate: numbe
             <div className="catch-up">✨ Frénésie : production doublée encore {Math.ceil((snap.state.frenzyUntil - game.serverNow()) / 1000)} s</div>
           )}
           <div className="hammer-hint">
-            {paused ? `🔨 Marteau confisqué encore ${Math.ceil((snap.state.clickPausedUntil - game.serverNow()) / 1000)} s` : `Frappe la pierre : +${formatRate(clickGain)} par coup`}
+            {paused ? `🔨 Marteau confisqué encore ${Math.ceil((snap.state.clickPausedUntil - game.serverNow()) / 1000)} s` : snap.s2 ? "Frappe pour l'élan : +20 % de production tant qu'il dure" : `Frappe la pierre : +${formatRate(clickGain)} par coup`}
           </div>
         </div>
         <div className="hammer-zone">
           <Vein veinAt={snap.state.veinAt ?? 0} now={game.serverNow()} run={game.run} />
-          <button className="hammer" disabled={paused} onPointerDown={onHit} aria-label={`Tailler la pierre (+${formatRate(clickGain)})`}>
+          <button className="hammer" disabled={paused} onPointerDown={onHit} aria-label={snap.s2 ? "Frapper pour l'élan" : `Tailler la pierre (+${formatRate(clickGain)})`}>
             🪨
           </button>
           {floaters.map((f) => (
