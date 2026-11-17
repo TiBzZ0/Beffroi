@@ -25,6 +25,13 @@ import {
   convoyLoad,
   concessionBudget,
   supplyBlocker,
+  CONC_BUILDING_IDS,
+  CONC_BUILDINGS,
+  CONC_BUILDING_MAX,
+  concBuildBlocker,
+  concBuildingCost,
+  TIERS,
+  tierOf,
   LAUNCH_MULT,
   BANDIT_HIGH,
   fundRoom,
@@ -98,7 +105,7 @@ export function S2MapScreen({ snap, live, now, run }: { snap: GameSnapshot; live
       now,
       view,
       layers,
-      mineSites: new Set(s2.conc.map((x) => x.site)),
+      mineSites: new Map(s2.conc.map((x) => [x.site, tierOf(x.level)] as [number, number])),
       routes: s2.conc.flatMap((x) => (world.map.sites[x.site] ? [[world.map.sites[x.site].pos]] : [])),
       myCastle: castle,
       picked: pickedPos,
@@ -370,7 +377,7 @@ export function S2Domain({ snap, live, now, run }: { snap: GameSnapshot; live: P
           return (
             <div key={c.id} className="row">
               <div>
-                <div className="row-title">{RESOURCE_ICON[site.type]} {site.name || RESOURCE_LABEL[site.type]} <span className="badge">niv. {c.level}</span></div>
+                <div className="row-title">{RESOURCE_ICON[site.type]} {site.name || RESOURCE_LABEL[site.type]} <span className="badge">niv. {c.level}</span> <span className="badge">{TIERS[tierOf(c.level)].name}</span></div>
                 <div className="row-desc">
                   {formatNumber(rate)} {RESOURCE_LABEL[site.type]}/h · convoi de {formatNumber(convoyLoad(s2, c, map))}{c.manual ? ", envoyé à la main." : ` toutes les ${minutes(convoyIntervalMs(s2))} min, prochain dans ${minutes(c.next - now)} min.`} Stock {formatNumber(c.stock)} / {formatNumber(cap)}.
                 </div>
@@ -392,6 +399,20 @@ export function S2Domain({ snap, live, now, run }: { snap: GameSnapshot; live: P
                       {PACES[k].name}
                     </button>
                   ))}
+                </div>
+                <div className="s2-settings">
+                  <span>Bâtiments</span>
+                  {CONC_BUILDING_IDS.map((b) => {
+                    const lvl = c.cb?.[b] ?? 0;
+                    const why = concBuildBlocker(s2, c.id, b, map, now);
+                    const working = c.cwork && c.cwork.until > now && c.cwork.id === b;
+                    return (
+                      <button key={b} className="btn btn-small" disabled={busy || !!why} title={`${CONC_BUILDINGS[b].text}.${why ? ` ${why}` : ""}`} onClick={() => void act({ type: "s2", op: "cbuild", id: c.id, building: b })}>
+                        {CONC_BUILDINGS[b].icon} {CONC_BUILDINGS[b].name} {lvl}
+                        {working ? ` → ${lvl + 1} (${minutes(c.cwork!.until - now)} min)` : lvl < CONC_BUILDING_MAX ? ` · 🧱 ${formatNumber(concBuildingCost(lvl + 1))}` : ""}
+                      </button>
+                    );
+                  })}
                 </div>
                 <div className="s2-settings">
                   <span>Départs</span>

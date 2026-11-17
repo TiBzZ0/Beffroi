@@ -39,6 +39,7 @@ const PAGES: { icon: string; title: string; text: string[] }[] = [
       "Tu prends d'autres concessions en touchant un site sur la carte. Les étapes du beffroi et l'or t'en ouvrent de nouvelles.",
       "Chaque concession se gère à part, dans l'onglet du domaine. Son rythme : prudent pour s'absenter, intensif pour produire plus contre un peu d'or. Ses convois : vers ton château, directement au beffroi (où ils comptent comme un don), ou vers une autre de tes concessions pour remplir sa réserve.",
       "Une concession s'améliore avec ce qu'elle a sur place : sa réserve de chantier, que tu remplis en lui envoyant des ressources depuis le château, puis son propre stock.",
+      "En montant de niveau, une concession passe de campement à exploitation (niveau 5), manufacture (10) et grand domaine (15). Elle peut bâtir chez elle un atelier (+production), et dès l'exploitation une écurie (+charge) et un grenier (+stock).",
     ],
   },
   {
@@ -53,7 +54,7 @@ const PAGES: { icon: string; title: string; text: string[] }[] = [
     icon: "🏗️",
     title: "Bâtiments d'appui",
     text: [
-      "🛠️ Les outils : +5 % de production sur toutes tes concessions par niveau.",
+      "🛠️ Les outils : +3 % de production sur toutes tes concessions par niveau.",
       "🛞 La charronnerie : des convois plus chargés. 🐎 Le relais : des convois plus fréquents et plus rapides.",
       "🏚️ L'entrepôt : un stock local plus grand, et plus de pierre à l'abri au château.",
     ],
@@ -179,7 +180,7 @@ const STEPS: GuideStep[] = [
   {
     id: "build",
     title: "Bâtis un bâtiment d'appui",
-    text: "Dans Concessions, lance la charronnerie (convois plus chargés) ou les outils (+5 % de production). Ils se paient en pierre.",
+    text: "Dans Concessions, lance la charronnerie (convois plus chargés) ou les outils (+3 % de production). Ils se paient en pierre.",
     tab: "ateliers",
     go: "Bâtir",
     done: (s) => !!s.s2 && (Object.values(s.s2.bld).some((n) => n > 0) || s.s2.works.length > 0),

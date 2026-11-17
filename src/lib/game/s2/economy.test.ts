@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { generateMap, type S2Map } from "./map";
-import { build, buyConcession, localCap, setConcession, shipNow, supplyBlocker, takeConcessionBlocker, concessionRate, convoyLoad, firstConcessionSites, marketQuote, newS2State, REF, settleS2, stockFull, takeConcession, supplyConcession, upgradeConcession, VALUE, type S2State } from "./economy";
+import { build, buyConcession, localCap, setConcession, shipNow, concBuild, concBuildBlocker, supplyBlocker, takeConcessionBlocker, concessionRate, convoyLoad, firstConcessionSites, marketQuote, newS2State, REF, settleS2, stockFull, takeConcession, supplyConcession, upgradeConcession, VALUE, type S2State } from "./economy";
 
 const T0 = Date.parse("2026-12-07T15:00:00Z");
 const H = 3_600_000;
@@ -51,7 +51,8 @@ describe("S2 : économie", () => {
 
   it("une concession trop productive pour sa charge remplit son stock et s'arrête", () => {
     let s = start();
-    s = { ...s, conc: s.conc.map((c) => ({ ...c, level: 15 })) };
+    // La charge suit le niveau, pas l'atelier : un atelier poussé sans écurie déborde.
+    s = { ...s, conc: s.conc.map((c) => ({ ...c, level: 15, cb: { atelier: 10 } })) };
     expect(concessionRate(s, s.conc[0], map)).toBeGreaterThan(convoyLoad(s, s.conc[0], map));
     const { s: after } = settleS2(s, ctx(), T0 + 30 * H);
     expect(stockFull(after, after.conc[0], map)).toBe(true);
@@ -138,6 +139,24 @@ describe("S2 : économie", () => {
     const boosted = settleS2({ ...s, launchUntil: T0 + 24 * H }, ctx(), T0 + 10 * H);
     expect(boosted.arrived.pierre).toBeGreaterThan(plain * 2.5);
     expect(stockFull(boosted.s, boosted.s.conc[0], map)).toBe(false);
+  });
+
+  it("bâtiments de concession : payés sur place, bornés par le niveau et le palier", () => {
+    let s = start();
+    const id = s.conc[0].id;
+    s = { ...s, conc: s.conc.map((c) => ({ ...c, stock: 0, fund: 10_000 })) };
+    expect(concBuildBlocker(s, id, "ecurie", map, T0)).toMatch(/Exploitation/);
+    const r = concBuild(s, id, "atelier", map, T0);
+    expect(r.ok).toBe(true);
+    if (!r.ok) return;
+    expect(r.value.conc[0].fund).toBe(10_000 - 200);
+    expect(concBuildBlocker(r.value, id, "atelier", map, T0 + 1)).toMatch(/chantier/);
+    const before = concessionRate(s, s.conc[0], map);
+    const done = settleS2(r.value, ctx(), T0 + H).s;
+    expect(done.conc[0].cb?.atelier).toBe(1);
+    expect(concessionRate(done, done.conc[0], map)).toBeCloseTo(before * (1 + 0.08 / (1 + 0)), 6);
+    // Niveau 2 d'atelier : il faut une concession niveau 2.
+    expect(concBuildBlocker(done, id, "atelier", map, T0 + H)).toMatch(/niveau 2/);
   });
 
   it("améliorations, bâtiments et concessions achetées", () => {

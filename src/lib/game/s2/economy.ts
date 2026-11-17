@@ -53,7 +53,7 @@ export const CONCESSION_GOLD = [1_500, 5_000, 15_000];
 export const LOCAL_STOCK_HOURS = 4;
 
 export function concessionLevelFactor(level: number): number {
-  return 1 + 0.2 * (Math.max(1, level) - 1);
+  return 1 + 0.15 * (Math.max(1, level) - 1);
 }
 /** Prix du niveau n (2 à 15) d'une concession, en pierre. */
 export function concessionCost(level: number): number {
@@ -67,7 +67,7 @@ export type BuildingId = "outils" | "charronnerie" | "relais" | "entrepot";
 export const BUILDING_MAX = 20;
 export const BUILDING_SLOTS = 2;
 export const BUILDINGS: Record<BuildingId, { name: string; icon: string; base: number; text: string }> = {
-  outils: { name: "Outils", icon: "🛠️", base: 500, text: "+5 % de production de toutes les concessions par niveau" },
+  outils: { name: "Outils", icon: "🛠️", base: 500, text: "+3 % de production de toutes les concessions par niveau" },
   charronnerie: { name: "Charronnerie", icon: "🛞", base: 400, text: "Charge d'un convoi : 60 min de production de base, +10 % par niveau" },
   relais: { name: "Relais", icon: "🐎", base: 400, text: "Un convoi toutes les 60 min, 2 min de moins par niveau ; convois 3 % plus rapides par niveau" },
   entrepot: { name: "Entrepôt", icon: "🏚️", base: 300, text: "Stock local +30 min par niveau ; stock à l'abri au château +15 min par niveau" },
@@ -100,6 +100,9 @@ export interface Concession {
   dest?: Dest;
   /** Convois envoyés à une autre de ses concessions (sa réserve de chantier) ; prime sur `dest`. */
   destConc?: string;
+  /** Bâtiments de la concession (atelier, écurie, grenier), et le chantier en cours. */
+  cb?: Partial<Record<ConcBuildingId, number>>;
+  cwork?: { id: ConcBuildingId; level: number; until: number };
   /** Convois à la main : la concession garde tout jusqu'à ce que le joueur en envoie un. */
   manual?: boolean;
   /** Brigands : prochain passage (stock au-dessus de 90 % depuis une heure), et avis déjà donné. */
@@ -107,6 +110,31 @@ export interface Concession {
   warned?: boolean;
   /** Réserve de chantier, en valeur pierre : ce que le château lui a envoyé, pour ses améliorations. */
   fund?: number;
+}
+export type ConcBuildingId = "atelier" | "ecurie" | "grenier";
+export const CONC_BUILDINGS: Record<ConcBuildingId, { name: string; icon: string; per: number; text: string }> = {
+  atelier: { name: "Atelier", icon: "⚒️", per: 0.08, text: "+8 % de production de cette concession par niveau" },
+  ecurie: { name: "Écurie", icon: "🐴", per: 0.1, text: "+10 % de charge des convois de cette concession par niveau" },
+  grenier: { name: "Grenier", icon: "🌾", per: 0.25, text: "+25 % de stock local de cette concession par niveau" },
+};
+export const CONC_BUILDING_IDS = Object.keys(CONC_BUILDINGS) as ConcBuildingId[];
+export const CONC_BUILDING_MAX = 10;
+export const concBuildingCost = (level: number) => Math.round(200 * Math.pow(1.6, level - 1));
+export const concBuildingMs = (level: number) => Math.round(10 * 60_000 * Math.pow(1.3, level - 1));
+const cbLevel = (c: Concession, id: ConcBuildingId) => c.cb?.[id] ?? 0;
+/** Paliers d'une concession selon son niveau : un nom, et un dessin plus riche sur la carte. */
+export const TIERS = [
+  { from: 1, name: "Campement" },
+  { from: 5, name: "Exploitation" },
+  { from: 10, name: "Manufacture" },
+  { from: 15, name: "Grand domaine" },
+];
+export function tierOf(level: number): number {
+  let t = 0;
+  TIERS.forEach((x, i) => {
+    if (level >= x.from) t = i;
+  });
+  return t;
 }
 export type Pace = "prudent" | "normal" | "intensif";
 export type Dest = "chateau" | "beffroi";
@@ -185,25 +213,31 @@ export function concessionSlots(s: S2State, ctx: Pick<S2Context, "stageConcessio
   return Math.min(CONCESSIONS_MAX, 1 + ctx.stageConcessions + s.bought);
 }
 
+/** Bonus de région, en part (s'ajoute aux autres bonus). */
 const regionBonus = (s: S2State, res: Resource) =>
-  (s.region === "montagne" && res === "pierre") || (s.region === "collines" && res === "fer") || (s.region === "cote" && res === "or") ? 1.1 : 1;
+  (s.region === "montagne" && res === "pierre") || (s.region === "collines" && res === "fer") || (s.region === "cote" && res === "or") ? 0.1 : 0;
+/** Grand domaine (niveau 15) : +10 % dans la somme des bonus. */
+const DOMAIN_BONUS = 0.1;
 
 /** Production horaire d'une concession, hors multiplicateur commun. */
 export function concessionRate(s: S2State, c: Concession, map: S2Map): number {
   const site = map.sites[c.site];
   if (!site) return 0;
-  return BASE_PROD[site.type] * siteFactor(site.places) * concessionLevelFactor(c.level) * (1 + 0.05 * s.bld.outils) * regionBonus(s, site.type) * PACES[c.pace ?? "normal"].prod;
+  // Base × taille × niveau × (1 + somme des bonus : outils, atelier, région, grand domaine), puis le rythme.
+  const bonus = 0.03 * s.bld.outils + CONC_BUILDINGS.atelier.per * cbLevel(c, "atelier") + regionBonus(s, site.type) + (c.level >= CONCESSION_MAX_LEVEL ? DOMAIN_BONUS : 0);
+  return BASE_PROD[site.type] * siteFactor(site.places) * concessionLevelFactor(c.level) * (1 + bonus) * PACES[c.pace ?? "normal"].prod;
 }
 /** Charge d'un convoi : 60 min de production de base de la concession, +10 % par niveau de charronnerie. */
 export function convoyLoad(s: S2State, c: Concession, map: S2Map): number {
   const site = map.sites[c.site];
-  return site ? BASE_PROD[site.type] * siteFactor(site.places) * (1 + 0.1 * s.bld.charronnerie + (s.loadBonus ?? 0)) : 0;
+  // La charge suit le niveau de la concession ; charronnerie, écurie et Grands chariots s'additionnent.
+  return site ? BASE_PROD[site.type] * siteFactor(site.places) * concessionLevelFactor(c.level) * (1 + 0.1 * s.bld.charronnerie + CONC_BUILDINGS.ecurie.per * cbLevel(c, "ecurie") + (s.loadBonus ?? 0)) : 0;
 }
 export function convoyIntervalMs(s: S2State): number {
   return Math.max(20, 60 - 2 * s.bld.relais) * 60_000;
 }
 export function localCap(s: S2State, c: Concession, map: S2Map): number {
-  return concessionRate(s, c, map) * (LOCAL_STOCK_HOURS + 0.5 * s.bld.entrepot + (s.stockBonusHours ?? 0)) * PACES[c.pace ?? "normal"].stock;
+  return concessionRate(s, c, map) * (LOCAL_STOCK_HOURS + 0.5 * s.bld.entrepot + (s.stockBonusHours ?? 0)) * PACES[c.pace ?? "normal"].stock * (1 + CONC_BUILDINGS.grenier.per * cbLevel(c, "grenier"));
 }
 /** Trajet d'un convoi : 2 min par case (Tchebychev), plafonné à 45 min, plus rapide avec le relais et en Plaine. */
 export function convoyTravelMs(s: S2State, from: Pos, to: Pos): number {
@@ -248,7 +282,7 @@ export function settleS2(s: S2State, ctx: S2Context, now: number): { s: S2State;
   const castle = st.castle!;
   const mult = ctx.multiplier ?? (() => 1);
   // Instants où quelque chose change : chantiers finis, bonus communs.
-  const cuts = [...st.works.map((w) => w.until), ...st.conc.map((c) => c.upUntil ?? 0), st.launchUntil ?? 0, ...(ctx.breakpoints ?? [])].filter((t) => t > st.at && t < now);
+  const cuts = [...st.works.map((w) => w.until), ...st.conc.map((c) => c.upUntil ?? 0), ...st.conc.map((c) => c.cwork?.until ?? 0), st.launchUntil ?? 0, ...(ctx.breakpoints ?? [])].filter((t) => t > st.at && t < now);
   cuts.sort((a, b) => a - b);
   let cursor = st.at;
   for (const end of [...cuts, now]) {
@@ -331,6 +365,7 @@ export function settleS2(s: S2State, ctx: S2Context, now: number): { s: S2State;
     }
     // Chantiers finis à `end`.
     st.conc = st.conc.map((c) => (c.upUntil && c.upUntil <= end ? { ...c, level: Math.min(CONCESSION_MAX_LEVEL, c.level + 1), upUntil: undefined } : c));
+    st.conc = st.conc.map((c) => (c.cwork && c.cwork.until <= end ? { ...c, cb: { ...c.cb, [c.cwork.id]: Math.max(cbLevel(c, c.cwork.id), c.cwork.level) }, cwork: undefined } : c));
     const done = st.works.filter((w) => w.until <= end);
     for (const w of done) st.bld[w.id] = Math.max(st.bld[w.id], w.level);
     st.works = st.works.filter((w) => w.until > end);
@@ -493,6 +528,31 @@ export function upgradeConcession(s: S2State, id: string, map: S2Map, now: numbe
   return { ok: true, value: { s: { ...s, conc: s.conc.map((x) => (x.id === id ? next : x)) }, cost } };
 }
 
+/** Bâtiment d'une concession : payé sur place (réserve puis stock), un chantier à la fois, jamais au-dessus du niveau de la concession. */
+export function concBuildBlocker(s: S2State, id: string, b: unknown, map: S2Map, now: number): string | null {
+  const c = s.conc.find((x) => x.id === id);
+  if (!c) return "Concession inconnue.";
+  if (typeof b !== "string" || !(b in CONC_BUILDINGS)) return "Bâtiment inconnu.";
+  if (c.cwork && c.cwork.until > now) return "Un chantier est déjà en cours dans cette concession.";
+  const level = cbLevel(c, b as ConcBuildingId) + 1;
+  if (level > CONC_BUILDING_MAX) return "Niveau maximal.";
+  if (level > c.level) return `Monte d'abord la concession au niveau ${level}.`;
+  if (b !== "atelier" && c.level < TIERS[1].from) return `${CONC_BUILDINGS[b as ConcBuildingId].name} : à partir du palier Exploitation (niveau ${TIERS[1].from}).`;
+  if (concBuildingCost(level) > concessionBudget(c, map) + 1e-6) return "Réserve et stock de la concession insuffisants : envoie-lui des ressources.";
+  return null;
+}
+export function concBuild(s: S2State, id: string, b: ConcBuildingId, map: S2Map, now: number): R<S2State> {
+  const why = concBuildBlocker(s, id, b, map, now);
+  if (why) return fail(why);
+  const c = s.conc.find((x) => x.id === id)!;
+  const level = cbLevel(c, b) + 1;
+  const cost = concBuildingCost(level);
+  const fromFund = Math.min(c.fund ?? 0, cost);
+  const value = VALUE[map.sites[c.site]?.type ?? "pierre"];
+  const next: Concession = { ...c, fund: (c.fund ?? 0) - fromFund, stock: Math.max(0, c.stock - (cost - fromFund) / value), cwork: { id: b, level, until: now + concBuildingMs(level) } };
+  return { ok: true, value: { ...s, conc: s.conc.map((x) => (x.id === id ? next : x)) } };
+}
+
 /** Ravitaille une concession depuis le château : un convoi part tout de suite et remplit sa réserve à l'arrivée. */
 export function supplyBlocker(s: S2State, id: string, have: Record<Resource, number>, res: unknown, amount: number): string | null {
   if (!s.castle) return "Pose d'abord ton château.";
@@ -574,6 +634,20 @@ export function firstConcessionSites(map: S2Map, castle: Pos, taken: (siteId: nu
 // Lecture depuis la base (valeurs nettoyées)
 // ---------------------------------------------------------------------------
 
+function cleanCb(cb: unknown, work: unknown): Pick<Concession, "cb" | "cwork"> {
+  const out: Pick<Concession, "cb" | "cwork"> = {};
+  if (cb && typeof cb === "object") {
+    const levels: Partial<Record<ConcBuildingId, number>> = {};
+    for (const id of CONC_BUILDING_IDS) {
+      const n = Math.floor(Number((cb as Record<string, unknown>)[id]));
+      if (Number.isFinite(n) && n > 0) levels[id] = Math.min(CONC_BUILDING_MAX, n);
+    }
+    if (Object.keys(levels).length) out.cb = levels;
+  }
+  const w = work as { id?: unknown; level?: unknown; until?: unknown } | null;
+  if (w && typeof w === "object" && typeof w.id === "string" && w.id in CONC_BUILDINGS && Number(w.until) > 0) out.cwork = { id: w.id as ConcBuildingId, level: Math.min(CONC_BUILDING_MAX, Math.max(1, Math.floor(Number(w.level) || 1))), until: Number(w.until) };
+  return out;
+}
 const num = (v: unknown, min = 0) => (Number.isFinite(Number(v)) ? Math.max(min, Number(v)) : min);
 const pos = (v: unknown): Pos | null => (Array.isArray(v) && v.length === 2 && v.every((x) => Number.isInteger(Number(x))) ? [Number(v[0]), Number(v[1])] : null);
 const RES: Resource[] = ["pierre", "fer", "or"];
@@ -594,7 +668,7 @@ export function cleanS2(raw: unknown, now: number): S2State {
       .slice(0, CONCESSIONS_MAX)
       .map((c) => {
         const x = c as Record<string, unknown>;
-        return { id: String(x.id), site: Math.floor(num(x.site)), level: Math.min(CONCESSION_MAX_LEVEL, Math.max(1, Math.floor(num(x.level, 1)))), stock: num(x.stock), next: num(x.next) || now, ...(num(x.upUntil) > 0 ? { upUntil: num(x.upUntil) } : {}), ...(x.pace === "prudent" || x.pace === "intensif" ? { pace: x.pace } : {}), ...(x.dest === "beffroi" ? { dest: "beffroi" as const } : {}), ...(num(x.fund) > 0 ? { fund: num(x.fund) } : {}), ...(typeof x.destConc === "string" ? { destConc: x.destConc } : {}), ...(num(x.banditAt) > 0 ? { banditAt: num(x.banditAt) } : {}), ...(x.warned === true ? { warned: true } : {}), ...(x.manual === true ? { manual: true } : {}) };
+        return { id: String(x.id), site: Math.floor(num(x.site)), level: Math.min(CONCESSION_MAX_LEVEL, Math.max(1, Math.floor(num(x.level, 1)))), stock: num(x.stock), next: num(x.next) || now, ...(num(x.upUntil) > 0 ? { upUntil: num(x.upUntil) } : {}), ...(x.pace === "prudent" || x.pace === "intensif" ? { pace: x.pace } : {}), ...(x.dest === "beffroi" ? { dest: "beffroi" as const } : {}), ...(num(x.fund) > 0 ? { fund: num(x.fund) } : {}), ...(typeof x.destConc === "string" ? { destConc: x.destConc } : {}), ...(num(x.banditAt) > 0 ? { banditAt: num(x.banditAt) } : {}), ...(x.warned === true ? { warned: true } : {}), ...(x.manual === true ? { manual: true } : {}), ...cleanCb(x.cb, x.cwork) };
       }),
     convoys: (Array.isArray(r.convoys) ? r.convoys : [])
       .filter((v) => v && typeof v === "object" && RES.includes((v as Convoy).res))

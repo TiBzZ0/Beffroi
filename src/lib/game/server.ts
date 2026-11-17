@@ -268,7 +268,7 @@ import { applyRiftFight, cleanRift, expeditionOpts, floorRenown, floorTrain, gua
 import { COMPANY_CAP, COMPANY_VALUE, FIXED_EVENT_COMPANIES, FIXED_TRAIN, FORTRESS_COMPANIES, LORD_COMPANIES, LORD_RAID_SHARE, LORD_TRAIN, trainLevels, buildBarracks, buildFort, combatLevels, cleanCompanies, cleanFortLevels, cleanRecruits, cleanWorks, createCompany, dissolveCompany, recruit, retypeCompany, setIronArmy, startTraining } from "./companies";
 import { castleBlocker, generateMap, regionAt, type Resource, type S2Map } from "./s2/map";
 import { s2Map, setS2Map, s2Enabled } from "./s2/rules";
-import { REF, VALUE, build, buyConcession, cleanS2, dropConcession, LAUNCH_MS, LAUNCH_MULT, START_STONE, shipNow, supplyBlocker, supplyConcession,
+import { REF, VALUE, build, buyConcession, cleanS2, dropConcession, concBuild, type ConcBuildingId, LAUNCH_MS, LAUNCH_MULT, START_STONE, shipNow, supplyBlocker, supplyConcession,
   setConcession, exchangeBlocker, firstConcessionSites, marketQuote, takeConcession, upgradeConcession, type BuildingId } from "./s2/economy";
 import { afterDefeat, cleanLordS2, companiesHome, fiefLoot, garrison, lordTrain, patrolUnit, REFORM_MS, settleFief } from "./s2/lords";
 import { buyNode, cleanLineage, lin, lineageMark, LIN_GENERATOR_DISCOUNT, LIN_MOLE, LIN_SPY_CATCH, NODE_BY_ID, nodeEffect, parisDay, RENOWN, RENOWN_GIFT_SEASON, renownAvailable, respec, type RenownSource } from "./lineage";
@@ -2506,6 +2506,10 @@ function applyS2Action(state: PlayerState, action: Extract<GameAction, { type: "
     case "set": {
       const r = setConcession(s2, String(action.id), action.pace, action.dest, action.manual);
       return r.ok ? done({ ...state, s2: r.value }, "set", { id: action.id, pace: action.pace, dest: action.dest, manual: action.manual }) : r;
+    }
+    case "cbuild": {
+      const r = concBuild(s2, String(action.id), action.building as ConcBuildingId, map, now);
+      return r.ok ? done({ ...state, s2: r.value }, "cbuild", { id: action.id, building: action.building }) : r;
     }
     case "ship": {
       const r = shipNow(s2, String(action.id), map, now);

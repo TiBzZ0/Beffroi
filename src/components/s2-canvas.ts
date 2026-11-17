@@ -148,8 +148,18 @@ function glyph(c: CanvasRenderingContext2D, k: string, x: number, y: number, X: 
   }
 }
 
-export function drawSite(c: CanvasRenderingContext2D, x: number, y: number, S: number, t: Resource, places: number, mine = false) {
+export function drawSite(c: CanvasRenderingContext2D, x: number, y: number, S: number, t: Resource, places: number, mine = false, tier = 0) {
   const r = S * (places >= 8 ? 0.62 : places >= 6 ? 0.52 : 0.44);
+  // Paliers de ma concession : anneaux de laiton (exploitation, manufacture), puis la bannière (grand domaine).
+  if (mine && tier > 0) {
+    c.strokeStyle = "rgba(201,163,91,.95)";
+    c.lineWidth = Math.max(1, S / 14);
+    for (let k = 1; k <= Math.min(2, tier); k++) {
+      c.beginPath();
+      c.arc(x, y, r + (S / 7) * k, 0, Math.PI * 2);
+      c.stroke();
+    }
+  }
   c.fillStyle = RES[t];
   c.strokeStyle = mine ? "#8b1e1e" : "#1a1a1a";
   c.lineWidth = Math.max(1.2, S / (mine ? 5 : 10));
@@ -166,6 +176,23 @@ export function drawSite(c: CanvasRenderingContext2D, x: number, y: number, S: n
   c.textAlign = "center";
   c.textBaseline = "middle";
   c.fillText(String(places), x, y + 0.5);
+  if (mine && tier >= 3) {
+    const fx = x + r * 0.7;
+    const fy = y - r * 1.1;
+    c.strokeStyle = "#1a1a1a";
+    c.lineWidth = Math.max(1, S / 16);
+    c.beginPath();
+    c.moveTo(fx, fy + r * 0.9);
+    c.lineTo(fx, fy - r * 0.5);
+    c.stroke();
+    c.fillStyle = "#8b1e1e";
+    c.beginPath();
+    c.moveTo(fx, fy - r * 0.5);
+    c.lineTo(fx + r * 0.8, fy - r * 0.25);
+    c.lineTo(fx, fy);
+    c.closePath();
+    c.fill();
+  }
 }
 
 export function drawLord(c: CanvasRenderingContext2D, x: number, y: number, S: number, tier: number, weak = false) {
@@ -355,7 +382,8 @@ export interface DrawInput {
   now: number;
   view: View;
   layers: Layers;
-  mineSites: Set<number>;
+  /** Mes concessions : site → palier (0 campement … 3 grand domaine). */
+  mineSites: Map<number, number>;
   routes: [number, number][][];
   myCastle: [number, number] | null;
   picked: [number, number] | null;
@@ -534,7 +562,7 @@ export function drawMap(c: CanvasRenderingContext2D, d: DrawInput) {
     for (const s of world.map.sites) {
       if (!visible(s.pos[0], s.pos[1])) continue;
       const [px, py] = mid(s.pos[0], s.pos[1]);
-      drawSite(c, px, py, S, s.type, s.places, d.mineSites.has(s.id));
+      drawSite(c, px, py, S, s.type, s.places, d.mineSites.has(s.id), d.mineSites.get(s.id) ?? 0);
     }
   if (layers.lords)
     for (const l of world.lords) {
