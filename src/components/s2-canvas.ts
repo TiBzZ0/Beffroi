@@ -1,7 +1,7 @@
 // Saison 2 : dessin de la grande carte sur un canvas, repris de la maquette « Carte de la saison 2 »
 // (régions peintes avec leurs motifs, frontières, centre tourbillonnant, sites hexagonaux, écus des seigneurs,
 // châteaux à bannière, failles, forteresses, beffroi). Fonctions pures de dessin : l'écran gère la vue et les clics.
-import { RANKS, REGIONS, S2_BELFRY, S2_FORTRESSES, S2_FORTRESSES_OPEN, S2_RIFTS, S2_SIZE, type Rank, type Resource } from "@/lib/game/s2/map";
+import { inCentre, RANKS, REGIONS, S2_BELFRY, S2_FORTRESSES, S2_FORTRESSES_OPEN, S2_RIFTS, S2_SIZE, type Rank, type Resource } from "@/lib/game/s2/map";
 import type { S2WorldView } from "@/lib/game/types";
 
 type RGB = [number, number, number];
@@ -374,7 +374,8 @@ export function drawMap(c: CanvasRenderingContext2D, d: DrawInput) {
   };
   const visible = (x: number, y: number, pad = 2) => Math.abs(x + 0.5 - v.cx) <= v.span / 2 + pad && Math.abs(y + 0.5 - v.cy) <= v.span / 2 + pad;
   const reg = world.map.regions;
-  const regionAt = (x: number, y: number) => (x < 0 || y < 0 || x >= N || y >= N ? undefined : reg[y]?.[x]);
+  // Le tourbillon prime sur les régions enregistrées (une carte tirée avant l'anneau des forteresses).
+  const regionAt = (x: number, y: number) => (x < 0 || y < 0 || x >= N || y >= N ? undefined : inCentre([x, y]) ? -1 : reg[y]?.[x]);
 
   // Mer et cadre.
   c.fillStyle = "#2b4a5a";

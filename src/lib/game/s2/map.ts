@@ -69,7 +69,8 @@ export interface S2Map {
 
 export const cheb = (a: Pos, b: Pos) => Math.max(Math.abs(a[0] - b[0]), Math.abs(a[1] - b[1]));
 const eucl = (a: Pos, b: Pos) => Math.hypot(a[0] - b[0], a[1] - b[1]);
-export const inCentre = (p: Pos) => eucl(p, S2_CENTER) <= S2_CENTER_RADIUS;
+/** Le centre tourbillonnant : le disque autour du beffroi et les deux cases autour de chaque forteresse. */
+export const inCentre = (p: Pos) => eucl(p, S2_CENTER) <= S2_CENTER_RADIUS || S2_FORTRESSES.some((f) => cheb(f, p) <= 2);
 
 /** Facteur de production selon la taille du site. */
 export function siteFactor(places: number): number {
@@ -85,7 +86,7 @@ const NAMES: Record<Resource, { head: string; tails: string[] }> = {
 /** Ressource la plus proche (Tchebychev) depuis chaque case hors du centre : la carte est équitable si tout est à 12 cases au plus. */
 export const FAIR_DISTANCE = 12;
 const OUTSIDE: Pos[] = [];
-for (let y = 0; y < S2_SIZE; y++) for (let x = 0; x < S2_SIZE; x++) if (Math.hypot(x - 20, y - 20) > 7) OUTSIDE.push([x, y]);
+for (let y = 0; y < S2_SIZE; y++) for (let x = 0; x < S2_SIZE; x++) if (!inCentre([x, y])) OUTSIDE.push([x, y]);
 /** Couples (case, ressource) trop loin de toute ressource de ce type. */
 function uncovered(sites: Site[]): { p: Pos; r: Resource }[] {
   const out: { p: Pos; r: Resource }[] = [];
@@ -299,7 +300,7 @@ export function generateMap(seed: number): S2Map {
 /** Région d'une case, ou null dans le centre. */
 export function regionAt(map: S2Map, p: Pos): RegionId | null {
   const r = map.regions[p[1]]?.[p[0]];
-  return r === undefined || r < 0 ? null : REGIONS[r].id;
+  return r === undefined || r < 0 || inCentre(p) ? null : REGIONS[r].id;
 }
 
 /** Une case peut-elle recevoir un château ? Hors du centre, à 2 cases au moins de tout lieu et de tout château. */

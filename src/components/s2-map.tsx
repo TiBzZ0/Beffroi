@@ -250,7 +250,7 @@ function S2Panel({ snap, live, now, world, picked, busy, act, castlesOthers }: {
   const castle = s2.castle;
   if (!picked) return <p className="row-desc s2-panel">Touche une case, un site ou un seigneur pour le voir ici.</p>;
   const regionOf = (p: Pos) => {
-    const r = world.map.regions[p[1]]?.[p[0]] ?? -1;
+    const r = inCentre(p) ? -1 : (world.map.regions[p[1]]?.[p[0]] ?? -1);
     return r >= 0 ? REGIONS[r] : null;
   };
   if (picked.kind === "cell") {
