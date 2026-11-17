@@ -26,7 +26,7 @@ const PAGES: { icon: string; title: string; text: string[] }[] = [
     title: "Trois monnaies",
     text: [
       "🪨 La pierre sert à bâtir : tes bâtiments d'appui, le ravitaillement de tes concessions, et faire monter le beffroi.",
-      "⚔️ Le fer paie l'armée : recruter et entraîner tes compagnies. Tu démarres avec 3 000 fer.",
+      "⚔️ Le fer paie l'armée : recruter et entraîner tes compagnies. Tu démarres avec 30 000 fer.",
       "🪙 L'or paie l'espionnage et les concessions en plus. Chaque convoi qui arrive en rapporte un peu.",
     ],
   },

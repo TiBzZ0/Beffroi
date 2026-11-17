@@ -13,14 +13,14 @@ export const VALUE: Record<Resource, number> = { pierre: 1, fer: 2, or: 4 };
 export const RESOURCE_ICON: Record<Resource, string> = { pierre: "🪨", fer: "⚔️", or: "🪙" };
 export const RESOURCE_LABEL: Record<Resource, string> = { pierre: "pierre", fer: "fer", or: "or" };
 /** Production de base d'une concession, par heure. */
-export const BASE_PROD: Record<Resource, number> = { pierre: 100, fer: 50, or: 25 };
+export const BASE_PROD: Record<Resource, number> = { pierre: 1_000, fer: 500, or: 250 };
 /** Marché : une monnaie contre une autre au tiers de sa valeur de référence. */
 export const MARKET_RATE = 1 / 3;
 /** Or en plus à chaque convoi arrivé : 3 % de sa charge, en valeur de référence. */
 export const CONVOY_GOLD = 0.03;
 
 /** REF(j) : production d'une concession typique d'un joueur actif au jour j, en valeur pierre par heure. */
-const REF_POINTS: [number, number][] = [[0, 100], [3, 400], [7, 1200], [14, 3000]];
+const REF_POINTS: [number, number][] = [[0, 1_000], [3, 4_000], [7, 12_000], [14, 30_000]];
 export function REF(day: number): number {
   const d = Math.max(0, day);
   for (let i = 1; i < REF_POINTS.length; i++) {
@@ -49,7 +49,7 @@ export function marketQuote(from: Resource, to: Resource, amount: number): numbe
 export const CONCESSION_MAX_LEVEL = 15;
 export const CONCESSIONS_MAX = 5;
 /** Concessions achetées en or : la 3e, la 4e, la 5e. */
-export const CONCESSION_GOLD = [1_500, 5_000, 15_000];
+export const CONCESSION_GOLD = [15_000, 50_000, 150_000];
 export const LOCAL_STOCK_HOURS = 4;
 
 export function concessionLevelFactor(level: number): number {
@@ -67,7 +67,7 @@ export function rampMs(level: number, top: number, topMs: number): number {
 const H = 3_600_000;
 /** Prix du niveau n (2 à 15) d'une concession, en valeur pierre : bon marché au début, cher à la fin. */
 export function concessionCost(level: number): number {
-  return Math.round(60 * Math.pow(1.7, Math.max(0, level - 2)));
+  return Math.round(40 * Math.pow(1.8, Math.max(0, level - 2)));
 }
 export function concessionBuildMs(level: number): number {
   return rampMs(level - 1, 14, 8 * H);
@@ -84,7 +84,7 @@ export const BUILDINGS: Record<BuildingId, { name: string; icon: string; base: n
 };
 export const BUILDING_IDS = Object.keys(BUILDINGS) as BuildingId[];
 export function buildingCost(id: BuildingId, level: number): number {
-  return Math.round((BUILDINGS[id].base / 10) * Math.pow(1.7, level - 1));
+  return Math.round((BUILDINGS[id].base / 10) * Math.pow(1.65, level - 1));
 }
 export function buildingMs(level: number): number {
   return rampMs(level, BUILDING_MAX, 12 * H);
@@ -201,7 +201,7 @@ export interface S2State {
 }
 
 export function newS2State(now: number): S2State {
-  return { castle: null, region: null, iron: 3_000, gold: 0, conc: [], convoys: [], bld: { outils: 0, charronnerie: 0, relais: 0, entrepot: 0 }, works: [], bought: 0, at: now, produced: 0 };
+  return { castle: null, region: null, iron: 30_000, gold: 0, conc: [], convoys: [], bld: { outils: 0, charronnerie: 0, relais: 0, entrepot: 0 }, works: [], bought: 0, at: now, produced: 0 };
 }
 
 /** Ce qui vient d'ailleurs que de l'état : la carte, et les bonus de l'instant. */
@@ -350,15 +350,7 @@ export function settleS2(s: S2State, ctx: S2Context, now: number): { s: S2State;
         const take = c.manual ? 0 : Math.min(c.stock, load);
         if (take >= 1) {
           c.stock -= take;
-          // Vers une autre concession tant que sa réserve a la place ; sinon le convoi rentre au château.
-          const target = c.destConc ? st.conc.find((x) => x.id === c.destConc) : undefined;
-          const targetSite = target ? ctx.map.sites[target.site] : undefined;
-          if (target && targetSite && fundRoom(st, target) >= take * VALUE[site.type] - 1e-6) {
-            st.convoys.push({ conc: target.id, res: site.type, load: take, depart: dep, arrive: dep + convoyTravelMs(st, site.pos, targetSite.pos), from: site.pos, to: targetSite.pos, dest: "concession" });
-          } else {
-            const to = c.dest === "beffroi" && !ctx.belfryDone ? S2_BELFRY : castle;
-            st.convoys.push({ conc: c.id, res: site.type, load: take, depart: dep, arrive: dep + convoyTravelMs(st, site.pos, to), from: site.pos, to, ...(to === castle ? {} : { dest: "beffroi" as const }) });
-          }
+          dispatch(st, ctx.map, c, take, dep, !!ctx.belfryDone);
           if (c.pace === "intensif") {
             const fee = (take * VALUE[site.type] * INTENSIVE_GOLD) / VALUE.or;
             if (st.gold >= fee) st.gold -= fee;
@@ -447,15 +439,30 @@ export function shipNow(s: S2State, id: string, map: S2Map, now: number): R<S2St
   if (take < 1) return fail("Rien à envoyer.");
   const c = { ...c0, stock: c0.stock - take };
   const st: S2State = { ...s, conc: s.conc.map((x) => (x.id === id ? c : x)), convoys: [...s.convoys] };
+  dispatch(st, map, c, take, now, false);
+  return { ok: true, value: st };
+}
+
+/**
+ * Fait partir `take` du stock de `c` : d'abord vers la réserve de la concession choisie, autant qu'elle en accepte,
+ * le reste vers le beffroi ou le château.
+ */
+function dispatch(st: S2State, map: S2Map, c: Concession, take: number, dep: number, belfryDone: boolean) {
+  const site = map.sites[c.site];
+  if (!site || !st.castle) return;
+  let left = take;
   const target = c.destConc ? st.conc.find((x) => x.id === c.destConc) : undefined;
   const targetSite = target ? map.sites[target.site] : undefined;
-  if (target && targetSite && fundRoom(st, target) >= take * VALUE[site.type] - 1e-6) {
-    st.convoys.push({ conc: target.id, res: site.type, load: take, depart: now, arrive: now + convoyTravelMs(st, site.pos, targetSite.pos), from: site.pos, to: targetSite.pos, dest: "concession" });
-  } else {
-    const to = c.dest === "beffroi" ? S2_BELFRY : s.castle;
-    st.convoys.push({ conc: c.id, res: site.type, load: take, depart: now, arrive: now + convoyTravelMs(st, site.pos, to), from: site.pos, to, ...(to === s.castle ? {} : { dest: "beffroi" as const }) });
+  if (target && targetSite) {
+    const part = Math.min(left, Math.max(0, fundRoom(st, target)) / VALUE[site.type]);
+    if (part >= 1) {
+      st.convoys.push({ conc: target.id, res: site.type, load: part, depart: dep, arrive: dep + convoyTravelMs(st, site.pos, targetSite.pos), from: site.pos, to: targetSite.pos, dest: "concession" });
+      left -= part;
+    }
   }
-  return { ok: true, value: st };
+  if (left < 1e-9) return;
+  const to = c.dest === "beffroi" && !belfryDone ? S2_BELFRY : st.castle;
+  st.convoys.push({ conc: c.id, res: site.type, load: left, depart: dep, arrive: dep + convoyTravelMs(st, site.pos, to), from: site.pos, to, ...(to === st.castle ? {} : { dest: "beffroi" as const }) });
 }
 
 /** Règle le rythme et la destination d'une concession ; l'effet vaut dès le convoi suivant. */

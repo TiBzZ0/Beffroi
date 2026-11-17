@@ -20,11 +20,11 @@ function start(): S2State {
 
 describe("S2 : économie", () => {
   it("REF suit les points de la spécification", () => {
-    expect(REF(0)).toBeCloseTo(100);
-    expect(REF(3)).toBeCloseTo(400);
-    expect(REF(7)).toBeCloseTo(1200);
-    expect(REF(14)).toBeCloseTo(3000);
-    expect(REF(5)).toBeGreaterThan(400);
+    expect(REF(0)).toBeCloseTo(1_000);
+    expect(REF(3)).toBeCloseTo(4_000);
+    expect(REF(7)).toBeCloseTo(12_000);
+    expect(REF(14)).toBeCloseTo(30_000);
+    expect(REF(5)).toBeGreaterThan(4_000);
   });
 
   it("le marché rend le tiers de la valeur", () => {
@@ -190,7 +190,7 @@ describe("S2 : économie", () => {
     const later = settleS2(s, ctx(), arrive + H).s;
     expect(later.conc[0].level).toBe(2);
     expect(later.bld.outils).toBe(1);
-    expect(buyConcession({ ...later, gold: 1_000 }).ok).toBe(false);
-    expect(buyConcession({ ...later, gold: 1_500 }).ok).toBe(true);
+    expect(buyConcession({ ...later, gold: 10_000 }).ok).toBe(false);
+    expect(buyConcession({ ...later, gold: 15_000 }).ok).toBe(true);
   });
 });

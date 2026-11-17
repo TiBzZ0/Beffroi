@@ -42,7 +42,7 @@ describe("S2 : parcours d'un joueur", () => {
     const r = takeConcession(s2, { map, stageConcessions: 0 }, site, { taken: () => 0 }, T0);
     expect(r.ok).toBe(true);
     p = { ...newPlayerState(T0), companyModel: true, seasonStart: T0, s2: r.ok ? r.value : s2 };
-    expect(p.s2!.iron).toBe(3_000);
+    expect(p.s2!.iron).toBe(30_000);
   });
 
   it("les convois rapportent de la pierre et un peu d'or", () => {
@@ -66,9 +66,9 @@ describe("S2 : parcours d'un joueur", () => {
     const id = s.companies![s.companies!.length - 1].id;
     const r = recruit(s, id, 100, p.lastUpdate);
     expect(r.ok).toBe(true);
-    // 100 piquiers à 4 fer.
-    expect(s.stone - (r.ok ? r.value.stone : 0)).toBe(400);
-    expect(trainCost({ train: 0 } as never)).toBe(500);
+    // 100 piquiers à 40 fer.
+    expect(s.stone - (r.ok ? r.value.stone : 0)).toBe(4_000);
+    expect(trainCost({ train: 0 } as never)).toBe(5_000);
     const t = startTraining(r.ok ? r.value : s, id, p.lastUpdate);
     expect(t.ok).toBe(true);
   });

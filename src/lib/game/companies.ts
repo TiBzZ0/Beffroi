@@ -267,7 +267,7 @@ export function fortsFromLevels(levels: Partial<Record<DefenseId, number>> | und
 const REF_RATE: [number, number][] = [
   [0, 30], [0.25, 1e3], [0.5, 1e4], [1, 1e5], [2, 6e5], [3.5, 3e6], [6, 8e6], [12, 3e7], [24, 1e8], [48, 4e8], [72, 1.6e9], [96, 7e9], [144, 1e10],
 ];
-/** Saison 2 : l'armée se paie en fer (prix en pierre ÷ 100), l'entraînement aussi ; la courbe de référence suit REF(j). */
+/** Saison 2 : l'armée se paie en fer (prix en pierre ÷ 10), l'entraînement aussi ; la courbe de référence suit REF(j). */
 let ironArmy = false;
 export function setIronArmy(on: boolean): void {
   ironArmy = on;
@@ -302,7 +302,7 @@ export function barracksCost(s: ArmyHolder): number {
 }
 
 export function trainCost(c: Pick<Company, "train">): number {
-  if (ironArmy) return Math.round(500 * 1.6 ** c.train);
+  if (ironArmy) return Math.round(5_000 * 1.6 ** c.train);
   // Moment habituel : une demi-heure pour lever la compagnie, puis les entraînements précédents.
   let at = 0.5;
   for (let k = 0; k < c.train; k++) at += trainMs({ train: k }) / HOUR;
@@ -334,7 +334,7 @@ export function barracksMs(level: number): number {
 
 export function recruitPrice(unit: UnitId, n: number, discount = 1): number {
   const def = UNITS.find((u) => u.id === unit);
-  return Math.ceil(((def?.cost ?? 0) * n * discount) / (ironArmy ? 100 : 1));
+  return Math.ceil(((def?.cost ?? 0) * n * discount) / (ironArmy ? 10 : 1));
 }
 
 // ---------------------------------------------------------------------------
