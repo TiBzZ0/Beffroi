@@ -357,3 +357,46 @@ export function firstConcessionSites(map: S2Map, castle: Pos, taken: (siteId: nu
   const best = [...free].sort((a, b) => cheb(a.pos, castle) - cheb(b.pos, castle))[0];
   return best ? [best.id] : [];
 }
+
+// ---------------------------------------------------------------------------
+// Lecture depuis la base (valeurs nettoyées)
+// ---------------------------------------------------------------------------
+
+const num = (v: unknown, min = 0) => (Number.isFinite(Number(v)) ? Math.max(min, Number(v)) : min);
+const pos = (v: unknown): Pos | null => (Array.isArray(v) && v.length === 2 && v.every((x) => Number.isInteger(Number(x))) ? [Number(v[0]), Number(v[1])] : null);
+const RES: Resource[] = ["pierre", "fer", "or"];
+const REGION_IDS: RegionId[] = ["froid", "montagne", "plaine", "collines", "desert", "cote", "foret"];
+
+export function cleanS2(raw: unknown, now: number): S2State {
+  const r = (raw ?? {}) as Record<string, unknown>;
+  const base = newS2State(now);
+  if (!raw || typeof raw !== "object") return base;
+  const bld = (r.bld ?? {}) as Record<string, unknown>;
+  return {
+    castle: pos(r.castle),
+    region: REGION_IDS.includes(r.region as RegionId) ? (r.region as RegionId) : null,
+    iron: num(r.iron),
+    gold: num(r.gold),
+    conc: (Array.isArray(r.conc) ? r.conc : [])
+      .filter((c) => c && typeof c === "object" && typeof (c as Concession).id === "string")
+      .slice(0, CONCESSIONS_MAX)
+      .map((c) => {
+        const x = c as Record<string, unknown>;
+        return { id: String(x.id), site: Math.floor(num(x.site)), level: Math.min(CONCESSION_MAX_LEVEL, Math.max(1, Math.floor(num(x.level, 1)))), stock: num(x.stock), next: num(x.next) || now, ...(num(x.upUntil) > 0 ? { upUntil: num(x.upUntil) } : {}) };
+      }),
+    convoys: (Array.isArray(r.convoys) ? r.convoys : [])
+      .filter((v) => v && typeof v === "object" && RES.includes((v as Convoy).res))
+      .map((v) => {
+        const x = v as Record<string, unknown>;
+        return { conc: String(x.conc), res: x.res as Resource, load: num(x.load), depart: num(x.depart), arrive: num(x.arrive), from: pos(x.from) ?? [0, 0], to: pos(x.to) ?? [0, 0] };
+      }),
+    bld: Object.fromEntries(BUILDING_IDS.map((id) => [id, Math.min(BUILDING_MAX, Math.floor(num(bld[id])))])) as Record<BuildingId, number>,
+    works: (Array.isArray(r.works) ? r.works : [])
+      .filter((w) => w && typeof w === "object" && BUILDING_IDS.includes((w as S2Work).id))
+      .slice(0, BUILDING_SLOTS)
+      .map((w) => ({ id: (w as S2Work).id, level: Math.floor(num((w as S2Work).level, 1)), until: num((w as S2Work).until) })),
+    bought: Math.min(CONCESSION_GOLD.length, Math.floor(num(r.bought))),
+    at: num(r.at) || now,
+    produced: num(r.produced),
+  };
+}

@@ -260,6 +260,10 @@ import { recordContribution } from "@/lib/redis";
 import { addRelics, assignCaptain, assignRelic, captainOf, CAPTAIN_COST, cleanCaptains, cleanOffer, cleanRelics, drawTraits, dropRelic, addCaptain, HUNT_TARGETS, expeditionSpeed, makeCaptain, makeRelic, RARITY_LABEL, RELICS, TRAIT_IDS, TRAITS, type Relic, type TraitId } from "./captains";
 import { applyRiftFight, cleanRift, expeditionOpts, floorRenown, floorTrain, guardianBattle, isGuardian, splitLosses, riftFightBlocker, riftFloor, riftOf, riftReturn, riftSend, riftWeek, RIFT_CHEST_EVERY, RIFT_CHEST_SECONDS } from "./rift";
 import { COMPANY_VALUE, FIXED_EVENT_COMPANIES, FIXED_TRAIN, FORTRESS_COMPANIES, LORD_COMPANIES, LORD_RAID_SHARE, LORD_TRAIN, trainLevels, buildBarracks, buildFort, combatLevels, cleanCompanies, cleanFortLevels, cleanRecruits, cleanWorks, createCompany, dissolveCompany, recruit, retypeCompany, startTraining } from "./companies";
+import { generateMap, type S2Map } from "./s2/map";
+import { s2Map, setS2Map, s2Enabled } from "./s2/rules";
+import { cleanS2 } from "./s2/economy";
+import { cleanLordS2 } from "./s2/lords";
 import { buyNode, cleanLineage, lin, lineageMark, LIN_MOLE, LIN_SPY_CATCH, NODE_BY_ID, parisDay, RENOWN, RENOWN_GIFT_SEASON, renownAvailable, respec, type RenownSource } from "./lineage";
 import { notify, notifyEach, type PushMessage } from "@/lib/push";
 
@@ -279,7 +283,7 @@ interface PlayerRow {
   upgrades: string[];
   total_produced: number;
   total_contributed: number;
-  military?: { levels?: Record<string, number>; research?: { id: string; endsAt: number; cost?: number }[] | { id: string; endsAt: number } | null; academy?: number; sabotageImmuneUntil?: number; ruinImmuneUntil?: number; elanUntil?: number; tithe?: number; titheOwed?: number; titheSet?: boolean; share?: StageShare | null; donorTiers?: number; curfew?: Curfew | null; seen?: PlayerState["seen"] | null; veinAt?: number; frenzyUntil?: number; quest?: number | null; questFlags?: string[]; wounded?: Record<string, number>; healAt?: number; marches?: unknown; boostProdUntil?: number; boostSafeUntil?: number; merchantEvent?: number; daily?: unknown; dailyBoostUntil?: number; dailyBoost?: number; hallTithe?: number; spyLevel?: number; spies?: unknown; moles?: unknown; counterUntil?: number; rumor?: { mode?: string; until?: number } | null; granaryCutUntil?: number; blindUntil?: number; spyLog?: unknown; tribute?: { seconds?: number; at?: number } | null; inboxRead?: Record<string, unknown> | null; lineage?: unknown; companies?: unknown; barracks?: number; works?: unknown; fortLevels?: unknown; recruits?: unknown; rift?: unknown; captains?: unknown; relics?: unknown; captainOffer?: unknown } | null;
+  military?: { levels?: Record<string, number>; research?: { id: string; endsAt: number; cost?: number }[] | { id: string; endsAt: number } | null; academy?: number; sabotageImmuneUntil?: number; ruinImmuneUntil?: number; elanUntil?: number; tithe?: number; titheOwed?: number; titheSet?: boolean; share?: StageShare | null; donorTiers?: number; curfew?: Curfew | null; seen?: PlayerState["seen"] | null; veinAt?: number; frenzyUntil?: number; quest?: number | null; questFlags?: string[]; wounded?: Record<string, number>; healAt?: number; marches?: unknown; boostProdUntil?: number; boostSafeUntil?: number; merchantEvent?: number; daily?: unknown; dailyBoostUntil?: number; dailyBoost?: number; hallTithe?: number; spyLevel?: number; spies?: unknown; moles?: unknown; counterUntil?: number; rumor?: { mode?: string; until?: number } | null; granaryCutUntil?: number; blindUntil?: number; spyLog?: unknown; tribute?: { seconds?: number; at?: number } | null; inboxRead?: Record<string, unknown> | null; lineage?: unknown; companies?: unknown; barracks?: number; works?: unknown; fortLevels?: unknown; recruits?: unknown; rift?: unknown; captains?: unknown; relics?: unknown; captainOffer?: unknown; s2?: unknown; lordS2?: unknown } | null;
   total_clicks: number;
   last_ip?: string | null;
   last_update: string;
@@ -450,6 +454,8 @@ function toEntity(row: PlayerRow): Entity {
       ...(currentCompanyModel && !lord && !row.profiles?.is_bot
         ? { companyModel: true, companies: cleanCompanies(row.military?.companies), barracks: Math.max(0, Math.floor(Number(row.military?.barracks ?? 0) || 0)), works: cleanWorks(row.military?.works), fortLevels: cleanFortLevels(row.military?.fortLevels), recruits: cleanRecruits(row.military?.recruits), rift: cleanRift(row.military?.rift), captains: cleanCaptains(row.military?.captains), relics: cleanRelics(row.military?.relics), captainOffer: cleanOffer(row.military?.captainOffer) }
         : {}),
+      // Saison 2 : château, concessions et convois des joueurs ; fief des seigneurs.
+      ...(!s2Enabled(currentSeasonNumber) ? {} : lord ? { lordS2: cleanLordS2(row.military?.lordS2, Date.now()) } : row.profiles?.is_bot ? {} : { s2: cleanS2(row.military?.s2, Date.now()) }),
       ...(row.military?.seen ? { seen: { produced: Number(row.military.seen.produced ?? 0), contributed: Number(row.military.seen.contributed ?? 0), levels: armyCounts(row.military.seen.levels ?? {}, [...UNIT_IDS, ...DEFENSE_IDS]) } } : {}),
     },
   };
@@ -478,7 +484,7 @@ function toJson(e: Entity, state: PlayerState, extra: Record<string, unknown> = 
     troops: state.troops,
     defenses: state.defenses,
     stationed: state.stationed,
-    military: { levels: state.levels, research: state.research, academy: state.academy, sabotageImmuneUntil: state.sabotageImmuneUntil, ruinImmuneUntil: state.ruinImmuneUntil, elanUntil: state.elanUntil, tithe: state.tithe, titheOwed: state.titheOwed, titheSet: state.titheSet, share: state.share, donorTiers: state.donorTiers, curfew: state.curfew, seen: state.seen ?? null, veinAt: state.veinAt, frenzyUntil: state.frenzyUntil, quest: state.quest, questFlags: state.questFlags, wounded: state.wounded, healAt: state.healAt, marches: state.marches ?? [], boostProdUntil: state.boostProdUntil, boostSafeUntil: state.boostSafeUntil, merchantEvent: state.merchantEvent, daily: state.daily ?? null, dailyBoostUntil: state.dailyBoostUntil, dailyBoost: state.dailyBoost, hallTithe: state.hallTithe, spyLevel: state.spyLevel ?? 0, spies: state.spies ?? [], moles: state.moles ?? [], counterUntil: state.counterUntil ?? 0, rumor: state.rumor ?? null, granaryCutUntil: state.granaryCutUntil ?? 0, blindUntil: state.blindUntil ?? 0, spyLog: (state.spyLog ?? []).slice(-SPY_LOG_MAX), tribute: state.tribute ?? null, inboxRead: state.inboxRead ?? {}, lineage: state.lineage ?? null, ...(state.companyModel ? { companies: state.companies ?? [], barracks: state.barracks ?? 0, works: state.works ?? {}, fortLevels: state.fortLevels ?? {}, recruits: state.recruits ?? [], rift: state.rift ?? null, captains: state.captains ?? [], relics: state.relics ?? [], captainOffer: state.captainOffer ?? null } : {}) },
+    military: { levels: state.levels, research: state.research, academy: state.academy, sabotageImmuneUntil: state.sabotageImmuneUntil, ruinImmuneUntil: state.ruinImmuneUntil, elanUntil: state.elanUntil, tithe: state.tithe, titheOwed: state.titheOwed, titheSet: state.titheSet, share: state.share, donorTiers: state.donorTiers, curfew: state.curfew, seen: state.seen ?? null, veinAt: state.veinAt, frenzyUntil: state.frenzyUntil, quest: state.quest, questFlags: state.questFlags, wounded: state.wounded, healAt: state.healAt, marches: state.marches ?? [], boostProdUntil: state.boostProdUntil, boostSafeUntil: state.boostSafeUntil, merchantEvent: state.merchantEvent, daily: state.daily ?? null, dailyBoostUntil: state.dailyBoostUntil, dailyBoost: state.dailyBoost, hallTithe: state.hallTithe, spyLevel: state.spyLevel ?? 0, spies: state.spies ?? [], moles: state.moles ?? [], counterUntil: state.counterUntil ?? 0, rumor: state.rumor ?? null, granaryCutUntil: state.granaryCutUntil ?? 0, blindUntil: state.blindUntil ?? 0, spyLog: (state.spyLog ?? []).slice(-SPY_LOG_MAX), tribute: state.tribute ?? null, inboxRead: state.inboxRead ?? {}, lineage: state.lineage ?? null, ...(state.companyModel ? { companies: state.companies ?? [], barracks: state.barracks ?? 0, works: state.works ?? {}, fortLevels: state.fortLevels ?? {}, recruits: state.recruits ?? [], rift: state.rift ?? null, captains: state.captains ?? [], relics: state.relics ?? [], captainOffer: state.captainOffer ?? null } : {}), ...(state.s2 ? { s2: state.s2 } : {}), ...(state.lordS2 ? { lordS2: state.lordS2 } : {}) },
     click_strikes: state.clickStrikes,
     click_paused_until: iso(state.clickPausedUntil),
     ...extra,
@@ -493,6 +499,7 @@ function toSeason(row: { id: number; number: number; starts_at: string; ends_at:
 let currentSeasonStart = 0;
 /** C1 : les compagnies arrivent avec la saison 1 ; la saison 0 garde l'armée d'avant jusqu'au bout. */
 let currentCompanyModel = false;
+let currentSeasonNumber = 0;
 export const COMPANY_SEASON = 1;
 
 /** H2 : niveaux d'héritage lus dans le profil. */
@@ -519,6 +526,30 @@ function cleanLegacy(raw: unknown): PlayerState["legacy"] {
 /** Saison en cours, gardée en mémoire 30 s (tant qu'elle n'est pas finie) pour économiser un aller-retour par action. */
 let seasonCache: { season: SeasonView; until: number } | null = null;
 
+/**
+ * Saison 2 : la carte de la saison, tirée une fois (graine = identifiant de la saison) et gardée en base, pour qu'un
+ * changement du tirage ne déplace jamais les sites d'une saison en cours.
+ */
+let mapSeason = -1;
+async function ensureSeasonMap(admin: SupabaseClient, season: SeasonView): Promise<void> {
+  if (!s2Enabled(season.number)) {
+    setS2Map(null);
+    mapSeason = season.id;
+    return;
+  }
+  if (mapSeason === season.id && s2Map()) return;
+  const { data } = await admin.from("season_maps").select("data").eq("season_id", season.id).maybeSingle();
+  let map = data?.data as S2Map | undefined;
+  if (!map) {
+    map = generateMap(season.id);
+    await admin.from("season_maps").insert({ season_id: season.id, data: map });
+    const { data: again } = await admin.from("season_maps").select("data").eq("season_id", season.id).maybeSingle();
+    map = (again?.data as S2Map | undefined) ?? map;
+  }
+  setS2Map(map);
+  mapSeason = season.id;
+}
+
 export async function getActiveSeason(admin: SupabaseClient): Promise<SeasonView> {
   const now = Date.now();
   if (seasonCache && seasonCache.until > now) return seasonCache.season;
@@ -527,7 +558,9 @@ export async function getActiveSeason(admin: SupabaseClient): Promise<SeasonView
   const season = toSeason(Array.isArray(data) ? data[0] : data);
   currentSeasonStart = season.startsAt;
   currentCompanyModel = season.number >= COMPANY_SEASON;
+  currentSeasonNumber = season.number;
   setSeasonRules(season.number);
+  await ensureSeasonMap(admin, season);
   seasonCache = { season, until: Math.min(now + 30_000, season.endsAt) };
   return season;
 }

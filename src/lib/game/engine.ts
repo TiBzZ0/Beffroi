@@ -174,6 +174,9 @@ import {
 import { armySize, armyValue, battle, cleanArmy, type Army, type BattleOptions, type Levels, type RoundLog } from "./battle";
 import { settleRift, type RiftState } from "./rift";
 import { armyBoost, hasTrait, type Captain, type Relic, type TraitId } from "./captains";
+import { productionValue, settleS2, type S2State } from "./s2/economy";
+import type { LordS2State } from "./s2/lords";
+import { s2Map } from "./s2/rules";
 import { combatLevels, lockedMen, refRate, settleArmy, type ArmyWorks, type Company, type RecruitOrder } from "./companies";
 import { lin, LIN_ATTACK, LIN_ATTACK_LOSSES, LIN_CAVE_SECONDS, LIN_DONOR_TIERS, LIN_ELAN, LIN_FORT_DAMAGE, LIN_FORTUNE, LIN_GENERATOR_DISCOUNT, LIN_PRODUCTION, LIN_PROTECTED, LIN_PVP_CAP, LIN_REBUILD, LIN_RESEARCH_SPEED, LIN_REVENGE_MS, LIN_RUIN_OUTPUT, LIN_SABOTAGE, LIN_SPEED, LIN_SPY_SPEED, LIN_TROOP_DISCOUNT, LIN_WOUNDED, type LineageState } from "./lineage";
 
@@ -298,6 +301,10 @@ export interface PlayerState {
   abroad?: Army;
   /** Modèle des compagnies en vigueur. Fixé par le serveur selon la saison, jamais enregistré. */
   companyModel?: boolean;
+  /** Saison 2 : château, concessions, convois, fer et or (absent avant la saison 2). */
+  s2?: S2State;
+  /** Saison 2 : fief et garnison d'un seigneur. */
+  lordS2?: LordS2State;
   /** F1 : la faille (semaine, plus haut étage, repos des compagnies, expédition). */
   rift?: RiftState | null;
   /** C3, F3 : capitaines, reliques, et les trois traits proposés au dernier recrutement. */
@@ -685,6 +692,9 @@ export function legacyStartUntil(state: PlayerState): number {
 
 /** Production de pierre par seconde pour un nombre d'étapes terminées donné. */
 export function productionPerSecond(state: PlayerState, world: WorldState, stagesDone: number): number {
+  // Saison 2 : la production est celle des concessions, en valeur pierre (le château ne produit plus rien).
+  const map = state.s2 ? s2Map() : null;
+  if (state.s2 && map) return (productionValue(state.s2, map) / 3600) * productionMultiplier(state, world, stagesDone);
   let base = 0;
   for (const g of GENERATORS) {
     // L2 : l'Architecte royal fait encore produire les ruines à 50 %.
@@ -770,6 +780,23 @@ export function advance(state: PlayerState, now: number, world: WorldState, opts
   let gain = 0;
   let tithed = 0;
   const tithe = Math.min(MAX_TITHE, Math.max(0, state.tithe ?? 0));
+  const map = state.s2 ? s2Map() : null;
+  if (state.s2 && map) {
+    // Saison 2 : les concessions produisent, les convois rapportent ; un multiplicateur commun (élan, bonus…) par segment.
+    const base = productionValue(state.s2, map) / 3600;
+    const multiplier = (t: number) => (base > 0 ? rateAt(state, world, t, opts) / base : 1);
+    const { s: s2, arrived } = settleS2(state.s2, { map, stageConcessions: stagesDoneAt(world, now) >= 1 ? 1 : 0, multiplier, breakpoints: events.filter((t) => t > state.s2!.at && t < now) }, now);
+    const toBelfry = stagesDoneAt(world, now) < TOTAL_STAGES ? arrived.pierre * tithe : 0;
+    const value = arrived.pierre + arrived.fer * 2 + arrived.or * 4;
+    return {
+      ...state,
+      s2: { ...s2, iron: s2.iron + arrived.fer, gold: s2.gold + arrived.or },
+      stone: state.stone + arrived.pierre - toBelfry,
+      totalProduced: state.totalProduced + value,
+      titheOwed: (state.titheOwed ?? 0) + toBelfry,
+      lastUpdate: now,
+    };
+  }
   let cursor = start;
   for (const t of [...breakpoints, now]) {
     const part = (rateAt(state, world, cursor, opts) * (t - cursor)) / 1000;
