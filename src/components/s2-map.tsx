@@ -25,6 +25,7 @@ import {
   convoyLoad,
   concessionBudget,
   supplyBlocker,
+  SECOND_SLOT_LEVEL,
   concessionBuildMs,
   buildingMs,
   concBuildingMs,
@@ -415,7 +416,7 @@ export function S2Domain({ snap, live, now, run }: { snap: GameSnapshot; live: P
           </div>
         );
       })()}
-      {(s2.launchUntil ?? 0) > now && (
+      {LAUNCH_MULT > 1 && (s2.launchUntil ?? 0) > now && (
         <p className="row-desc">🚀 Lancement : production et charge des convois ×{LAUNCH_MULT} encore {Math.ceil(((s2.launchUntil ?? 0) - now) / 3_600_000)} h.</p>
       )}
 
@@ -543,6 +544,7 @@ export function S2Domain({ snap, live, now, run }: { snap: GameSnapshot; live: P
         })}
       </div>
       {s2.conc.length < slots && <p className="row-desc">Une place libre : choisis un site sur la carte.</p>}
+      {slots < 2 && <p className="row-desc">🔓 Deuxième concession : monte une concession au niveau {SECOND_SLOT_LEVEL} (palier Exploitation), ou attends la première étape du beffroi.</p>}
       {s2.bought < CONCESSION_GOLD.length && (
         <button className="btn" disabled={busy || !!buyConcessionBlocker(s2)} title={buyConcessionBlocker(s2) ?? undefined} onClick={() => void act({ type: "s2", op: "buy" })}>
           Acheter une concession · 🪙 {formatNumber(CONCESSION_GOLD[s2.bought])}

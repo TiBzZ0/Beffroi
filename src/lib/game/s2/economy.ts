@@ -20,7 +20,7 @@ export const MARKET_RATE = 1 / 3;
 export const CONVOY_GOLD = 0.03;
 
 /** REF(j) : production d'une concession typique d'un joueur actif au jour j, en valeur pierre par heure. */
-const REF_POINTS: [number, number][] = [[0, 1_000], [3, 4_000], [7, 12_000], [14, 30_000]];
+const REF_POINTS: [number, number][] = [[0, 1_000], [3, 4_500], [7, 6_500], [14, 9_000]];
 export function REF(day: number): number {
   const d = Math.max(0, day);
   for (let i = 1; i < REF_POINTS.length; i++) {
@@ -49,7 +49,7 @@ export function marketQuote(from: Resource, to: Resource, amount: number): numbe
 export const CONCESSION_MAX_LEVEL = 15;
 export const CONCESSIONS_MAX = 5;
 /** Concessions achetées en or : la 3e, la 4e, la 5e. */
-export const CONCESSION_GOLD = [15_000, 50_000, 150_000];
+export const CONCESSION_GOLD = [10_000, 25_000, 50_000];
 export const LOCAL_STOCK_HOURS = 4;
 
 export function concessionLevelFactor(level: number): number {
@@ -67,7 +67,7 @@ export function rampMs(level: number, top: number, topMs: number): number {
 const H = 3_600_000;
 /** Prix du niveau n (2 à 15) d'une concession, en valeur pierre : bon marché au début, cher à la fin. */
 export function concessionCost(level: number): number {
-  return Math.round(40 * Math.pow(1.8, Math.max(0, level - 2)));
+  return Math.round(40 * Math.pow(2.1, Math.max(0, level - 2)));
 }
 export function concessionBuildMs(level: number): number {
   return rampMs(level - 1, 14, 8 * H);
@@ -84,7 +84,7 @@ export const BUILDINGS: Record<BuildingId, { name: string; icon: string; base: n
 };
 export const BUILDING_IDS = Object.keys(BUILDINGS) as BuildingId[];
 export function buildingCost(id: BuildingId, level: number): number {
-  return Math.round((BUILDINGS[id].base / 10) * Math.pow(1.65, level - 1));
+  return Math.round((BUILDINGS[id].base / 10) * Math.pow(1.85, level - 1));
 }
 export function buildingMs(level: number): number {
   return rampMs(level, BUILDING_MAX, 12 * H);
@@ -129,7 +129,7 @@ export const CONC_BUILDINGS: Record<ConcBuildingId, { name: string; icon: string
 };
 export const CONC_BUILDING_IDS = Object.keys(CONC_BUILDINGS) as ConcBuildingId[];
 export const CONC_BUILDING_MAX = 10;
-export const concBuildingCost = (level: number) => Math.round(30 * Math.pow(1.75, level - 1));
+export const concBuildingCost = (level: number) => Math.round(30 * Math.pow(2.2, level - 1));
 export const concBuildingMs = (level: number) => rampMs(level, CONC_BUILDING_MAX, 4 * H);
 const cbLevel = (c: Concession, id: ConcBuildingId) => c.cb?.[id] ?? 0;
 /** Paliers d'une concession selon son niveau : un nom, et un dessin plus riche sur la carte. */
@@ -219,9 +219,15 @@ export interface S2Context {
   banditsFrom?: number;
 }
 
+/**
+ * Places de concession : la première, la deuxième dès la première étape du beffroi ou dès qu'une concession passe
+ * Exploitation (niveau 5), puis celles achetées en or.
+ */
 export function concessionSlots(s: S2State, ctx: Pick<S2Context, "stageConcessions">): number {
-  return Math.min(CONCESSIONS_MAX, 1 + ctx.stageConcessions + s.bought);
+  const second = ctx.stageConcessions >= 1 || s.conc.some((c) => c.level >= SECOND_SLOT_LEVEL) ? 1 : 0;
+  return Math.min(CONCESSIONS_MAX, 1 + second + s.bought);
 }
+export const SECOND_SLOT_LEVEL = 5;
 
 /** Bonus de région, en part (s'ajoute aux autres bonus). */
 const regionBonus = (s: S2State, res: Resource) =>
@@ -466,8 +472,9 @@ function dispatch(st: S2State, map: S2Map, c: Concession, take: number, dep: num
 }
 
 /** Règle le rythme et la destination d'une concession ; l'effet vaut dès le convoi suivant. */
-/** Lancement : les 24 premières heures après la pose du château, production et charge des convois ×3. */
-export const LAUNCH_MULT = 3;
+/** Lancement : multiplicateur des 24 premières heures (ramené à 1 : plus de bonus de départ, seulement la pierre offerte). */
+/** Retiré à l'équilibrage : un ×3 qui retombe au bout de 24 h donne une chute de production brutale. */
+export const LAUNCH_MULT = 1;
 export const LAUNCH_MS = 24 * 3_600_000;
 /** Pierre offerte à la pose du château, pour bâtir tout de suite. */
 export const START_STONE = 1_000;

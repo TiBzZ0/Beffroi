@@ -21,10 +21,10 @@ function start(): S2State {
 describe("S2 : économie", () => {
   it("REF suit les points de la spécification", () => {
     expect(REF(0)).toBeCloseTo(1_000);
-    expect(REF(3)).toBeCloseTo(4_000);
-    expect(REF(7)).toBeCloseTo(12_000);
-    expect(REF(14)).toBeCloseTo(30_000);
-    expect(REF(5)).toBeGreaterThan(4_000);
+    expect(REF(3)).toBeCloseTo(4_500);
+    expect(REF(7)).toBeCloseTo(6_500);
+    expect(REF(14)).toBeCloseTo(9_000);
+    expect(REF(5)).toBeGreaterThan(4_500);
   });
 
   it("le marché rend le tiers de la valeur", () => {
@@ -133,14 +133,6 @@ describe("S2 : économie", () => {
     expect(sent.value.conc[0].stock).toBeCloseTo(after.conc[0].stock - convoyLoad(s, s.conc[0], map), 6);
   });
 
-  it("lancement : production et charge ×3 pendant 24 h", () => {
-    const s = start();
-    const plain = settleS2(s, ctx(), T0 + 10 * H).arrived.pierre;
-    const boosted = settleS2({ ...s, launchUntil: T0 + 24 * H }, ctx(), T0 + 10 * H);
-    expect(boosted.arrived.pierre).toBeGreaterThan(plain * 2.5);
-    expect(stockFull(boosted.s, boosted.s.conc[0], map)).toBe(false);
-  });
-
   it("bâtiments de concession : payés sur place, bornés par le niveau et le palier", () => {
     let s = start();
     const id = s.conc[0].id;
@@ -190,7 +182,7 @@ describe("S2 : économie", () => {
     const later = settleS2(s, ctx(), arrive + H).s;
     expect(later.conc[0].level).toBe(2);
     expect(later.bld.outils).toBe(1);
-    expect(buyConcession({ ...later, gold: 10_000 }).ok).toBe(false);
-    expect(buyConcession({ ...later, gold: 15_000 }).ok).toBe(true);
+    expect(buyConcession({ ...later, gold: 9_000 }).ok).toBe(false);
+    expect(buyConcession({ ...later, gold: 10_000 }).ok).toBe(true);
   });
 });

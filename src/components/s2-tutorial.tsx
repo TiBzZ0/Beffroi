@@ -36,7 +36,7 @@ const PAGES: { icon: string; title: string; text: string[] }[] = [
     text: [
       "Une concession, c'est une place sur un site : une carrière pour la pierre, une mine pour le fer, un filon pour l'or. Ta première carrière t'est donnée avec ton château.",
       "La concession produit en continu dans son stock local. Toutes les 15 minutes, un convoi part vers ton château avec ce qui s'y trouve. Si le stock est plein, la concession s'arrête : la charronnerie et le relais règlent ça. Au-dessus de 90 %, des brigands rôdent et peuvent en voler une part chaque heure.",
-      "Tu prends d'autres concessions en touchant un site sur la carte. Les étapes du beffroi et l'or t'en ouvrent de nouvelles.",
+      "Tu prends d'autres concessions en touchant un site sur la carte. La deuxième s'ouvre dès qu'une concession atteint le niveau 5 (ou à la première étape du beffroi) ; les suivantes s'achètent en or (10 000, 25 000, 50 000).",
       "Chaque concession se gère à part, dans l'onglet du domaine. Son rythme : prudent pour s'absenter, intensif pour produire plus contre un peu d'or. Ses convois : vers ton château, directement au beffroi (où ils comptent comme un don), ou vers une autre de tes concessions pour remplir sa réserve.",
       "Une concession s'améliore avec ce qu'elle a sur place : sa réserve de chantier, que tu remplis en lui envoyant des ressources depuis le château, puis son propre stock.",
       "En montant de niveau, une concession passe de campement à exploitation (niveau 5), manufacture (10) et grand domaine (15). Elle peut bâtir chez elle un atelier (+production), et dès l'exploitation une écurie (+charge) et un grenier (+stock).",
