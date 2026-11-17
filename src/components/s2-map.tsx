@@ -340,6 +340,24 @@ function S2Panel({ snap, live, now, world, picked, busy, act, castlesOthers }: {
 }
 
 /** Onglet du domaine en saison 2 : concessions, bâtiments d'appui, marché. */
+/** Un chantier en cours : son nom, le temps restant qui défile, et une barre d'avancement. */
+function Work({ icon, label, start, until, now }: { icon: string; label: string; start: number; until: number; now: number }) {
+  const pct = Math.min(100, Math.max(0, ((now - start) / Math.max(1, until - start)) * 100));
+  return (
+    <div className="s2-work">
+      <div className="s2-work-head">
+        <span>
+          {icon} {label}
+        </span>
+        <span className="num">{until > now ? dur(until - now) : "terminé"}</span>
+      </div>
+      <div className="bar bar-thin" role="progressbar" aria-valuenow={Math.round(pct)} aria-valuemin={0} aria-valuemax={100}>
+        <span style={{ width: `${pct}%` }} />
+      </div>
+    </div>
+  );
+}
+
 export function S2Domain({ snap, live, now, run }: { snap: GameSnapshot; live: PlayerState; now: number; run: Run }) {
   const world = snap.s2!;
   const s2 = live.s2;
@@ -368,6 +386,35 @@ export function S2Domain({ snap, live, now, run }: { snap: GameSnapshot; live: P
         <span>⚔️ {formatNumber(s2.iron)} fer</span>
         <span>🪙 {formatNumber(s2.gold)} or</span>
       </div>
+      {(() => {
+        const items: { key: string; icon: string; label: string; start: number; until: number }[] = [];
+        for (const c of s2.conc) {
+          const name = map.sites[c.site]?.name || "Concession";
+          if (c.upUntil && c.upUntil > now) items.push({ key: `up-${c.id}`, icon: "⛏️", label: `${name} → niveau ${c.level + 1}`, start: c.upUntil - concessionBuildMs(c.level + 1), until: c.upUntil });
+          if (c.cwork && c.cwork.until > now) items.push({ key: `cb-${c.id}`, icon: CONC_BUILDINGS[c.cwork.id].icon, label: `${CONC_BUILDINGS[c.cwork.id].name} niv. ${c.cwork.level} · ${name}`, start: c.cwork.until - concBuildingMs(c.cwork.level), until: c.cwork.until });
+        }
+        for (const w of s2.works) if (w.until > now) items.push({ key: `w-${w.id}-${w.level}`, icon: BUILDINGS[w.id].icon, label: `${BUILDINGS[w.id].name} → niveau ${w.level}`, start: w.until - buildingMs(w.level), until: w.until });
+        const moving = s2.convoys.filter((v) => v.arrive > now);
+        if (!items.length && !moving.length) return null;
+        items.sort((a, b) => a.until - b.until);
+        return (
+          <div className="s2-works">
+            <h3>🔨 En cours</h3>
+            {items.map((i) => (
+              <Work key={i.key} icon={i.icon} label={i.label} start={i.start} until={i.until} now={now} />
+            ))}
+            {moving.length > 0 && (
+              <Work
+                icon="🛒"
+                label={`${moving.length} convoi${moving.length > 1 ? "s" : ""} en route · le prochain apporte ${formatNumber(moving.reduce((a, v) => (v.arrive < a.arrive ? v : a)).load)} ${RESOURCE_LABEL[moving.reduce((a, v) => (v.arrive < a.arrive ? v : a)).res]}`}
+                start={moving.reduce((a, v) => (v.arrive < a.arrive ? v : a)).depart}
+                until={Math.min(...moving.map((v) => v.arrive))}
+                now={now}
+              />
+            )}
+          </div>
+        );
+      })()}
       {(s2.launchUntil ?? 0) > now && (
         <p className="row-desc">🚀 Lancement : production et charge des convois ×{LAUNCH_MULT} encore {Math.ceil(((s2.launchUntil ?? 0) - now) / 3_600_000)} h.</p>
       )}
@@ -477,7 +524,9 @@ export function S2Domain({ snap, live, now, run }: { snap: GameSnapshot; live: P
                 </div>
                 {full && <div className="row-desc">⚠️ Stock plein : améliore ta charronnerie ou ton relais.</div>}
                 {c.stock >= BANDIT_HIGH * cap && c.pace !== "prudent" && <div className="row-desc s2-over">🗡️ Stock au-dessus de 90 % : des brigands rôdent. Chaque heure, 30 % de risque d&apos;en perdre 20 %. Vide-le, ou passe en prudent.</div>}
-                {c.upUntil && c.upUntil > now && <div className="row-desc">🔨 Niveau {c.level + 1} dans {dur(c.upUntil - now)}.</div>}
+                {c.upUntil && c.upUntil > now && <Work icon="⛏️" label={`Niveau ${c.level + 1}`} start={c.upUntil - concessionBuildMs(c.level + 1)} until={c.upUntil} now={now} />}
+                {c.cwork && c.cwork.until > now && <Work icon={CONC_BUILDINGS[c.cwork.id].icon} label={`${CONC_BUILDINGS[c.cwork.id].name} niveau ${c.cwork.level}`} start={c.cwork.until - concBuildingMs(c.cwork.level)} until={c.cwork.until} now={now} />}
+                {!c.manual && <Work icon="🛒" label="Prochain convoi" start={c.next - convoyIntervalMs(s2)} until={c.next} now={now} />}
               </div>
               <div className="s2-actions">
                 {c.level < CONCESSION_MAX_LEVEL && (
@@ -512,7 +561,7 @@ export function S2Domain({ snap, live, now, run }: { snap: GameSnapshot; live: P
               <div>
                 <div className="row-title">{def.icon} {def.name} <span className="badge">niv. {s2.bld[id]}</span></div>
                 <div className="row-desc">{def.text}</div>
-                {work.map((w) => <div key={w.level} className="row-desc">🔨 Niveau {w.level} dans {dur(w.until - now)}.</div>)}
+                {work.map((w) => <Work key={w.level} icon="🔨" label={`Niveau ${w.level}`} start={w.until - buildingMs(w.level)} until={w.until} now={now} />)}
               </div>
               <button className="btn btn-small btn-primary" disabled={busy || !!why} title={why ?? undefined} onClick={() => void act({ type: "s2", op: "build", building: id })}>
                 Niveau {next} · 🪨 {formatNumber(Math.ceil(buildingCost(id, next) * discount))} · {dur(buildingMs(next))}

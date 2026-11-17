@@ -2779,3 +2779,8 @@ use.g-enemy {
 .s2-settings { display: flex; flex-wrap: wrap; align-items: center; gap: 4px; margin-top: 4px; font-size: 0.85em; }
 .s2-settings > span { color: var(--muted, #8a8070); margin-right: 4px; min-width: 6.5em; }
 .s2-over { color: #d9822b; }
+
+.s2-works { margin: 8px 0 12px; display: grid; gap: 6px; }
+.s2-works h3 { margin: 0 0 2px; }
+.s2-work { display: grid; gap: 3px; margin-top: 4px; }
+.s2-work-head { display: flex; justify-content: space-between; gap: 8px; font-size: 0.85rem; color: var(--ink-soft); }
