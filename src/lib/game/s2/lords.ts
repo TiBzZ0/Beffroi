@@ -34,12 +34,12 @@ export function newLordS2State(now: number): LordS2State {
 const dayOf = (seasonStart: number, t: number) => Math.max(0, (t - seasonStart) / 86_400_000);
 
 /** Types des compagnies d'un seigneur, d'après le mélange de troupes de son tempérament. */
-export function garrisonUnits(lordId: string, rank: Rank): UnitId[] {
+export function garrisonUnits(lordId: string, rank: Rank, companies = RANKS[rank].companies): UnitId[] {
   const def = LORDS.find((l) => l.id === lordId);
   const mix = def ? LORD_ARMY[def.key].troops : {};
   const entries = (Object.entries(mix).length ? Object.entries(mix) : [["piquier", 0.6], ["milicien", 0.4]]) as [UnitId, number][];
   entries.sort((a, b) => b[1] - a[1]);
-  const n = RANKS[rank].companies;
+  const n = companies;
   const counts = entries.map(([u, share]) => ({ u, k: Math.floor(share * n), rest: share * n - Math.floor(share * n) }));
   let left = n - counts.reduce((a, c) => a + c.k, 0);
   for (const c of [...counts].sort((a, b) => b.rest - a.rest)) {
@@ -59,15 +59,14 @@ export function lordTrain(rank: Rank, seasonStart: number, now: number): number 
 }
 
 /** Compagnies présentes au fief : toutes, sauf pendant la reformation (linéaire sur 12 h). */
-export function companiesHome(rank: Rank, ls: LordS2State, now: number): number {
-  const n = RANKS[rank].companies;
+export function companiesHome(n: number, ls: LordS2State, now: number): number {
   if (!ls.beatenAt || now >= ls.beatenAt + REFORM_MS) return n;
   return Math.min(n, Math.floor((n * Math.max(0, now - ls.beatenAt)) / REFORM_MS));
 }
 
 /** Garnison : troupes, fortifications (ducs), niveaux de combat. */
 export function garrison(lord: MapLord, ls: LordS2State, seasonStart: number, now: number): { army: Army; levels: Levels; companies: number } {
-  const units = garrisonUnits(lord.id, lord.rank).slice(0, companiesHome(lord.rank, ls, now));
+  const units = garrisonUnits(lord.id, lord.rank, lord.companies).slice(0, companiesHome(lord.companies, ls, now));
   const army: Record<string, number> = {};
   for (const u of units) army[u] = (army[u] ?? 0) + COMPANY_CAP[u];
   const forts = RANKS[lord.rank].forts;

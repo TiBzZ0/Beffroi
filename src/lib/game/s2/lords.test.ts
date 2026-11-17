@@ -13,7 +13,8 @@ describe("S2 : seigneurs", () => {
 
   it("garnisons en compagnies pleines selon le rang", () => {
     expect(garrisonUnits(duc.id, "duc")).toHaveLength(10);
-    expect(garrisonUnits(hob.id, "hobereau")).toHaveLength(1);
+    expect(garrisonUnits(hob.id, "hobereau", hob.companies)).toHaveLength(hob.companies);
+    expect(map.lords.filter((l) => l.rank === "hobereau" && l.companies === 1)).toHaveLength(4);
     const g = garrison(duc, newLordS2State(T0), T0, T0 + 9 * D);
     expect(g.companies).toBe(10);
     expect((g.army as Record<string, number>).muraille).toBeGreaterThan(0);
@@ -28,8 +29,8 @@ describe("S2 : seigneurs", () => {
     const loot = fiefLoot(ls, 1, T0, T0 + 2 * D);
     expect(loot.fer).toBeGreaterThanOrEqual(Math.floor(0.5 * REF(2) / 2));
     ls = afterDefeat(ls, T0 + 2 * D);
-    expect(companiesHome("hobereau", ls, T0 + 2 * D)).toBe(0);
-    expect(companiesHome("duc", ls, T0 + 2 * D + REFORM_MS / 2)).toBe(5);
-    expect(companiesHome("duc", ls, T0 + 2 * D + REFORM_MS)).toBe(10);
+    expect(companiesHome(2, ls, T0 + 2 * D)).toBe(0);
+    expect(companiesHome(10, ls, T0 + 2 * D + REFORM_MS / 2)).toBe(5);
+    expect(companiesHome(10, ls, T0 + 2 * D + REFORM_MS)).toBe(10);
   });
 });

@@ -37,7 +37,7 @@ export const RANKS: Record<Rank, { name: string; count: number; companies: numbe
   duc: { name: "Duc", count: 2, companies: 10, train: 8, conc: 2, zone: 4, forts: 5 },
   comte: { name: "Comte", count: 4, companies: 5, train: 5, conc: 2, zone: 3, forts: 0 },
   baron: { name: "Baron", count: 6, companies: 3, train: 2, conc: 1, zone: 3, forts: 0 },
-  hobereau: { name: "Hobereau", count: 8, companies: 1, train: 0, conc: 1, zone: 2, forts: 0 },
+  hobereau: { name: "Hobereau", count: 8, companies: 2, train: 0, conc: 1, zone: 2, forts: 0 },
 };
 export const RANK_ORDER: Rank[] = ["duc", "comte", "baron", "hobereau"];
 
@@ -54,6 +54,8 @@ export interface MapLord {
   id: string;
   pos: Pos;
   rank: Rank;
+  /** Compagnies de sa garnison (les hobereaux les plus éloignés du centre n'en ont qu'une). */
+  companies: number;
   /** Sites où il tient une place (un site peut revenir deux fois). */
   conc: number[];
 }
@@ -177,7 +179,9 @@ function assignLords(spots: Pos[], sites: Site[]): MapLord[] {
         used.set(s.id, (used.get(s.id) ?? 0) + 1);
         conc.push(s.id);
       }
-      out.push({ id: byPower[k].id, pos, rank, conc });
+      // Hobereaux : les quatre plus éloignés du centre n'ont qu'une compagnie.
+      const companies = rank === "hobereau" && i >= RANKS.hobereau.count / 2 ? 1 : RANKS[rank].companies;
+      out.push({ id: byPower[k].id, pos, rank, companies, conc });
     }
   }
   return out;
