@@ -3706,6 +3706,8 @@ function buildReports(snap: GameSnapshot, live: PlayerState, now: number): Repor
   const me = snap.userId;
   const myAlliance = snap.alliance?.id ?? null;
   const out: Report[] = (snap.chronicle ?? []).map((e) => reportOf(e, me, myAlliance, snap.rivals, snap.alliances));
+  // Saison 2 : brigands sur les concessions trop pleines.
+  for (const [i, l] of (live.s2?.log ?? []).entries()) out.push({ key: `s2log${l.at}-${i}`, cat: "chantier", icon: l.text.startsWith("🗡️") ? "🗡️" : "⚠️", title: l.text.length > 48 ? `${l.text.slice(0, 46)}…` : l.text, chips: [], at: l.at, text: l.text });
   for (const [i, l] of (live.spyLog ?? []).entries()) out.push({ key: `log${l.at}-${i}`, cat: "espionnage", icon: "🐀", title: l.text.length > 48 ? `${l.text.slice(0, 46)}…` : l.text, chips: [], at: l.at, text: l.text });
   for (const r of snap.rivals) {
     if (!(r.intelUntil > now)) continue;

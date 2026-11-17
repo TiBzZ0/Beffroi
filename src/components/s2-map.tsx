@@ -25,6 +25,7 @@ import {
   convoyLoad,
   concessionBudget,
   supplyBlocker,
+  BANDIT_HIGH,
   fundRoom,
   VALUE,
   PACES,
@@ -426,6 +427,7 @@ export function S2Domain({ snap, live, now, run }: { snap: GameSnapshot; live: P
                   })()}
                 </div>
                 {full && <div className="row-desc">⚠️ Stock plein : améliore ta charronnerie ou ton relais.</div>}
+                {c.stock >= BANDIT_HIGH * cap && c.pace !== "prudent" && <div className="row-desc s2-over">🗡️ Stock au-dessus de 90 % : des brigands rôdent. Chaque heure, 30 % de risque d&apos;en perdre 20 %. Vide-le, ou passe en prudent.</div>}
                 {c.upUntil && c.upUntil > now && <div className="row-desc">🔨 Niveau {c.level + 1} dans {minutes(c.upUntil - now)} min.</div>}
               </div>
               <div className="s2-actions">

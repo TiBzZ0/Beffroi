@@ -100,6 +100,9 @@ export interface Concession {
   dest?: Dest;
   /** Convois envoyés à une autre de ses concessions (sa réserve de chantier) ; prime sur `dest`. */
   destConc?: string;
+  /** Brigands : prochain passage (stock au-dessus de 90 % depuis une heure), et avis déjà donné. */
+  banditAt?: number;
+  warned?: boolean;
   /** Réserve de chantier, en valeur pierre : ce que le château lui a envoyé, pour ses améliorations. */
   fund?: number;
 }
@@ -145,6 +148,8 @@ export interface S2State {
   produced: number;
   /** Convois livrés au beffroi, en valeur pierre, pas encore versés au chantier. */
   giftOwed?: number;
+  /** Ce qui s'est passé sur les concessions (brigands), pour la boîte de réception. */
+  log?: { at: number; text: string }[];
   /** S10, Lignée (fixés à chaque calcul, jamais lus de la base) : Cave profonde, heures de stock local en plus. */
   stockBonusHours?: number;
   /** Charpentiers : convois plus rapides (part). */
@@ -168,6 +173,8 @@ export interface S2Context {
   breakpoints?: number[];
   /** Beffroi achevé : les convois qui devaient y aller rentrent au château. */
   belfryDone?: boolean;
+  /** Pas de brigands avant cet instant (48 h après l'arrivée du joueur). */
+  banditsFrom?: number;
 }
 
 export function concessionSlots(s: S2State, ctx: Pick<S2Context, "stageConcessions">): number {
@@ -250,11 +257,45 @@ export function settleS2(s: S2State, ctx: S2Context, now: number): { s: S2State;
       let cap = localCap(st, c, ctx.map);
       const load = convoyLoad(st, c, ctx.map);
       let t = cursor;
-      // Départs dans le segment.
-      while (c.next <= end) {
+      const name = site.name || site.type;
+      // Le stock monte jusqu'à `to` ; au passage des 90 %, un avis, et les brigands rôdent une heure plus tard.
+      const grow = (to: number) => {
+        const before = c.stock;
+        c.stock = Math.min(cap, c.stock + rate * (to - t));
+        const hi = BANDIT_HIGH * cap;
+        if (before < hi && c.stock >= hi && rate > 0) {
+          const tc = t + (hi - before) / rate;
+          if (!c.warned) {
+            c.warned = true;
+            log(st, tc, `⚠️ Stock presque plein à ${name} : des brigands rôdent.`);
+          }
+          c.banditAt ??= tc + BANDIT_EVERY_MS;
+        }
+        t = to;
+      };
+      // Sous 70 %, l'avis pourra revenir.
+      const settled = () => {
+        if (c.stock < BANDIT_CLEAR * cap) delete c.warned;
+      };
+      if (c.stock >= BANDIT_HIGH * cap) c.banditAt ??= t + BANDIT_EVERY_MS;
+      // Départs et passages des brigands dans le segment, dans l'ordre.
+      while (Math.min(c.next, c.banditAt ?? Infinity) <= end) {
+        if (c.banditAt !== undefined && c.banditAt < c.next) {
+          const at = c.banditAt;
+          grow(Math.max(at, t));
+          if (c.pace !== "prudent" && at >= (ctx.banditsFrom ?? 0) && c.stock >= BANDIT_HIGH * cap - 1e-6 && roll(c.id, at) < BANDIT_CHANCE) {
+            const stolen = c.stock * BANDIT_SHARE;
+            c.stock -= stolen;
+            log(st, at, `🗡️ Brigands à ${name} : −${Math.round(stolen).toLocaleString("fr-FR")} ${site.type}.`);
+          }
+          // Encore au-dessus de 90 % : ils repassent dans une heure ; sinon ils attendent le prochain passage des 90 %.
+          if (c.stock >= BANDIT_HIGH * cap - 1e-6) c.banditAt = at + BANDIT_EVERY_MS;
+          else delete c.banditAt;
+          settled();
+          continue;
+        }
         const dep = Math.max(c.next, t);
-        c.stock = Math.min(cap, c.stock + rate * (dep - t));
-        t = dep;
+        grow(dep);
         const take = Math.min(c.stock, load);
         if (take >= 1) {
           c.stock -= take;
@@ -279,8 +320,9 @@ export function settleS2(s: S2State, ctx: S2Context, now: number): { s: S2State;
           }
         }
         c.next = dep + interval;
+        settled();
       }
-      c.stock = Math.min(cap, c.stock + rate * (end - t));
+      grow(end);
     }
     // Chantiers finis à `end`.
     st.conc = st.conc.map((c) => (c.upUntil && c.upUntil <= end ? { ...c, level: Math.min(CONCESSION_MAX_LEVEL, c.level + 1), upUntil: undefined } : c));
@@ -343,6 +385,25 @@ export function takeConcession(s: S2State, ctx: S2Context, siteId: number, occ: 
 
 /** Abandonner une concession : sans remboursement, niveau perdu, la place se libère. */
 /** Règle le rythme et la destination d'une concession ; l'effet vaut dès le convoi suivant. */
+/** Brigands (dès la vague A) : une heure après que le stock local a passé 90 %, puis toutes les heures tant qu'il y est encore. */
+export const BANDIT_HIGH = 0.9;
+export const BANDIT_CLEAR = 0.7;
+export const BANDIT_CHANCE = 0.3;
+export const BANDIT_SHARE = 0.2;
+export const BANDIT_EVERY_MS = 3_600_000;
+/** Pas de brigands pendant les 48 premières heures d'un joueur. */
+export const BANDIT_GRACE_MS = 48 * 3_600_000;
+const LOG_MAX = 30;
+function roll(id: string, at: number): number {
+  let h = 2166136261 ^ Math.floor(at / 1000);
+  for (let i = 0; i < id.length; i++) h = Math.imul(h ^ id.charCodeAt(i), 16777619);
+  h = Math.imul(h ^ (h >>> 15), 2246822507);
+  return ((h ^ (h >>> 13)) >>> 0) / 4294967296;
+}
+function log(st: S2State, at: number, text: string) {
+  st.log = [...(st.log ?? []), { at: Math.round(at), text }].slice(-LOG_MAX);
+}
+
 export function setConcession(s: S2State, id: string, pace: unknown, dest: unknown): R<S2State> {
   const c = s.conc.find((x) => x.id === id);
   if (!c) return fail("Concession inconnue.");
@@ -498,7 +559,7 @@ export function cleanS2(raw: unknown, now: number): S2State {
       .slice(0, CONCESSIONS_MAX)
       .map((c) => {
         const x = c as Record<string, unknown>;
-        return { id: String(x.id), site: Math.floor(num(x.site)), level: Math.min(CONCESSION_MAX_LEVEL, Math.max(1, Math.floor(num(x.level, 1)))), stock: num(x.stock), next: num(x.next) || now, ...(num(x.upUntil) > 0 ? { upUntil: num(x.upUntil) } : {}), ...(x.pace === "prudent" || x.pace === "intensif" ? { pace: x.pace } : {}), ...(x.dest === "beffroi" ? { dest: "beffroi" as const } : {}), ...(num(x.fund) > 0 ? { fund: num(x.fund) } : {}), ...(typeof x.destConc === "string" ? { destConc: x.destConc } : {}) };
+        return { id: String(x.id), site: Math.floor(num(x.site)), level: Math.min(CONCESSION_MAX_LEVEL, Math.max(1, Math.floor(num(x.level, 1)))), stock: num(x.stock), next: num(x.next) || now, ...(num(x.upUntil) > 0 ? { upUntil: num(x.upUntil) } : {}), ...(x.pace === "prudent" || x.pace === "intensif" ? { pace: x.pace } : {}), ...(x.dest === "beffroi" ? { dest: "beffroi" as const } : {}), ...(num(x.fund) > 0 ? { fund: num(x.fund) } : {}), ...(typeof x.destConc === "string" ? { destConc: x.destConc } : {}), ...(num(x.banditAt) > 0 ? { banditAt: num(x.banditAt) } : {}), ...(x.warned === true ? { warned: true } : {}) };
       }),
     convoys: (Array.isArray(r.convoys) ? r.convoys : [])
       .filter((v) => v && typeof v === "object" && RES.includes((v as Convoy).res))
@@ -515,5 +576,6 @@ export function cleanS2(raw: unknown, now: number): S2State {
     at: num(r.at) || now,
     produced: num(r.produced),
     ...(num(r.giftOwed) > 0 ? { giftOwed: num(r.giftOwed) } : {}),
+    ...(Array.isArray(r.log) ? { log: (r.log as { at?: unknown; text?: unknown }[]).filter((l) => l && typeof l.text === "string").slice(-LOG_MAX).map((l) => ({ at: num(l.at), text: String(l.text).slice(0, 200) })) } : {}),
   };
 }

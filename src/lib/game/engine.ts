@@ -176,7 +176,7 @@ import {
 import { armySize, armyValue, battle, cleanArmy, type Army, type BattleOptions, type Levels, type RoundLog } from "./battle";
 import { settleRift, type RiftState } from "./rift";
 import { armyBoost, hasTrait, type Captain, type Relic, type TraitId } from "./captains";
-import { productionValue, settleS2, VALUE as S2_VALUE, type S2State } from "./s2/economy";
+import { BANDIT_GRACE_MS, productionValue, settleS2, VALUE as S2_VALUE, type S2State } from "./s2/economy";
 import type { LordS2State } from "./s2/lords";
 import { s2Map } from "./s2/rules";
 import { combatLevels, lockedMen, refRate, settleArmy, type ArmyWorks, type Company, type RecruitOrder } from "./companies";
@@ -800,7 +800,7 @@ export function advance(state: PlayerState, now: number, world: WorldState, opts
     const multiplier = (t: number) => (base > 0 ? rateAt(state, world, t, opts) / base : 1);
     // S10 : Cave profonde (+30 min de stock local), Charpentiers (convois 10 % plus rapides), Grands chariots (charge +25 %).
     const perked = { ...state.s2, stockBonusHours: lin(state, "cave") ? 0.5 : 0, convoySpeed: lin(state, "charpentiers") ? 0.1 : 0, loadBonus: lin(state, "fondations") ? 0.25 : 0 };
-    const { s: s2, arrived } = settleS2(perked, { map, stageConcessions: stagesDoneAt(world, now) >= 1 ? 1 : 0, multiplier, breakpoints: events.filter((t) => t > state.s2!.at && t < now), belfryDone: stagesDoneAt(world, now) >= TOTAL_STAGES }, now);
+    const { s: s2, arrived } = settleS2(perked, { map, stageConcessions: stagesDoneAt(world, now) >= 1 ? 1 : 0, multiplier, breakpoints: events.filter((t) => t > state.s2!.at && t < now), belfryDone: stagesDoneAt(world, now) >= TOTAL_STAGES, banditsFrom: (state.seasonStart || 0) + BANDIT_GRACE_MS }, now);
     const toBelfry = stagesDoneAt(world, now) < TOTAL_STAGES ? arrived.pierre * tithe : 0;
     const value = arrived.pierre + arrived.fer * 2 + arrived.or * 4;
     return {

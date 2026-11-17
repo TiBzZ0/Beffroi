@@ -96,6 +96,26 @@ describe("S2 : économie", () => {
     expect(arrived[map.sites[a.site].type]).toBeGreaterThan(0);
   });
 
+  it("des brigands volent une concession restée au-dessus de 90 %, jamais en prudent ni pendant la grâce", () => {
+    const s = start();
+    const c = s.conc[0];
+    // Une concession pleine, dont la charge ne suit pas : elle reste au plafond.
+    const full = { ...s, conc: [{ ...c, stock: localCap(s, c, map) }] };
+    const hurt = settleS2(full, { ...ctx(), multiplier: () => 3 }, T0 + 48 * H).s;
+    const thefts = (hurt.log ?? []).filter((l) => l.text.startsWith("🗡️"));
+    expect(hurt.log?.[0].text.startsWith("⚠️") || thefts.length > 0).toBe(true);
+    expect(thefts.length).toBeGreaterThan(5);
+    expect(thefts.length).toBeLessThan(30);
+    // Même calcul en deux fois : mêmes vols.
+    const mid = settleS2(full, { ...ctx(), multiplier: () => 3 }, T0 + 20 * H).s;
+    const two = settleS2(mid, { ...ctx(), multiplier: () => 3 }, T0 + 48 * H).s;
+    expect((two.log ?? []).filter((l) => l.text.startsWith("🗡️")).length).toBe(thefts.length);
+    const safe = settleS2({ ...full, conc: [{ ...full.conc[0], pace: "prudent" as const }] }, { ...ctx(), multiplier: () => 3 }, T0 + 48 * H).s;
+    expect((safe.log ?? []).some((l) => l.text.startsWith("🗡️"))).toBe(false);
+    const grace = settleS2(full, { ...ctx(), multiplier: () => 3, banditsFrom: T0 + 100 * H }, T0 + 48 * H).s;
+    expect((grace.log ?? []).some((l) => l.text.startsWith("🗡️"))).toBe(false);
+  });
+
   it("améliorations, bâtiments et concessions achetées", () => {
     let s = start();
     // Rien en réserve ni en stock : il faut ravitailler la concession.
