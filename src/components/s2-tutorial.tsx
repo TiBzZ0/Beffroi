@@ -2,7 +2,9 @@
 
 // Saison 2 : un guide pas à pas pour le début (S2Guide), et les règles en quelques pages, ouvertes par
 // « Règles », « ? » ou « Comment jouer ». Ce qui a été fait est gardé dans le navigateur (simple confort).
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
+import { createPortal } from "react-dom";
+import { concessionSlots } from "@/lib/game/s2/economy";
 import type { PlayerState } from "@/lib/game/engine";
 
 const OPEN_EVENT = "beffroi:tutoriel";
@@ -17,71 +19,113 @@ const PAGES: { icon: string; title: string; text: string[] }[] = [
     icon: "🗺️",
     title: "Bienvenue dans la saison 2",
     text: [
-      "Le royaume est maintenant une grande carte de 41 cases sur 41, découpée en sept régions. Chaque région donne un bonus à ceux qui s'y installent.",
-      "Tu commences par poser ton château où tu veux, hors du centre, à deux cases au moins des sites, des seigneurs et des autres châteaux. Les cases libres sont marquées d'un point blanc.",
+      "Le royaume est une carte de 41 cases sur 41. Au centre, le beffroi que tout le monde bâtit ensemble ; autour, sept régions, des sites de ressources et vingt seigneurs.",
+      "Ton but : faire grandir ton domaine (concessions, bâtiments), lever une armée pour battre les seigneurs, et aider à achever le beffroi. Les classements de fin de saison rapportent des écus.",
+      "Ces pages sont la référence. Le guide en bas de l'écran (🧭) te montre, lui, quoi toucher à chaque étape du début.",
+    ],
+  },
+  {
+    icon: "🏰",
+    title: "Poser son château",
+    text: [
+      "Touche une case marquée d'un point blanc sur la carte : hors du tourbillon central, à deux cases au moins des sites, des seigneurs et des autres châteaux.",
+      "Tu reçois une carrière proche, 1 000 pierre pour bâtir tout de suite et une compagnie de miliciens.",
+      "La région compte : ❄️ Froid +10 % de défense, ⛰️ Montagne +10 % sur les carrières, 🌾 Plaine armées et convois 10 % plus rapides, ⛏️ Collines +10 % sur les mines, 🏜️ Désert +10 % de butin sur les convois, ⚓ Côte +10 % d'or, 🌲 Forêt espions plus sûrs.",
+      "Reste près de plusieurs sites : tes convois feront moins de route (30 secondes par case).",
     ],
   },
   {
     icon: "💰",
     title: "Trois monnaies",
     text: [
-      "🪨 La pierre sert à bâtir : tes bâtiments d'appui, le ravitaillement de tes concessions, et faire monter le beffroi.",
-      "⚔️ Le fer paie l'armée : recruter et entraîner tes compagnies. Tu démarres avec 30 000 fer.",
-      "🪙 L'or paie l'espionnage et les concessions en plus. Chaque convoi qui arrive en rapporte un peu.",
+      "🪨 La pierre bâtit : bâtiments d'appui, ravitaillement des concessions, caserne, fortifications, et le beffroi.",
+      "⚔️ Le fer paie l'armée : recruter (20 à 300 fer l'homme) et entraîner. Tu démarres avec 30 000 fer ; les mines et les seigneurs en rapportent.",
+      "🪙 L'or paie l'espionnage, le rythme intensif et les concessions en plus. Chaque convoi arrivé en rapporte 3 % de sa valeur, et les filons en produisent.",
+      "⚖️ Le marché, dans le domaine, échange tout de suite au tiers de la valeur (1 or = 2 fer = 4 pierre).",
     ],
   },
   {
     icon: "⛏️",
     title: "Concessions et convois",
     text: [
-      "Une concession, c'est une place sur un site : une carrière pour la pierre, une mine pour le fer, un filon pour l'or. Ta première carrière t'est donnée avec ton château.",
-      "La concession produit en continu dans son stock local. Toutes les 15 minutes, un convoi part vers ton château avec ce qui s'y trouve. Si le stock est plein, la concession s'arrête : la charronnerie et le relais règlent ça. Au-dessus de 90 %, des brigands rôdent et peuvent en voler une part chaque heure.",
-      "Tu prends d'autres concessions en touchant un site sur la carte. La deuxième s'ouvre dès qu'une concession atteint le niveau 5 (ou à la première étape du beffroi) ; les suivantes s'achètent en or (10 000, 25 000, 50 000).",
-      "Chaque concession se gère à part, dans l'onglet du domaine. Son rythme : prudent pour s'absenter, intensif pour produire plus contre un peu d'or. Ses convois : vers ton château, directement au beffroi (où ils comptent comme un don), ou vers une autre de tes concessions pour remplir sa réserve.",
-      "Une concession s'améliore avec ce qu'elle a sur place : sa réserve de chantier, que tu remplis en lui envoyant des ressources depuis le château, puis son propre stock.",
-      "En montant de niveau, une concession passe de campement à exploitation (niveau 5), manufacture (10) et grand domaine (15). Elle peut bâtir chez elle un atelier (+production), et dès l'exploitation une écurie (+charge) et un grenier (+stock).",
+      "Une concession est une place sur un site : carrière (pierre), mine (fer) ou filon (or). Les grands sites (8 places au centre, 6 ailleurs) produisent davantage.",
+      "Elle produit dans son stock local. Toutes les 15 minutes, un convoi part vers ton château avec une charge : la production d'un intervalle. Si la production dépasse la charge, le stock monte ; plein, la concession s'arrête.",
+      "Au-dessus de 90 % de stock, des brigands rôdent : une heure après, puis chaque heure, 30 % de risque de perdre 20 % du stock. Vide-le ou passe en prudent.",
+      "Places : la première avec ton château, la deuxième dès qu'une concession atteint le niveau 5 (ou à la première étape du beffroi), puis trois à acheter en or (10 000, 25 000, 50 000).",
+    ],
+  },
+  {
+    icon: "🎛️",
+    title: "Gérer chaque concession",
+    text: [
+      "Rythme : 🐢 prudent (−20 % de production, stock ×2, à l'abri des brigands) pour t'absenter ; normal ; 🔥 intensif (+25 %, contre 5 % de la valeur de chaque convoi en or).",
+      "Départs : automatiques, ou à la main pour garder le stock sur place et payer les améliorations avec.",
+      "Convois vers : ton château, le beffroi (chaque convoi compte comme un don entier), ou une autre de tes concessions pour remplir sa réserve.",
+      "La ligne « Charge / production par intervalle » passe en orange quand la charge ne suit plus : c'est le signal de monter la charronnerie ou l'écurie.",
+    ],
+  },
+  {
+    icon: "📈",
+    title: "Faire grandir une concession",
+    text: [
+      "Une concession s'améliore avec ce qu'elle a sur place : sa réserve de chantier d'abord, puis son stock. Remplis la réserve avec « Ravitailler » (pierre, fer ×2, or ×4) ; elle accepte au plus le coût des deux prochains niveaux.",
+      "Chaque niveau : +15 % de production et de charge. Paliers : ⛺ Campement (1-4), 🏚️ Exploitation (5-9), 🏭 Manufacture (10-14), 🏰 Grand domaine (15, +10 % et ta bannière sur la carte).",
+      "Bâtiments de concession, jusqu'au niveau 10 et jamais au-dessus du niveau de la concession : ⚒️ atelier (+8 % de production par niveau), et dès l'Exploitation 🐴 écurie (+10 % de charge) et 🌾 grenier (+25 % de stock).",
+      "Les premiers niveaux se bâtissent en quelques secondes ; les derniers prennent des heures. Lance les longs chantiers avant de partir.",
+    ],
+  },
+  {
+    icon: "🏗️",
+    title: "Bâtiments d'appui (château)",
+    text: [
+      "Payés en pierre du château, deux chantiers à la fois, jusqu'au niveau 20. Ils valent pour toutes tes concessions.",
+      "🛠️ Outils : +3 % de production par niveau. 🛞 Charronnerie : +10 % de charge par niveau. 🐎 Relais : un convoi 20 s plus tôt par niveau (5 min au plus court), et 3 % plus rapide.",
+      "🏚️ Entrepôt : +30 min de stock local par niveau, et plus de pierre à l'abri au château en cas de raid.",
     ],
   },
   {
     icon: "🔨",
     title: "Le marteau et l'élan",
     text: [
-      "Le marteau ne taille plus la pierre : il allume l'élan. Tant que l'élan dure, toute ta production gagne 25 %.",
-      "Chaque coup ajoute quelques secondes d'élan. Passe de temps en temps pour le raviver.",
-    ],
-  },
-  {
-    icon: "🏗️",
-    title: "Bâtiments d'appui",
-    text: [
-      "🛠️ Les outils : +3 % de production sur toutes tes concessions par niveau.",
-      "🛞 La charronnerie : des convois plus chargés. 🐎 Le relais : des convois plus fréquents et plus rapides.",
-      "🏚️ L'entrepôt : un stock local plus grand, et plus de pierre à l'abri au château.",
+      "Le marteau ne taille plus la pierre : chaque coup allume l'élan. Tant qu'il dure, toute ta production gagne 25 %.",
+      "La jauge se remplit de quelques secondes par coup, jusqu'à un plafond. Passe la raviver de temps en temps.",
     ],
   },
   {
     icon: "🛡️",
-    title: "Ton armée et les seigneurs",
+    title: "L'armée",
     text: [
-      "Une compagnie de miliciens t'est offerte à la pose du château. Recrute et entraîne d'autres compagnies avec ton fer, dans l'onglet Armée.",
-      "Les seigneurs gardent leur fief avec de vraies compagnies : hobereaux, barons, comtes et ducs, du plus faible au plus fort. Commence par les hobereaux, loin du centre.",
-      "Une victoire emporte 60 % de leur fief et du fer pour chaque compagnie battue. La garnison se reforme ensuite en 12 heures.",
+      "Onglet Armée. Une compagnie a un type d'unité (miliciens, piquiers, arbalétriers, chevaliers, béliers) et un plafond d'hommes. La caserne ajoute des compagnies et des files de recrutement.",
+      "Recruter coûte du fer et prend quelques secondes par homme. L'entraînement (🎯, 10 niveaux) rend la compagnie plus forte : +8 % d'attaque et de vie par niveau.",
+      "Les fortifications défendent ton château. Les blessés reviennent avec le temps.",
+    ],
+  },
+  {
+    icon: "⚔️",
+    title: "Les seigneurs",
+    text: [
+      "Vingt seigneurs tiennent un fief : 🛡️ hobereaux (1 à 2 compagnies), barons, comtes, puis ducs près du centre. Ils n'attaquent jamais les joueurs.",
+      "Touche leur écu sur la carte pour voir leur garnison, puis « Attaquer ». Ton armée marche, se bat, et rentre avec le butin.",
+      "Une victoire emporte 60 % de leur fief (pierre, fer, or) et du fer pour chaque compagnie battue. La garnison se reforme ensuite, puis le fief se remplit à nouveau.",
+      "Commence par les hobereaux loin du centre ; les ducs se battent en alliance.",
     ],
   },
   {
     icon: "🔔",
     title: "Le beffroi et le centre",
     text: [
-      "Au centre se dressent le beffroi, la faille et une forteresse. Personne ne peut y bâtir de château.",
-      "Le beffroi se construit tous ensemble, avec la pierre. Chaque étape achevée donne un bonus à tout le royaume : une concession de plus, des gardiens de faille affaiblis, une compagnie de plus…",
+      "Le tourbillon violet au centre (et les cases qui flanquent les forteresses) est interdit aux châteaux. On y trouve le beffroi, la faille et les forteresses.",
+      "Le beffroi se bâtit tous ensemble, en pierre : verse depuis l'onglet Chantier, règle une dîme automatique, ou envoie-y directement les convois d'une concession.",
+      "Chaque étape achevée donne un bonus à tout le royaume (concession, gardiens de faille affaiblis, compagnie et entraînement plus rapide, production). Les meilleurs donateurs gagnent des écus.",
     ],
   },
   {
-    icon: "⚖️",
-    title: "Le marché",
+    icon: "🤝",
+    title: "Alliances, messages et classements",
     text: [
-      "Il te manque une monnaie ? Le marché échange tout de suite, au tiers de la valeur : 1 or vaut 4 pierres, 1 fer en vaut 2.",
-      "Tu le trouves dans l'onglet Concessions, avec tes bâtiments d'appui. Bonne saison !",
+      "Une alliance partage les rapports d'espions, envoie des renforts et attaque ensemble les forteresses et les ducs.",
+      "✉️ Messages regroupe les rapports : combats, espionnage, alliance, chantier (dont les brigands) et royaume.",
+      "🏆 Rangs : richesse, dons au beffroi, combats… Les podiums de fin de saison rapportent des écus pour la suivante. Bonne saison !",
     ],
   },
 ];
@@ -138,76 +182,137 @@ export function S2Tutorial({ seasonId }: { seasonId: number }) {
 }
 
 // ---------------------------------------------------------------------------
-// Guide pas à pas : une étape à la fois, qui avance quand le joueur l'a faite.
+// Guide pas à pas : il montre à l'écran ce qu'il faut toucher (surbrillance), dit quoi faire et pourquoi,
+// et passe à l'étape suivante dès qu'elle est faite.
 // ---------------------------------------------------------------------------
 
+type GuideTab = "carte" | "ateliers" | "armee" | "chantier" | "raids";
+const GROUP_OF: Record<GuideTab, string> = { carte: "carte", raids: "carte", ateliers: "domaine", armee: "armee", chantier: "chantier" };
+const TAB_NAME: Record<GuideTab, string> = { carte: "🗺️ Carte", raids: "Cibles", ateliers: "🏭 Domaine", armee: "⚔️ Armée", chantier: "⛪ Chantier" };
 
 interface GuideStep {
   id: string;
   title: string;
-  text: string;
+  /** Ce qu'il faut faire, selon ce qui est visible (la première cible trouvée à l'écran). */
+  what: Record<string, string>;
+  why: string;
   /** Onglet où se fait l'étape (null : partout). */
-  tab: "carte" | "ateliers" | "armee" | "chantier" | null;
-  go: string;
-  done: (s: PlayerState, visited: Set<string>) => boolean;
+  tab: (s: PlayerState, slots: number) => GuideTab | null;
+  /** Éléments à mettre en avant, par ordre de préférence (attribut data-tuto). */
+  targets: (s: PlayerState, slots: number) => string[];
+  done: (s: PlayerState, slots: number) => boolean;
 }
 
+const conc0 = (s: PlayerState) => s.s2?.conc[0];
 const STEPS: GuideStep[] = [
   {
     id: "castle",
     title: "Pose ton château",
-    text: "Ouvre la carte et touche une case marquée d'un point blanc, puis « Poser mon château ici ». Ta première carrière et une compagnie de miliciens te sont données.",
-    tab: "carte",
-    go: "Ouvrir la carte",
+    what: {
+      place: "Cette case est libre : touche « Poser mon château ici ».",
+      map: "Touche une case marquée d'un point blanc. Fais glisser pour te déplacer, molette ou boutons pour zoomer.",
+    },
+    why: "Ton château reçoit les convois de tes concessions et garde ton stock. La région donne un bonus (montagne : carrières, collines : mines, plaine : vitesse, froid : défense…). Reste près de plusieurs sites : les convois feront moins de route.",
+    tab: () => "carte",
+    targets: () => ["place", "map"],
     done: (s) => !!s.s2?.castle,
-  },
-  {
-    id: "concession",
-    title: "Regarde ta carrière",
-    text: "Dans Concessions, ta carrière remplit son stock et envoie un convoi de pierre vers ton château toutes les 15 minutes. Tu y verras aussi tes bâtiments d'appui et le marché.",
-    tab: "ateliers",
-    go: "Voir mes concessions",
-    done: (_, v) => v.has("ateliers"),
   },
   {
     id: "hammer",
     title: "Frappe le marteau",
-    text: "Le marteau allume l'élan : +25 % de production tant qu'il dure. Quelques coups suffisent, reviens le raviver de temps en temps.",
-    tab: null,
-    go: "",
+    what: { hammer: "Frappe la pierre quelques fois." },
+    why: "Chaque coup allume l'élan : +25 % de production tant qu'il dure. Reviens le raviver quand tu passes.",
+    tab: () => null,
+    targets: () => ["hammer"],
     done: (s) => (s.elanUntil ?? 0) > 0,
   },
   {
-    id: "build",
-    title: "Bâtis un bâtiment d'appui",
-    text: "Dans Concessions, lance la charronnerie (convois plus chargés) ou les outils (+3 % de production). Ils se paient en pierre.",
-    tab: "ateliers",
-    go: "Bâtir",
-    done: (s) => !!s.s2 && (Object.values(s.s2.bld).some((n) => n > 0) || s.s2.works.length > 0),
+    id: "outils",
+    title: "Bâtis les outils",
+    what: { "bld-outils": "Lance le niveau 1 des outils : 50 pierre, 5 secondes." },
+    why: "Les outils ajoutent +3 % de production à toutes tes concessions, présentes et futures. Ce sont tes bâtiments d'appui, payés avec la pierre du château.",
+    tab: () => "ateliers",
+    targets: () => ["bld-outils"],
+    done: (s) => (s.s2?.bld.outils ?? 0) > 0 || !!s.s2?.works.some((w) => w.id === "outils"),
+  },
+  {
+    id: "supply",
+    title: "Ravitaille ta carrière",
+    what: { supply: "Envoie 100 pierre ou plus à ta carrière avec « Envoyer »." },
+    why: "Une concession s'améliore avec ce qu'elle a sur place : sa réserve de chantier, puis son propre stock. Le convoi met quelques secondes par case à arriver.",
+    tab: () => "ateliers",
+    targets: () => ["supply"],
+    done: (s) => {
+      const c = conc0(s);
+      return !!c && ((c.fund ?? 0) > 0 || c.level >= 2 || !!c.upUntil || !!s.s2?.convoys.some((v) => v.dest === "concession"));
+    },
+  },
+  {
+    id: "upgrade",
+    title: "Monte ta carrière d'un niveau",
+    what: { "conc-upgrade": "Quand la réserve est arrivée, touche « Niveau 2 »." },
+    why: "Chaque niveau donne +15 % de production à cette concession, et ses convois emportent davantage. Au niveau 5, elle devient une Exploitation et t'ouvre une deuxième concession.",
+    tab: () => "ateliers",
+    targets: () => ["conc-upgrade"],
+    done: (s) => {
+      const c = conc0(s);
+      return !!c && (c.level >= 2 || !!c.upUntil);
+    },
+  },
+  {
+    id: "atelier",
+    title: "Bâtis un atelier dans ta carrière",
+    what: { "cbuild-atelier": "Lance l'atelier de ta carrière." },
+    why: "L'atelier ajoute +8 % de production par niveau à cette concession seulement. Il ne peut pas dépasser le niveau de la concession : monte les deux ensemble.",
+    tab: () => "ateliers",
+    targets: () => ["cbuild-atelier"],
+    done: (s) => {
+      const c = conc0(s);
+      return !!c && ((c.cb?.atelier ?? 0) > 0 || c.cwork?.id === "atelier");
+    },
   },
   {
     id: "army",
-    title: "Renforce ton armée",
-    text: "Dans Armée, recrute des hommes ou crée une deuxième compagnie. L'armée se paie en fer : tu en as 30 000 pour commencer.",
-    tab: "armee",
-    go: "Ouvrir l'armée",
+    title: "Recrute des soldats",
+    what: { company: "Touche « + » sur ta compagnie pour la remplir, ou crée-en une autre plus bas." },
+    why: "L'armée se paie en fer : tu en as 30 000 pour commencer. Il te faut des troupes pour battre les seigneurs et défendre tes convois. L'entraînement (🎯) rend une compagnie plus forte.",
+    tab: () => "armee",
+    targets: () => ["company"],
     done: (s) => (s.recruits?.length ?? 0) > 0 || (s.companies?.length ?? 0) > 1 || (s.companies ?? []).some((c) => c.train > 0 || c.trainUntil > 0),
-  },
-  {
-    id: "belfry",
-    title: "Aide à bâtir le beffroi",
-    text: "Dans Chantier, verse un peu de pierre ou règle ta dîme. Chaque étape achevée donne un bonus à tout le royaume, dont une concession de plus.",
-    tab: "chantier",
-    go: "Ouvrir le chantier",
-    done: (s) => s.totalContributed > 0 || !!s.titheSet,
   },
   {
     id: "lord",
     title: "Attaque un hobereau",
-    text: "Sur la carte, touche un écu rouge sans couronne, loin du centre, puis « Attaquer ». Une victoire rapporte 60 % de son fief et du fer.",
-    tab: "carte",
-    go: "Choisir un hobereau",
+    what: {
+      "lord-attack": "Lance l'attaque. Ton armée part, se bat, puis rentre avec le butin.",
+      map: "Touche un écu rouge sans couronne, de préférence loin du centre : c'est un hobereau, le seigneur le plus faible.",
+    },
+    why: "Une victoire emporte une part de son fief (pierre, fer, or) et du fer pour chaque compagnie battue. Les seigneurs n'attaquent jamais : c'est le meilleur moyen de gagner du fer.",
+    tab: () => "carte",
+    targets: () => ["lord-attack", "map"],
     done: (s) => (s.marches ?? []).some((m) => m.kind === "raid") || (s.questFlags ?? []).includes("lord"),
+  },
+  {
+    id: "belfry",
+    title: "Aide à bâtir le beffroi",
+    what: { contribute: "Verse 10 % de ta pierre au beffroi." },
+    why: "Le beffroi se bâtit ensemble. Chaque étape achevée donne un bonus à tout le royaume, et les meilleurs donateurs gagnent des écus en fin de saison.",
+    tab: () => "chantier",
+    targets: () => ["contribute"],
+    done: (s) => s.totalContributed > 0 || !!s.titheSet,
+  },
+  {
+    id: "second",
+    title: "Ouvre une deuxième concession",
+    what: {
+      take: "Touche « Prendre une concession ici ».",
+      map: "Une place est libre : touche un site sur la carte (hexagone gris pour la pierre, bleu pour le fer, jaune pour l'or).",
+      "conc-upgrade": "Continue de monter ta carrière : au niveau 5, une deuxième place s'ouvre.",
+    },
+    why: "Plus de concessions, c'est plus de production, et le fer et l'or se trouvent dans d'autres sites. Une mine de fer paie ton armée.",
+    tab: (s, slots) => ((s.s2?.conc.length ?? 0) < slots ? "carte" : "ateliers"),
+    targets: (s, slots) => ((s.s2?.conc.length ?? 0) < slots ? ["take", "map"] : ["conc-upgrade"]),
+    done: (s) => (s.s2?.conc.length ?? 0) >= 2,
   },
 ];
 
@@ -226,61 +331,160 @@ function writeSet(key: string, set: Set<string>) {
   }
 }
 
-export function S2Guide({ seasonId, live, tab, go }: { seasonId: number; live: PlayerState; tab: string; go: (tab: string) => void }) {
+type Box = { x: number; y: number; w: number; h: number };
+const sameBox = (a: Box | null, b: Box | null) => (!a || !b ? a === b : Math.abs(a.x - b.x) < 1 && Math.abs(a.y - b.y) < 1 && Math.abs(a.w - b.w) < 1 && Math.abs(a.h - b.h) < 1);
+
+function visibleEl(key: string): HTMLElement | null {
+  for (const el of Array.from(document.querySelectorAll<HTMLElement>(`[data-tuto="${key}"]`))) {
+    const r = el.getBoundingClientRect();
+    if (r.width > 0 && r.height > 0) return el;
+  }
+  return null;
+}
+
+export function S2Guide({ seasonId, live, tab, stages }: { seasonId: number; live: PlayerState; tab: string; stages: number }) {
   const doneKey = `beffroi-guide-s2-${seasonId}`;
-  const seenKey = `beffroi-guide-onglets-${seasonId}`;
   const hideKey = `beffroi-guide-masque-${seasonId}`;
-  // Ce qui est fait et les onglets vus restent acquis (une armée rentrée ne défait pas l'étape) : gardés à part.
-  const [stored] = useState(() => ({ done: readSet(doneKey), visited: readSet(seenKey) }));
+  const [stored] = useState(() => ({ done: readSet(doneKey) }));
   const [hidden, setHidden] = useState(() => readSet(hideKey).has("1"));
-  const visited = new Set(stored.visited).add(tab);
+  const [small, setSmall] = useState(false);
+  const [skipped, setSkipped] = useState<Set<string>>(() => new Set());
+  const slots = live.s2 ? concessionSlots(live.s2, { stageConcessions: stages >= 1 ? 1 : 0 }) : 1;
   const done = stored.done;
-  const newly = STEPS.filter((st) => !done.has(st.id) && st.done(live, visited)).map((st) => st.id);
+  const newly = STEPS.filter((st) => !done.has(st.id) && st.done(live, slots)).map((st) => st.id);
   useEffect(() => {
-    const st = stored;
-    if (!st.visited.has(tab)) {
-      st.visited.add(tab);
-      writeSet(seenKey, st.visited);
-    }
     if (newly.length) {
-      for (const id of newly) st.done.add(id);
-      writeSet(doneKey, st.done);
+      for (const id of newly) stored.done.add(id);
+      writeSet(doneKey, stored.done);
     }
   });
-  const isDone = (st: GuideStep) => done.has(st.id) || newly.includes(st.id);
-  const step = STEPS.find((st) => !isDone(st));
+  const isDone = (st: GuideStep) => done.has(st.id) || newly.includes(st.id) || skipped.has(st.id);
+  const step = STEPS.find((st) => !isDone(st)) ?? null;
   const count = STEPS.filter(isDone).length;
+
+  // Où pointer : l'onglet à ouvrir d'abord, sinon la première cible visible de l'étape.
+  const want = step?.tab(live, slots) ?? null;
+  const tabKeys: string[] = [];
+  if (want && want !== tab) {
+    const group = GROUP_OF[want];
+    const current = GROUP_OF[tab as GuideTab] ?? (tab === "ameliorations" ? "domaine" : tab);
+    tabKeys.push(group !== current ? `group-${group}` : `tab-${want}`);
+  }
+  const keys = step ? (tabKeys.length ? tabKeys : step.targets(live, slots)) : [];
+  const keysId = keys.join("|");
+
+  const [spot, setSpot] = useState<{ key: string; box: Box } | null>(null);
+  const lastScrolled = useRef("");
+  useEffect(() => {
+    if (!keysId || hidden || small) return;
+    const list = keysId.split("|");
+    const tick = () => {
+      let found: { key: string; box: Box } | null = null;
+      for (const k of list) {
+        const el = visibleEl(k);
+        if (!el) continue;
+        const r = el.getBoundingClientRect();
+        found = { key: k, box: { x: r.left, y: r.top, w: r.width, h: r.height } };
+        if (lastScrolled.current !== `${step?.id}:${k}` && (r.top < 60 || r.bottom > window.innerHeight - 40)) {
+          lastScrolled.current = `${step?.id}:${k}`;
+          el.scrollIntoView({ block: "center", behavior: "smooth" });
+        }
+        break;
+      }
+      setSpot((prev) => (prev?.key === found?.key && sameBox(prev?.box ?? null, found?.box ?? null) ? prev : found));
+    };
+    tick();
+    const id = window.setInterval(tick, 200);
+    window.addEventListener("scroll", tick, true);
+    window.addEventListener("resize", tick);
+    return () => {
+      window.clearInterval(id);
+      window.removeEventListener("scroll", tick, true);
+      window.removeEventListener("resize", tick);
+    };
+  }, [keysId, hidden, small, step?.id]);
+
   const hide = () => {
     writeSet(hideKey, new Set(["1"]));
     setHidden(true);
   };
-  if (hidden) return null;
+  if (hidden || typeof document === "undefined") return null;
   if (!step) {
     return (
       <div className="guide guide-done">
         <div>
-          <b>🎉 Tu connais l&apos;essentiel.</b> Le reste se découvre en jouant : bonne saison !
+          <b>🎉 Tu connais l&apos;essentiel.</b> Le reste est dans les règles (« 📖 Comment jouer ») : bonne saison !
         </div>
-        <button className="btn btn-small" onClick={hide}>Fermer</button>
+        <button className="btn btn-small" onClick={hide}>
+          Fermer
+        </button>
       </div>
     );
   }
-  const here = step.tab === null || step.tab === tab;
-  return (
-    <div className="guide" role="status">
-      <div className="guide-head">
-        <span className="guide-count num">Guide · étape {count + 1}/{STEPS.length}</span>
-        <span className="guide-links">
-          <button className="btn-link" onClick={openTutorial}>Règles</button>
-          <button className="btn-link" onClick={hide}>Masquer</button>
-        </span>
-      </div>
-      <div className="bar bar-thin"><span style={{ width: `${(count / STEPS.length) * 100}%` }} /></div>
-      <div className="guide-title">{step.title}</div>
-      <p className="guide-text">{step.text}</p>
-      {!here && step.go && (
-        <button className="btn btn-primary btn-small" onClick={() => go(step.tab!)}>{step.go}</button>
+  if (small) {
+    return (
+      <button className="guide-pill" onClick={() => setSmall(false)}>
+        🧭 Guide · {count + 1}/{STEPS.length} : {step.title}
+      </button>
+    );
+  }
+  const onTab = tabKeys.length > 0;
+  const shown = spot && keys.includes(spot.key) ? spot : null;
+  const what = onTab ? `Ouvre l'onglet ${TAB_NAME[want!]}.` : shown ? step.what[shown.key] : Object.values(step.what)[0];
+  // La bulle se place sous la cible, ou au-dessus s'il n'y a pas la place ; sans cible, en bas de l'écran.
+  const vw = window.innerWidth;
+  const vh = window.innerHeight;
+  const bw = Math.min(340, vw - 24);
+  let bubble: React.CSSProperties = { left: (vw - bw) / 2, bottom: 12, width: bw };
+  if (shown) {
+    const b = shown.box;
+    const big = b.h > vh * 0.5;
+    const left = Math.min(vw - bw - 12, Math.max(12, b.x + b.w / 2 - bw / 2));
+    if (big) bubble = { left, bottom: 12, width: bw };
+    else if (b.y + b.h + 230 < vh) bubble = { left, top: b.y + b.h + 12, width: bw };
+    else bubble = { left, bottom: vh - b.y + 12, width: bw };
+  }
+  return createPortal(
+    <>
+      {shown && (
+        <div
+          className="coach-spot"
+          aria-hidden
+          style={{ left: shown.box.x - 6, top: shown.box.y - 6, width: shown.box.w + 12, height: shown.box.h + 12 }}
+        />
       )}
-    </div>
+      <div className="coach-bubble" role="dialog" aria-label={`Guide : ${step.title}`} style={bubble}>
+        <div className="guide-head">
+          <span className="guide-count num">
+            🧭 Étape {count + 1}/{STEPS.length}
+          </span>
+          <span className="guide-links">
+            <button className="btn-link" onClick={openTutorial}>
+              Règles
+            </button>
+            <button className="btn-link" onClick={() => setSmall(true)}>
+              Réduire
+            </button>
+            <button className="btn-link" onClick={hide}>
+              Masquer
+            </button>
+          </span>
+        </div>
+        <div className="bar bar-thin">
+          <span style={{ width: `${(count / STEPS.length) * 100}%` }} />
+        </div>
+        <div className="guide-title">{step.title}</div>
+        <p className="coach-what">👉 {what}</p>
+        <p className="coach-why">
+          <b>Pourquoi ?</b> {step.why}
+        </p>
+        <div className="coach-foot">
+          <button className="btn-link" onClick={() => setSkipped(new Set(skipped).add(step.id))}>
+            Passer cette étape
+          </button>
+        </div>
+      </div>
+    </>,
+    document.body,
   );
 }

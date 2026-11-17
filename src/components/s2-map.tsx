@@ -183,6 +183,7 @@ export function S2MapScreen({ snap, live, now, run }: { snap: GameSnapshot; live
       <div className="s2-board" ref={box}>
         <canvas
           ref={canvas}
+          data-tuto="map"
           className="s2-canvas"
           style={{ width, height: width }}
           onPointerDown={onDown}
@@ -288,7 +289,7 @@ function S2Panel({ snap, live, now, world, picked, busy, act, castlesOthers }: {
         {region && <div className="row-desc">Bonus de région : {region.bonus}.</div>}
         {!castle && (
           why ? <div className="row-desc">{why}</div> : (
-            <button className="btn btn-primary" disabled={busy} onClick={() => void act({ type: "s2", op: "place", x: p[0], y: p[1] })}>Poser mon château ici</button>
+            <button className="btn btn-primary" data-tuto="place" disabled={busy} onClick={() => void act({ type: "s2", op: "place", x: p[0], y: p[1] })}>Poser mon château ici</button>
           )
         )}
       </div>
@@ -306,7 +307,7 @@ function S2Panel({ snap, live, now, world, picked, busy, act, castlesOthers }: {
           {taken + mine}/{site.places} places prises{mine ? ` (dont ${mine} à toi)` : ""}{castle ? ` · à ${cheb(site.pos, castle)} cases de ton château` : ""}.
         </div>
         {castle && (why ? <div className="row-desc">{why}</div> : (
-          <button className="btn btn-primary" disabled={busy} onClick={() => void act({ type: "s2", op: "take", site: site.id })}>Prendre une concession ici</button>
+          <button className="btn btn-primary" data-tuto="take" disabled={busy} onClick={() => void act({ type: "s2", op: "take", site: site.id })}>Prendre une concession ici</button>
         ))}
       </div>
     );
@@ -326,7 +327,7 @@ function S2Panel({ snap, live, now, world, picked, busy, act, castlesOthers }: {
           {l.reformAt > now ? ` La garnison se reforme : complète dans ${dur(l.reformAt - now)}.` : ""}
         </div>
         {castle && (
-          <button className="btn btn-primary" disabled={busy} onClick={() => void act({ type: "raid", target: l.id })}>Attaquer</button>
+          <button className="btn btn-primary" data-tuto="lord-attack" disabled={busy} onClick={() => void act({ type: "raid", target: l.id })}>Attaquer</button>
         )}
       </div>
     );
@@ -422,7 +423,7 @@ export function S2Domain({ snap, live, now, run }: { snap: GameSnapshot; live: P
 
       <h3>Concessions ({s2.conc.length}/{slots})</h3>
       <div className="list">
-        {s2.conc.map((c) => {
+        {s2.conc.map((c, ci) => {
           const site = map.sites[c.site];
           if (!site) return null;
           const rate = concessionRate(s2, c, map);
@@ -464,7 +465,7 @@ export function S2Domain({ snap, live, now, run }: { snap: GameSnapshot; live: P
                     const why = concBuildBlocker(s2, c.id, b, map, now);
                     const working = c.cwork && c.cwork.until > now && c.cwork.id === b;
                     return (
-                      <button key={b} className="btn btn-small" disabled={busy || !!why} title={`${CONC_BUILDINGS[b].text}.${why ? ` ${why}` : ""}`} onClick={() => void act({ type: "s2", op: "cbuild", id: c.id, building: b })}>
+                      <button key={b} className="btn btn-small" data-tuto={ci === 0 ? `cbuild-${b}` : undefined} disabled={busy || !!why} title={`${CONC_BUILDINGS[b].text}.${why ? ` ${why}` : ""}`} onClick={() => void act({ type: "s2", op: "cbuild", id: c.id, building: b })}>
                         {CONC_BUILDINGS[b].icon} {CONC_BUILDINGS[b].name} {lvl}
                         {working ? ` → ${lvl + 1} (${dur(c.cwork!.until - now)})` : lvl < CONC_BUILDING_MAX ? ` · 🧱 ${formatNumber(concBuildingCost(lvl + 1))} · ${dur(concBuildingMs(lvl + 1))}` : ""}
                       </button>
@@ -517,7 +518,7 @@ export function S2Domain({ snap, live, now, run }: { snap: GameSnapshot; live: P
                   {(() => {
                     const why = supplyBlocker(s2, c.id, have, supply.res, supply.amount);
                     return (
-                      <button className="btn btn-small" disabled={busy || !!why} title={why ?? "Un convoi part du château et remplit la réserve de la concession à l'arrivée."} onClick={() => void act({ type: "s2", op: "supply", id: c.id, from: supply.res, amount: supply.amount })}>
+                      <button className="btn btn-small" data-tuto={ci === 0 ? "supply" : undefined} disabled={busy || !!why} title={why ?? "Un convoi part du château et remplit la réserve de la concession à l'arrivée."} onClick={() => void act({ type: "s2", op: "supply", id: c.id, from: supply.res, amount: supply.amount })}>
                         Envoyer
                       </button>
                     );
@@ -531,7 +532,7 @@ export function S2Domain({ snap, live, now, run }: { snap: GameSnapshot; live: P
               </div>
               <div className="s2-actions">
                 {c.level < CONCESSION_MAX_LEVEL && (
-                  <button className="btn btn-small btn-primary" disabled={busy || !!upWhy} title={upWhy ?? undefined} onClick={() => void act({ type: "s2", op: "upgrade", id: c.id })}>
+                  <button className="btn btn-small btn-primary" data-tuto={ci === 0 ? "conc-upgrade" : undefined} disabled={busy || !!upWhy} title={upWhy ?? undefined} onClick={() => void act({ type: "s2", op: "upgrade", id: c.id })}>
                     Niveau {c.level + 1} · 🧱 {formatNumber(concessionCost(c.level + 1))} · {dur(concessionBuildMs(c.level + 1))}
                   </button>
                 )}
@@ -565,7 +566,7 @@ export function S2Domain({ snap, live, now, run }: { snap: GameSnapshot; live: P
                 <div className="row-desc">{def.text}</div>
                 {work.map((w) => <Work key={w.level} icon="🔨" label={`Niveau ${w.level}`} start={w.until - buildingMs(w.level)} until={w.until} now={now} />)}
               </div>
-              <button className="btn btn-small btn-primary" disabled={busy || !!why} title={why ?? undefined} onClick={() => void act({ type: "s2", op: "build", building: id })}>
+              <button className="btn btn-small btn-primary" data-tuto={`bld-${id}`} disabled={busy || !!why} title={why ?? undefined} onClick={() => void act({ type: "s2", op: "build", building: id })}>
                 Niveau {next} · 🪨 {formatNumber(Math.ceil(buildingCost(id, next) * discount))} · {dur(buildingMs(next))}
               </button>
             </div>

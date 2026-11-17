@@ -209,7 +209,7 @@ export function Game({ userId }: { userId: string }) {
       {snap.s2 && <S2Tutorial seasonId={snap.season.id} />}
       {game.away && <AwayModal away={game.away} event={snap.event} onClose={game.dismissAway} />}
       <TopBar snap={snap} now={now} />
-      {snap.s2 && <S2Guide seasonId={snap.season.id} live={live} tab={tab} go={(t) => selectTab(t as Tab)} />}
+      {snap.s2 && <S2Guide seasonId={snap.season.id} live={live} tab={tab} stages={stagesDone} />}
       <Movements snap={snap} live={live} now={now} run={game.run} />
       <LastDayBanner snap={snap} now={now} />
       <SeasonEndCard snap={snap} />
@@ -229,7 +229,7 @@ export function Game({ userId }: { userId: string }) {
           {GROUPS[group].filter((t) => t !== "faille" || !!snap.rift).length > 1 && (
             <div className="subtabs group-subtabs" role="group" aria-label="Sections">
               {GROUPS[group].filter((t) => (t !== "faille" || !!snap.rift) && !(snap.s2 && t === "ameliorations")).map((t) => (
-                <button key={t} className="btn btn-small" aria-pressed={tab === t} onClick={() => selectTab(t)}>
+                <button key={t} className="btn btn-small" aria-pressed={tab === t} onClick={() => selectTab(t)} data-tuto={`tab-${t}`}>
                   {snap.s2 && t === "ateliers" ? "Concessions" : SUBTAB_LABELS[t]}
                   {t === "ameliorations" && affordableUpgrades > 0 ? " •" : ""}
                 </button>
@@ -815,7 +815,7 @@ function Heritage({ snap, run }: { snap: GameSnapshot; run: ReturnType<typeof us
 
 function TabButton<T extends string>({ id, tab, setTab, label, dot }: { id: T; tab: T; setTab: (t: T) => void; label: string; dot?: boolean }) {
   return (
-    <button className="tab" role="tab" aria-selected={tab === id} onClick={() => setTab(id)}>
+    <button className="tab" role="tab" aria-selected={tab === id} onClick={() => setTab(id)} data-tuto={`group-${id}`}>
       {label}
       {dot && <span className="dot" aria-label="nouveautés" />}
     </button>
@@ -988,7 +988,7 @@ function Hero({ snap, live, rate, clickGain, game }: { snap: GameSnapshot; live:
         </div>
         <div className="hammer-zone">
           <Vein veinAt={snap.state.veinAt ?? 0} now={game.serverNow()} run={game.run} />
-          <button className="hammer" disabled={paused} onPointerDown={onHit} aria-label={snap.s2 ? "Frapper pour l'élan" : `Tailler la pierre (+${formatRate(clickGain)})`}>
+          <button className="hammer" data-tuto="hammer" disabled={paused} onPointerDown={onHit} aria-label={snap.s2 ? "Frapper pour l'élan" : `Tailler la pierre (+${formatRate(clickGain)})`}>
             🪨
           </button>
           {floaters.map((f) => (
@@ -1278,7 +1278,7 @@ function Worksite({ snap, live, run }: { snap: GameSnapshot; live: PlayerState; 
       </div>
       {(snap.lots ?? []).length > 0 && <Lots lots={snap.lots ?? []} now={snap.serverNow} run={run} />}
       <div className="row-title">{finished ? "🪨 Orner" : "🪨 Verser"}</div>
-      <div className="contrib">
+      <div className="contrib" data-tuto="contribute">
         {[
           [0.1, "10 %"],
           [0.5, "50 %"],
@@ -4639,7 +4639,7 @@ export function Companies({ live, now, run, renown = 0 }: { live: PlayerState; n
           const training = c.trainUntil > now;
           const isOpen = open === c.id;
           return (
-            <div key={c.id} className="row company">
+            <div key={c.id} className="row company" data-tuto={i === 0 ? "company" : undefined}>
               <div className="row-icon" aria-hidden>
                 {u.icon}
               </div>
