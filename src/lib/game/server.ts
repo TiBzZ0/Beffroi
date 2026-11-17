@@ -1223,7 +1223,8 @@ async function tickLords(admin: SupabaseClient, season: SeasonView, entities: Ma
     }
 
     // Raid. Les seigneurs les plus forts ne frappent que ceux qui les ont attaqués.
-    if (lord.raidEveryHours && me.nextRaidAt !== null && me.nextRaidAt <= now) {
+    // Saison 2 (vague A) : les seigneurs ne lancent plus de raids ; leur hostilité et leurs patrouilles arrivent en vague B.
+    if (lord.raidEveryHours && me.nextRaidAt !== null && me.nextRaidAt <= now && !s2Map()) {
       const nextRaid = { next_raid_at: iso(now + jitter(lord.raidEveryHours)) };
       const army = armies.get(lord.id)!;
       const attackers = lord.retaliateOnly ? await recentAttackers(admin, season.id, lord.id, Math.max(now - REVENGE_MS, state.lastRaidAt)) : null;
