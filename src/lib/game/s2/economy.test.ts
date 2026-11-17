@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { generateMap, type S2Map } from "./map";
-import { build, buyConcession, localCap, setConcession, supplyBlocker, takeConcessionBlocker, concessionRate, convoyLoad, firstConcessionSites, marketQuote, newS2State, REF, settleS2, stockFull, takeConcession, supplyConcession, upgradeConcession, VALUE, type S2State } from "./economy";
+import { build, buyConcession, localCap, setConcession, shipNow, supplyBlocker, takeConcessionBlocker, concessionRate, convoyLoad, firstConcessionSites, marketQuote, newS2State, REF, settleS2, stockFull, takeConcession, supplyConcession, upgradeConcession, VALUE, type S2State } from "./economy";
 
 const T0 = Date.parse("2026-12-07T15:00:00Z");
 const H = 3_600_000;
@@ -114,6 +114,22 @@ describe("S2 : économie", () => {
     expect((safe.log ?? []).some((l) => l.text.startsWith("🗡️"))).toBe(false);
     const grace = settleS2(full, { ...ctx(), multiplier: () => 3, banditsFrom: T0 + 100 * H }, T0 + 48 * H).s;
     expect((grace.log ?? []).some((l) => l.text.startsWith("🗡️"))).toBe(false);
+  });
+
+  it("en manuel, la concession garde son stock jusqu'à l'envoi", () => {
+    const s = start();
+    const id = s.conc[0].id;
+    const m = setConcession(s, id, undefined, undefined, true);
+    expect(m.ok).toBe(true);
+    if (!m.ok) return;
+    const { s: after, arrived } = settleS2(m.value, ctx(), T0 + 3 * H);
+    expect(arrived.pierre).toBe(0);
+    expect(after.conc[0].stock).toBeGreaterThan(convoyLoad(s, s.conc[0], map));
+    const sent = shipNow(after, id, map, T0 + 3 * H);
+    expect(sent.ok).toBe(true);
+    if (!sent.ok) return;
+    expect(sent.value.convoys.length).toBe(1);
+    expect(sent.value.conc[0].stock).toBeCloseTo(after.conc[0].stock - convoyLoad(s, s.conc[0], map), 6);
   });
 
   it("améliorations, bâtiments et concessions achetées", () => {

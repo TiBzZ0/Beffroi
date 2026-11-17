@@ -368,7 +368,7 @@ export function S2Domain({ snap, live, now, run }: { snap: GameSnapshot; live: P
               <div>
                 <div className="row-title">{RESOURCE_ICON[site.type]} {site.name || RESOURCE_LABEL[site.type]} <span className="badge">niv. {c.level}</span></div>
                 <div className="row-desc">
-                  {formatNumber(rate)} {RESOURCE_LABEL[site.type]}/h · convoi de {formatNumber(convoyLoad(s2, c, map))} toutes les {minutes(convoyIntervalMs(s2))} min, prochain dans {minutes(c.next - now)} min.
+                  {formatNumber(rate)} {RESOURCE_LABEL[site.type]}/h · convoi de {formatNumber(convoyLoad(s2, c, map))}{c.manual ? ", envoyé à la main." : ` toutes les ${minutes(convoyIntervalMs(s2))} min, prochain dans ${minutes(c.next - now)} min.`} Stock {formatNumber(c.stock)} / {formatNumber(cap)}.
                 </div>
                 <div className="bar bar-thin"><span style={{ width: `${Math.min(100, (c.stock / Math.max(1, cap)) * 100)}%` }} /></div>
                 {(() => {
@@ -389,6 +389,21 @@ export function S2Domain({ snap, live, now, run }: { snap: GameSnapshot; live: P
                     </button>
                   ))}
                 </div>
+                <div className="s2-settings">
+                  <span>Départs</span>
+                  <button className={`btn btn-small${!c.manual ? " btn-primary" : ""}`} disabled={busy || !c.manual} title="Un convoi part tout seul à chaque intervalle." onClick={() => void act({ type: "s2", op: "set", id: c.id, manual: false })}>
+                    Automatiques
+                  </button>
+                  <button className={`btn btn-small${c.manual ? " btn-primary" : ""}`} disabled={busy || !!c.manual} title="La concession garde tout pour ses améliorations. Au-dessus de 90 % de stock, les brigands rôdent (sauf en prudent)." onClick={() => void act({ type: "s2", op: "set", id: c.id, manual: true })}>
+                    À la main
+                  </button>
+                  {c.manual && (
+                    <button className="btn btn-small btn-primary" disabled={busy || c.stock < 1} onClick={() => void act({ type: "s2", op: "ship", id: c.id })}>
+                      🛒 Envoyer un convoi ({formatNumber(Math.min(c.stock, convoyLoad(s2, c, map)))})
+                    </button>
+                  )}
+                </div>
+                {c.manual && <div className="row-desc">✋ Départs à la main : le stock reste sur place et sert aux améliorations. Au-dessus de 90 %, les brigands rôdent{c.pace === "prudent" ? " (pas en prudent)" : ""}.</div>}
                 <div className="s2-settings">
                   <span>Convois vers</span>
                   {(["chateau", "beffroi"] as const).map((k) => (

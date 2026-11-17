@@ -100,6 +100,8 @@ export interface Concession {
   dest?: Dest;
   /** Convois envoyés à une autre de ses concessions (sa réserve de chantier) ; prime sur `dest`. */
   destConc?: string;
+  /** Convois à la main : la concession garde tout jusqu'à ce que le joueur en envoie un. */
+  manual?: boolean;
   /** Brigands : prochain passage (stock au-dessus de 90 % depuis une heure), et avis déjà donné. */
   banditAt?: number;
   warned?: boolean;
@@ -296,7 +298,7 @@ export function settleS2(s: S2State, ctx: S2Context, now: number): { s: S2State;
         }
         const dep = Math.max(c.next, t);
         grow(dep);
-        const take = Math.min(c.stock, load);
+        const take = c.manual ? 0 : Math.min(c.stock, load);
         if (take >= 1) {
           c.stock -= take;
           // Vers une autre concession tant que sa réserve a la place ; sinon le convoi rentre au château.
@@ -384,6 +386,28 @@ export function takeConcession(s: S2State, ctx: S2Context, siteId: number, occ: 
 }
 
 /** Abandonner une concession : sans remboursement, niveau perdu, la place se libère. */
+/** Convoi à la main : part tout de suite avec ce qu'il y a au stock, une charge au plus, vers la destination réglée. */
+export function shipNow(s: S2State, id: string, map: S2Map, now: number): R<S2State> {
+  const c0 = s.conc.find((x) => x.id === id);
+  if (!c0) return fail("Concession inconnue.");
+  if (!s.castle) return fail("Pose d'abord ton château.");
+  const site = map.sites[c0.site];
+  if (!site) return fail("Site inconnu.");
+  const take = Math.min(c0.stock, convoyLoad(s, c0, map));
+  if (take < 1) return fail("Rien à envoyer.");
+  const c = { ...c0, stock: c0.stock - take };
+  const st: S2State = { ...s, conc: s.conc.map((x) => (x.id === id ? c : x)), convoys: [...s.convoys] };
+  const target = c.destConc ? st.conc.find((x) => x.id === c.destConc) : undefined;
+  const targetSite = target ? map.sites[target.site] : undefined;
+  if (target && targetSite && fundRoom(st, target) >= take * VALUE[site.type] - 1e-6) {
+    st.convoys.push({ conc: target.id, res: site.type, load: take, depart: now, arrive: now + convoyTravelMs(st, site.pos, targetSite.pos), from: site.pos, to: targetSite.pos, dest: "concession" });
+  } else {
+    const to = c.dest === "beffroi" ? S2_BELFRY : s.castle;
+    st.convoys.push({ conc: c.id, res: site.type, load: take, depart: now, arrive: now + convoyTravelMs(st, site.pos, to), from: site.pos, to, ...(to === s.castle ? {} : { dest: "beffroi" as const }) });
+  }
+  return { ok: true, value: st };
+}
+
 /** Règle le rythme et la destination d'une concession ; l'effet vaut dès le convoi suivant. */
 /** Brigands (dès la vague A) : une heure après que le stock local a passé 90 %, puis toutes les heures tant qu'il y est encore. */
 export const BANDIT_HIGH = 0.9;
@@ -404,7 +428,7 @@ function log(st: S2State, at: number, text: string) {
   st.log = [...(st.log ?? []), { at: Math.round(at), text }].slice(-LOG_MAX);
 }
 
-export function setConcession(s: S2State, id: string, pace: unknown, dest: unknown): R<S2State> {
+export function setConcession(s: S2State, id: string, pace: unknown, dest: unknown, manual?: unknown): R<S2State> {
   const c = s.conc.find((x) => x.id === id);
   if (!c) return fail("Concession inconnue.");
   if (pace !== undefined && !(typeof pace === "string" && pace in PACES)) return fail("Rythme inconnu.");
@@ -417,6 +441,8 @@ export function setConcession(s: S2State, id: string, pace: unknown, dest: unkno
     if (pace === "normal") delete next.pace;
     else next.pace = pace as Pace;
   }
+  if (manual === true) next.manual = true;
+  else if (manual === false) delete next.manual;
   if (dest !== undefined) {
     delete next.dest;
     delete next.destConc;
@@ -559,7 +585,7 @@ export function cleanS2(raw: unknown, now: number): S2State {
       .slice(0, CONCESSIONS_MAX)
       .map((c) => {
         const x = c as Record<string, unknown>;
-        return { id: String(x.id), site: Math.floor(num(x.site)), level: Math.min(CONCESSION_MAX_LEVEL, Math.max(1, Math.floor(num(x.level, 1)))), stock: num(x.stock), next: num(x.next) || now, ...(num(x.upUntil) > 0 ? { upUntil: num(x.upUntil) } : {}), ...(x.pace === "prudent" || x.pace === "intensif" ? { pace: x.pace } : {}), ...(x.dest === "beffroi" ? { dest: "beffroi" as const } : {}), ...(num(x.fund) > 0 ? { fund: num(x.fund) } : {}), ...(typeof x.destConc === "string" ? { destConc: x.destConc } : {}), ...(num(x.banditAt) > 0 ? { banditAt: num(x.banditAt) } : {}), ...(x.warned === true ? { warned: true } : {}) };
+        return { id: String(x.id), site: Math.floor(num(x.site)), level: Math.min(CONCESSION_MAX_LEVEL, Math.max(1, Math.floor(num(x.level, 1)))), stock: num(x.stock), next: num(x.next) || now, ...(num(x.upUntil) > 0 ? { upUntil: num(x.upUntil) } : {}), ...(x.pace === "prudent" || x.pace === "intensif" ? { pace: x.pace } : {}), ...(x.dest === "beffroi" ? { dest: "beffroi" as const } : {}), ...(num(x.fund) > 0 ? { fund: num(x.fund) } : {}), ...(typeof x.destConc === "string" ? { destConc: x.destConc } : {}), ...(num(x.banditAt) > 0 ? { banditAt: num(x.banditAt) } : {}), ...(x.warned === true ? { warned: true } : {}), ...(x.manual === true ? { manual: true } : {}) };
       }),
     convoys: (Array.isArray(r.convoys) ? r.convoys : [])
       .filter((v) => v && typeof v === "object" && RES.includes((v as Convoy).res))
