@@ -4566,6 +4566,16 @@ function CaptainsPanel({ live, run, renown }: { live: PlayerState; run: ReturnTy
   );
 }
 
+/** Barre d'avancement d'un chantier ou d'un entraînement. */
+function WorkBar({ start, until, now }: { start: number; until: number; now: number }) {
+  const pct = Math.min(100, Math.max(0, ((now - start) / Math.max(1, until - start)) * 100));
+  return (
+    <div className="bar bar-thin" role="progressbar" aria-valuenow={Math.round(pct)} aria-valuemin={0} aria-valuemax={100}>
+      <span style={{ width: `${pct}%` }} />
+    </div>
+  );
+}
+
 /** C1 à C4 : caserne, compagnies, recrutement, entraînement et fortifications en niveaux (saison 1 et suivantes). */
 export function Companies({ live, now, run, renown = 0 }: { live: PlayerState; now: number; run: ReturnType<typeof useGame>["run"]; renown?: number }) {
   // Saison 2 : l'armée se paie en fer.
@@ -4609,6 +4619,7 @@ export function Companies({ live, now, run, renown = 0 }: { live: PlayerState; n
           <div className="row-desc num">
             {works.barracks ? `🔨 niveau ${works.barracks.level} dans ${countdown(works.barracks.until - now)}` : lv >= BARRACKS_MAX ? "Niveau maximal" : `Niveau ${lv + 1} : ${countdown(barracksMs(lv + 1))} de travaux`}
           </div>
+          {works.barracks && <WorkBar start={works.barracks.until - barracksMs(works.barracks.level)} until={works.barracks.until} now={now} />}
         </div>
         {lv < BARRACKS_MAX && !works.barracks && (
           <Btn className="btn btn-primary" busy={busy} reason={barracksBlocker(live)} onClick={() => void act({ type: "company", op: "barracks" })}>
@@ -4653,6 +4664,7 @@ export function Companies({ live, now, run, renown = 0 }: { live: PlayerState; n
                   })()}` : ""}
                   {training ? ` · 🎯 ${countdown(c.trainUntil - now)}` : ""}
                 </div>
+                {training && <WorkBar start={c.trainUntil - trainMs(c)} until={c.trainUntil} now={now} />}
                 {(captainOf(live, c.id) || relicOf(live, c.id)) && (
                   <div className="row-desc one-line">
                     {(() => {
@@ -4739,6 +4751,7 @@ export function Companies({ live, now, run, renown = 0 }: { live: PlayerState; n
                   {formatNumber(fortCount(d.id, level))} · ⚔️ {d.attack} · ❤️ {d.hp}
                   {building ? ` · 🔨 niv. ${works.fort!.level} dans ${countdown(works.fort!.until - now)}` : ""}
                 </div>
+                {building && <WorkBar start={works.fort!.until - fortMs(works.fort!.level - 1)} until={works.fort!.until} now={now} />}
               </div>
               {level < FORT_MAX && !building && (
                 <Btn className="btn btn-primary btn-small" busy={busy} reason={fortBlocker(live, d.id)} onClick={() => void act({ type: "company", op: "fort", unit: d.id })}>
