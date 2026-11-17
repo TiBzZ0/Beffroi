@@ -2,7 +2,8 @@
 
 import { createContext, useContext, useEffect, useId, useRef, useState } from "react";
 import { s2Enabled, setS2Map } from "@/lib/game/s2/rules";
-import { S2Domain, S2MapScreen } from "@/components/s2-map";
+import { S2MapScreen } from "@/components/s2-map";
+import { placeOf, S2Domain, S2Lands, S2ResourceBar, type Place } from "@/components/s2-domain";
 import { S2Guide, S2Tutorial } from "@/components/s2-tutorial";
 import { setIronArmy } from "@/lib/game/companies";
 import { LAUNCH_MULT } from "@/lib/game/s2/economy";
@@ -179,6 +180,21 @@ export function Game({ userId }: { userId: string }) {
     setTab(t);
     setLastSub((prev) => ({ ...prev, [groupOf(t)]: t }));
   };
+  // Saison 2 : le lieu où l'on travaille (château ou concession), gardé d'une visite à l'autre.
+  const [place, setPlace] = useState<Place>(() => {
+    try {
+      return localStorage.getItem("beffroi.place") ?? "chateau";
+    } catch {
+      return "chateau";
+    }
+  });
+  const selectPlace = (p: Place) => {
+    setPlace(p);
+    try {
+      localStorage.setItem("beffroi.place", p);
+    } catch {}
+    if (groupOf(tab) !== "domaine") selectTab("ateliers");
+  };
   const group = groupOf(tab);
   const selectGroup = (g: Group) => selectTab(g === group ? tab : (lastSub[g] ?? GROUPS[g][0]));
 
@@ -195,6 +211,7 @@ export function Game({ userId }: { userId: string }) {
   setS2Map(snap.s2?.map ?? null);
   const live: PlayerState = { ...advance(snap.state, now, world), stone: game.predictedStone() };
   const rate = rateAt(live, world, now);
+  const here = placeOf(live.s2, place);
   const researchDone = tab !== "armee" && researchEnds.some((e) => e <= now && e > armySeenAt);
   const eventLive = (isCombatEvent(snap.event) || isLocalEvent(snap.event)) && !!snap.event?.active && snap.event.endsAt > now;
   const affordableUpgrades = UPGRADES.filter((u) => !live.upgrades.includes(u.id) && upgradeUnlocked(live, u) && upgradeCost(live, u) <= live.stone).length;
@@ -213,11 +230,23 @@ export function Game({ userId }: { userId: string }) {
       <LastDayBanner snap={snap} now={now} />
       <SeasonEndCard snap={snap} />
       <PushPrompt raided={(snap.chronicle ?? []).some((c) => c.kind === "raid" && c.targetId === snap.userId) || (game.away?.raidsLost.length ?? 0) > 0} />
-      <div className="layout">
-        <Hero snap={snap} live={live} rate={rate} clickGain={clickValue(live, world, stagesDone)} game={game} />
-        <section className={`panel dom-${group}`}>
+      <div className={snap.s2 ? "layout s2-layout" : "layout"}>
+        {snap.s2 && (
+          <aside className="s2-lands-col">
+            <S2Lands snap={snap} live={live} now={now} place={here} select={selectPlace} openMap={() => selectTab("carte")} run={game.run} />
+          </aside>
+        )}
+        {snap.s2 ? (
+          <aside className="s2-side-col">
+            <Hero snap={snap} live={live} rate={rate} clickGain={clickValue(live, world, stagesDone)} game={game} />
+          </aside>
+        ) : (
+          <Hero snap={snap} live={live} rate={rate} clickGain={clickValue(live, world, stagesDone)} game={game} />
+        )}
+        <section className={`panel dom-${group}${snap.s2 ? " s2-main" : ""}`}>
+          {snap.s2 && <S2ResourceBar live={live} now={now} place={group === "domaine" ? here : "chateau"} map={snap.s2.map} />}
           <div className="tabs" role="tablist">
-            <TabButton id="domaine" tab={group} setTab={selectGroup} label="🏭 Domaine" dot={affordableUpgrades > 0} />
+            <TabButton id="domaine" tab={group} setTab={selectGroup} label={snap.s2 ? "🏰 Domaine" : "🏭 Domaine"} dot={!snap.s2 && affordableUpgrades > 0} />
             <TabButton id="chantier" tab={group} setTab={selectGroup} label="⛪ Chantier" />
             <TabButton id="armee" tab={group} setTab={selectGroup} label="⚔️ Armée" dot={researchDone} />
             <TabButton id="carte" tab={group} setTab={selectGroup} label={eventLive ? "🗺️ Carte ⚡" : "🗺️ Carte"} dot={eventLive || snap.rivals.some((r) => r.revenge && !r.blocker)} />
@@ -225,7 +254,7 @@ export function Game({ userId }: { userId: string }) {
             <TabButton id="messages" tab={group} setTab={selectGroup} label="✉️ Messages" dot={tab !== "messages" && unreadCount(snap, live, now) > 0} />
             <TabButton id="rangs" tab={group} setTab={selectGroup} label="🏆 Rangs" />
           </div>
-          {GROUPS[group].filter((t) => t !== "faille" || !!snap.rift).length > 1 && (
+          {GROUPS[group].filter((t) => (t !== "faille" || !!snap.rift) && !(snap.s2 && t === "ameliorations")).length > 1 && (
             <div className="subtabs group-subtabs" role="group" aria-label="Sections">
               {GROUPS[group].filter((t) => (t !== "faille" || !!snap.rift) && !(snap.s2 && t === "ameliorations")).map((t) => (
                 <button key={t} className="btn btn-small" aria-pressed={tab === t} onClick={() => selectTab(t)} data-tuto={`tab-${t}`}>
@@ -236,7 +265,7 @@ export function Game({ userId }: { userId: string }) {
             </div>
           )}
           <div className="tab-body" role="tabpanel">
-            {tab === "ateliers" && snap.s2 && <S2Domain snap={snap} live={live} now={now} run={game.run} />}
+            {tab === "ateliers" && snap.s2 && <S2Domain snap={snap} live={live} now={now} run={game.run} place={here} select={selectPlace} />}
             {tab === "ateliers" && !snap.s2 && <Generators live={live} stagesDone={stagesDone} snap={snap} run={game.run} />}
             {tab === "ameliorations" && !snap.s2 && <Upgrades live={live} run={game.run} />}
             {tab === "chantier" && <Worksite snap={snap} live={live} run={game.run} />}
@@ -910,7 +939,9 @@ function Hero({ snap, live, rate, clickGain, game }: { snap: GameSnapshot; live:
   const pct = finished ? 100 : Math.min(100, (w.progress / Math.max(1, w.target)) * 100);
 
   return (
-    <section className="panel hero">
+    <section className={`panel hero${snap.s2 ? " hero-s2" : ""}`}>
+      {!snap.s2 && (
+        <>
       <div className="hero-main">
         <div className="hero-stats">
           <div className="stone-count num">
@@ -974,6 +1005,8 @@ function Hero({ snap, live, rate, clickGain, game }: { snap: GameSnapshot; live:
           ))}
         </div>
       </div>
+        </>
+      )}
       <DailyCard daily={snap.daily} now={game.serverNow()} run={game.run} />
       <EventBanner e={snap.event} now={game.serverNow()} stone={snap.state.stone} run={game.run} />
       <Status state={snap.state} now={game.serverNow()} />

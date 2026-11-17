@@ -131,3 +131,13 @@ export function cleanLordS2(raw: unknown, now: number): LordS2State {
   const f = (r.fief ?? {}) as Partial<Arrivals>;
   return { fief: { pierre: num(f.pierre), fer: num(f.fer), or: num(f.or) }, at: num(r.at) || now, beatenAt: num(r.beatenAt) };
 }
+
+/** Garnison telle que le joueur la voit sur la carte (compagnies présentes, entraînement) : pour estimer un combat côté navigateur. */
+export function garrisonOfView(l: { id: string; rank: Rank; companies: number; home: number; train: number }): { army: Army; levels: Levels } {
+  const units = garrisonUnits(l.id, l.rank, l.companies).slice(0, Math.max(0, l.home));
+  const army: Record<string, number> = {};
+  for (const u of units) army[u] = (army[u] ?? 0) + COMPANY_CAP[u];
+  const forts = RANKS[l.rank].forts;
+  if (forts > 0) Object.assign(army, fortsFromLevels({ palissade: forts, tour: forts, baliste: forts, muraille: forts }));
+  return { army: army as Army, levels: trainLevels(l.train) };
+}

@@ -3,56 +3,17 @@
 // Saison 2 : la grande carte (41 × 41, zoom, glisser, filtres), la pose du château, et l'onglet du domaine
 // (concessions, bâtiments d'appui, marché). Tout se lit dans `snap.s2` et dans l'état prévu `live`.
 import { useEffect, useRef, useState } from "react";
-import { openTutorial } from "@/components/s2-tutorial";
+import { guideDone, openTutorial } from "@/components/s2-tutorial";
+import { armySize, estimateChance } from "@/lib/game/battle";
+import { attackArmy, playerAttackOpts } from "@/lib/game/engine";
+import { garrisonOfView } from "@/lib/game/s2/lords";
 import { drawBelfry, drawCastle, drawFort, drawLord, drawMap, drawRift, drawSite, toCell, type Layers, type View } from "@/components/s2-canvas";
 import { UNITS } from "@/lib/game/config";
 import { formatNumber } from "@/lib/game/format";
-import { lin, LIN_GENERATOR_DISCOUNT } from "@/lib/game/lineage";
 import type { PlayerState } from "@/lib/game/engine";
 import type { GameAction, GameSnapshot, S2WorldView } from "@/lib/game/types";
-import {
-  BUILDING_IDS,
-  BUILDINGS,
-  buildBlocker,
-  buildingCost,
-  buyConcessionBlocker,
-  CONCESSION_GOLD,
-  CONCESSION_MAX_LEVEL,
-  concessionCost,
-  concessionRate,
-  concessionSlots,
-  convoyIntervalMs,
-  convoyLoad,
-  concessionBudget,
-  supplyBlocker,
-  SECOND_SLOT_LEVEL,
-  concessionBuildMs,
-  buildingMs,
-  concBuildingMs,
-  CONC_BUILDING_IDS,
-  CONC_BUILDINGS,
-  CONC_BUILDING_MAX,
-  concBuildBlocker,
-  concBuildingCost,
-  TIERS,
-  tierOf,
-  LAUNCH_MULT,
-  BANDIT_HIGH,
-  fundRoom,
-  VALUE,
-  PACES,
-  type Pace,
-  exchangeBlocker,
-  localCap,
-  marketQuote,
-  RESOURCE_ICON,
-  RESOURCE_LABEL,
-  stockFull,
-  takeConcessionBlocker,
-  upgradeConcessionBlocker,
-  type BuildingId,
-} from "@/lib/game/s2/economy";
-import { castleBlocker, cheb, inCentre, RANKS, REGIONS, S2_SIZE, type Pos, type Resource } from "@/lib/game/s2/map";
+import { tierOf, RESOURCE_ICON, RESOURCE_LABEL, takeConcessionBlocker } from "@/lib/game/s2/economy";
+import { castleBlocker, cheb, inCentre, RANKS, REGIONS, S2_SIZE, type Pos } from "@/lib/game/s2/map";
 
 type Run = (action: GameAction) => Promise<unknown>;
 type Pick = { kind: "cell"; pos: Pos } | { kind: "site"; id: number } | { kind: "lord"; id: string } | { kind: "castle"; id: string };
@@ -328,9 +289,7 @@ function S2Panel({ snap, live, now, world, picked, busy, act, castlesOthers }: {
           Fief : environ {formatNumber(l.fief)} en valeur pierre (une victoire en emporte 60 %, plus du fer par compagnie battue).
           {l.reformAt > now ? ` La garnison se reforme : complète dans ${dur(l.reformAt - now)}.` : ""}
         </div>
-        {castle && (
-          <button className="btn btn-primary" data-tuto="lord-attack" disabled={busy} onClick={() => void act({ type: "raid", target: l.id })}>Attaquer</button>
-        )}
+        {castle && <LordAttack live={live} lord={l} busy={busy} attack={() => void act({ type: "raid", target: l.id })} />}
       </div>
     );
   }
@@ -343,256 +302,38 @@ function S2Panel({ snap, live, now, world, picked, busy, act, castlesOthers }: {
   );
 }
 
-/** Onglet du domaine en saison 2 : concessions, bâtiments d'appui, marché. */
-/** Un chantier en cours : son nom, le temps restant qui défile, et une barre d'avancement. */
-function Work({ icon, label, start, until, now }: { icon: string; label: string; start: number; until: number; now: number }) {
-  const pct = Math.min(100, Math.max(0, ((now - start) / Math.max(1, until - start)) * 100));
+/** Chance estimée contre la garnison d'un seigneur, et une confirmation quand elle est faible. */
+function LordAttack({ live, lord, busy, attack }: { live: PlayerState; lord: S2WorldView["lords"][number]; busy: boolean; attack: () => void }) {
+  const [sure, setSure] = useState(false);
+  useEffect(() => {
+    guideDone("lord");
+  }, []);
+  const mine = attackArmy(live);
+  const g = garrisonOfView(lord);
+  const chance = armySize(mine) > 0 ? estimateChance(mine, g.army, playerAttackOpts(live, { defenderLevels: g.levels })) : 0;
+  const pct = Math.round(chance * 100);
+  const risky = chance < 0.6;
   return (
-    <div className="s2-work">
-      <div className="s2-work-head">
-        <span>
-          {icon} {label}
-        </span>
-        <span className="num">{until > now ? dur(until - now) : "terminé"}</span>
+    <div className="lord-attack">
+      <div className="row-desc">
+        {armySize(mine) === 0 ? (
+          "Tu n'as aucune troupe au château : recrute d'abord dans l'onglet Armée."
+        ) : (
+          <>
+            Chance de victoire estimée avec toutes tes troupes au château : <span className={`lord-chance ${risky ? "bad" : "good"}`}>{pct} %</span>.
+            {risky && " Une défaite te coûte des hommes : entraîne et remplis tes compagnies avant d'attaquer."}
+          </>
+        )}
       </div>
-      <div className="bar bar-thin" role="progressbar" aria-valuenow={Math.round(pct)} aria-valuemin={0} aria-valuemax={100}>
-        <span style={{ width: `${pct}%` }} />
-      </div>
-    </div>
-  );
-}
-
-export function S2Domain({ snap, live, now, run }: { snap: GameSnapshot; live: PlayerState; now: number; run: Run }) {
-  const world = snap.s2!;
-  const s2 = live.s2;
-  const [busy, setBusy] = useState(false);
-  const [from, setFrom] = useState<Resource>("pierre");
-  const [to, setTo] = useState<Resource>("fer");
-  const [amount, setAmount] = useState(1000);
-  const [supply, setSupply] = useState<{ res: Resource; amount: number }>({ res: "pierre", amount: 500 });
-  if (!s2) return <p className="empty">La saison 2 n&apos;est pas encore ouverte.</p>;
-  const act = async (a: GameAction) => {
-    // Les actions avec aperçu immédiat ne bloquent pas les boutons pendant l'aller-retour.
-    const waits = a.type !== "s2" || a.op === "place" || a.op === "take";
-    if (waits) setBusy(true);
-    await run(a);
-    if (waits) setBusy(false);
-  };
-  const map = world.map;
-  const slots = concessionSlots(s2, { stageConcessions: stageConcessions(snap, now) });
-  const discount = lin(live, "main_oeuvre") ? 1 - LIN_GENERATOR_DISCOUNT : 1;
-  const have = { pierre: live.stone, fer: s2.iron, or: s2.gold };
-  if (!s2.castle) return <p className="empty">Pose d&apos;abord ton château depuis l&apos;onglet Carte.</p>;
-  const exWhy = exchangeBlocker(have, from, to, amount);
-  return (
-    <div className="s2-domain">
-      <button className="btn btn-small s2-howto" onClick={openTutorial}>📖 Comment jouer</button>
-      <div className="s2-purse">
-        <span>🪨 {formatNumber(live.stone)}</span>
-        <span>⚔️ {formatNumber(s2.iron)} fer</span>
-        <span>🪙 {formatNumber(s2.gold)} or</span>
-      </div>
-      {(() => {
-        const items: { key: string; icon: string; label: string; start: number; until: number }[] = [];
-        for (const c of s2.conc) {
-          const name = map.sites[c.site]?.name || "Concession";
-          if (c.upUntil && c.upUntil > now) items.push({ key: `up-${c.id}`, icon: "⛏️", label: `${name} → niveau ${c.level + 1}`, start: c.upUntil - concessionBuildMs(c.level + 1), until: c.upUntil });
-          if (c.cwork && c.cwork.until > now) items.push({ key: `cb-${c.id}`, icon: CONC_BUILDINGS[c.cwork.id].icon, label: `${CONC_BUILDINGS[c.cwork.id].name} niv. ${c.cwork.level} · ${name}`, start: c.cwork.until - concBuildingMs(c.cwork.level), until: c.cwork.until });
-        }
-        for (const w of s2.works) if (w.until > now) items.push({ key: `w-${w.id}-${w.level}`, icon: BUILDINGS[w.id].icon, label: `${BUILDINGS[w.id].name} → niveau ${w.level}`, start: w.until - buildingMs(w.level), until: w.until });
-        const moving = s2.convoys.filter((v) => v.arrive > now);
-        if (!items.length && !moving.length) return null;
-        items.sort((a, b) => a.until - b.until);
-        return (
-          <div className="s2-works">
-            <h3>🔨 En cours</h3>
-            {items.map((i) => (
-              <Work key={i.key} icon={i.icon} label={i.label} start={i.start} until={i.until} now={now} />
-            ))}
-            {moving.length > 0 && (
-              <Work
-                icon="🛒"
-                label={`${moving.length} convoi${moving.length > 1 ? "s" : ""} en route · le prochain apporte ${formatNumber(moving.reduce((a, v) => (v.arrive < a.arrive ? v : a)).load)} ${RESOURCE_LABEL[moving.reduce((a, v) => (v.arrive < a.arrive ? v : a)).res]}`}
-                start={moving.reduce((a, v) => (v.arrive < a.arrive ? v : a)).depart}
-                until={Math.min(...moving.map((v) => v.arrive))}
-                now={now}
-              />
-            )}
-          </div>
-        );
-      })()}
-      {LAUNCH_MULT > 1 && (s2.launchUntil ?? 0) > now && (
-        <p className="row-desc">🚀 Lancement : production et charge des convois ×{LAUNCH_MULT} encore {Math.ceil(((s2.launchUntil ?? 0) - now) / 3_600_000)} h.</p>
-      )}
-
-      <h3>Concessions ({s2.conc.length}/{slots})</h3>
-      <div className="list">
-        {s2.conc.map((c, ci) => {
-          const site = map.sites[c.site];
-          if (!site) return null;
-          const rate = concessionRate(s2, c, map);
-          const cap = localCap(s2, c, map);
-          const full = stockFull(s2, c, map);
-          const upWhy = upgradeConcessionBlocker(s2, c.id, map, now);
-          const budget = concessionBudget(c, map);
-          const incoming = s2.convoys.filter((v) => v.dest === "concession" && v.conc === c.id);
-          return (
-            <div key={c.id} className="row">
-              <div>
-                <div className="row-title">{RESOURCE_ICON[site.type]} {site.name || RESOURCE_LABEL[site.type]} <span className="badge">niv. {c.level}</span> <span className="badge">{TIERS[tierOf(c.level)].name}</span></div>
-                <div className="row-desc">
-                  {formatNumber(rate)} {RESOURCE_LABEL[site.type]}/h · convoi de {formatNumber(convoyLoad(s2, c, map))}{c.manual ? ", envoyé à la main." : ` toutes les ${dur(convoyIntervalMs(s2))}, prochain dans ${dur(c.next - now)}.`} Stock {formatNumber(c.stock)} / {formatNumber(cap)}.
-                </div>
-                <div className="bar bar-thin"><span style={{ width: `${Math.min(100, (c.stock / Math.max(1, cap)) * 100)}%` }} /></div>
-                {(() => {
-                  const load = convoyLoad(s2, c, map);
-                  const per = rate * (convoyIntervalMs(s2) / 3_600_000);
-                  return (
-                    <div className={`row-desc${per > load ? " s2-over" : ""}`}>
-                      Charge {formatNumber(load)} / production par intervalle {formatNumber(per)}
-                      {per > load && " : la charge ne suit pas, le stock va se remplir. Améliore ta charronnerie."}
-                    </div>
-                  );
-                })()}
-                <div className="s2-settings">
-                  <span>Rythme</span>
-                  {(Object.keys(PACES) as Pace[]).map((k) => (
-                    <button key={k} className={`btn btn-small${(c.pace ?? "normal") === k ? " btn-primary" : ""}`} disabled={busy || (c.pace ?? "normal") === k} title={PACES[k].text} onClick={() => void act({ type: "s2", op: "set", id: c.id, pace: k })}>
-                      {PACES[k].name}
-                    </button>
-                  ))}
-                </div>
-                <div className="s2-settings">
-                  <span>Bâtiments</span>
-                  {CONC_BUILDING_IDS.map((b) => {
-                    const lvl = c.cb?.[b] ?? 0;
-                    const why = concBuildBlocker(s2, c.id, b, map, now);
-                    const working = c.cwork && c.cwork.until > now && c.cwork.id === b;
-                    return (
-                      <button key={b} className="btn btn-small" data-tuto={ci === 0 ? `cbuild-${b}` : undefined} disabled={busy || !!why} title={`${CONC_BUILDINGS[b].text}.${why ? ` ${why}` : ""}`} onClick={() => void act({ type: "s2", op: "cbuild", id: c.id, building: b })}>
-                        {CONC_BUILDINGS[b].icon} {CONC_BUILDINGS[b].name} {lvl}
-                        {working ? ` → ${lvl + 1} (${dur(c.cwork!.until - now)})` : lvl < CONC_BUILDING_MAX ? ` · 🧱 ${formatNumber(concBuildingCost(lvl + 1))} · ${dur(concBuildingMs(lvl + 1))}` : ""}
-                      </button>
-                    );
-                  })}
-                </div>
-                <div className="s2-settings">
-                  <span>Départs</span>
-                  <button className={`btn btn-small${!c.manual ? " btn-primary" : ""}`} disabled={busy || !c.manual} title="Un convoi part tout seul à chaque intervalle." onClick={() => void act({ type: "s2", op: "set", id: c.id, manual: false })}>
-                    Automatiques
-                  </button>
-                  <button className={`btn btn-small${c.manual ? " btn-primary" : ""}`} disabled={busy || !!c.manual} title="La concession garde tout pour ses améliorations. Au-dessus de 90 % de stock, les brigands rôdent (sauf en prudent)." onClick={() => void act({ type: "s2", op: "set", id: c.id, manual: true })}>
-                    À la main
-                  </button>
-                  {c.manual && (
-                    <button className="btn btn-small btn-primary" disabled={busy || c.stock < 1} onClick={() => void act({ type: "s2", op: "ship", id: c.id })}>
-                      🛒 Envoyer un convoi ({formatNumber(Math.min(c.stock, convoyLoad(s2, c, map)))})
-                    </button>
-                  )}
-                </div>
-                {c.manual && <div className="row-desc">✋ Départs à la main : le stock reste sur place et sert aux améliorations. Au-dessus de 90 %, les brigands rôdent{c.pace === "prudent" ? " (pas en prudent)" : ""}.</div>}
-                <div className="s2-settings">
-                  <span>Convois vers</span>
-                  {(["chateau", "beffroi"] as const).map((k) => (
-                    <button key={k} className={`btn btn-small${!c.destConc && (c.dest ?? "chateau") === k ? " btn-primary" : ""}`} disabled={busy || (!c.destConc && (c.dest ?? "chateau") === k)} title={k === "beffroi" ? "Chaque convoi arrivé compte entièrement comme un don au beffroi (paliers, part de chantier, classement), en plus de la dîme. L'or de 3 % te revient." : "Ton château."} onClick={() => void act({ type: "s2", op: "set", id: c.id, dest: k })}>
-                      {k === "beffroi" ? "🔔 Beffroi" : "🏰 Château"}
-                    </button>
-                  ))}
-                  {s2.conc
-                    .filter((o) => o.id !== c.id && map.sites[o.site])
-                    .map((o) => (
-                      <button key={o.id} className={`btn btn-small${c.destConc === o.id ? " btn-primary" : ""}`} disabled={busy || c.destConc === o.id} title="Les convois remplissent la réserve de chantier de cette concession. Quand elle est pleine, ils rentrent au château." onClick={() => void act({ type: "s2", op: "set", id: c.id, dest: o.id })}>
-                        {RESOURCE_ICON[map.sites[o.site].type]} {map.sites[o.site].name || RESOURCE_LABEL[map.sites[o.site].type]}
-                      </button>
-                    ))}
-                  <button className="btn btn-small" disabled title="Bientôt : envoyer les convois à un membre de ton alliance.">🤝 Allié</button>
-                </div>
-                <div className="row-desc">
-                  🧱 Réserve de chantier {formatNumber(c.fund ?? 0)} · avec le stock, {formatNumber(budget)} disponibles pour ses travaux (valeur pierre).{c.level < CONCESSION_MAX_LEVEL && ` La réserve accepte encore ${formatNumber(Math.max(0, fundRoom(s2, c)))}.`}
-                  {incoming.length > 0 && ` Ravitaillement en route : ${formatNumber(incoming.reduce((a, v) => a + v.load * VALUE[v.res], 0))}, arrivée dans ${dur(Math.min(...incoming.map((v) => v.arrive)) - now)}.`}
-                </div>
-                <div className="s2-settings">
-                  <span>Ravitailler</span>
-                  <input type="number" min={1} step={100} value={supply.amount} onChange={(e) => setSupply({ ...supply, amount: Math.max(1, Math.floor(Number(e.target.value) || 0)) })} style={{ width: "6em" }} />
-                  <select value={supply.res} onChange={(e) => setSupply({ ...supply, res: e.target.value as Resource })}>
-                    <option value="pierre">🪨 pierre</option>
-                    <option value="fer">⚔️ fer (×2)</option>
-                    <option value="or">🪙 or (×4)</option>
-                  </select>
-                  {(() => {
-                    const why = supplyBlocker(s2, c.id, have, supply.res, supply.amount);
-                    return (
-                      <button className="btn btn-small" data-tuto={ci === 0 ? "supply" : undefined} disabled={busy || !!why} title={why ?? "Un convoi part du château et remplit la réserve de la concession à l'arrivée."} onClick={() => void act({ type: "s2", op: "supply", id: c.id, from: supply.res, amount: supply.amount })}>
-                        Envoyer
-                      </button>
-                    );
-                  })()}
-                </div>
-                {full && <div className="row-desc">⚠️ Stock plein : améliore ta charronnerie ou ton relais.</div>}
-                {c.stock >= BANDIT_HIGH * cap && c.pace !== "prudent" && <div className="row-desc s2-over">🗡️ Stock au-dessus de 90 % : des brigands rôdent. Chaque heure, 30 % de risque d&apos;en perdre 20 %. Vide-le, ou passe en prudent.</div>}
-                {c.upUntil && c.upUntil > now && <Work icon="⛏️" label={`Niveau ${c.level + 1}`} start={c.upUntil - concessionBuildMs(c.level + 1)} until={c.upUntil} now={now} />}
-                {c.cwork && c.cwork.until > now && <Work icon={CONC_BUILDINGS[c.cwork.id].icon} label={`${CONC_BUILDINGS[c.cwork.id].name} niveau ${c.cwork.level}`} start={c.cwork.until - concBuildingMs(c.cwork.level)} until={c.cwork.until} now={now} />}
-                {!c.manual && <Work icon="🛒" label="Prochain convoi" start={c.next - convoyIntervalMs(s2)} until={c.next} now={now} />}
-              </div>
-              <div className="s2-actions">
-                {c.level < CONCESSION_MAX_LEVEL && (
-                  <button className="btn btn-small btn-primary" data-tuto={ci === 0 ? "conc-upgrade" : undefined} disabled={busy || !!upWhy} title={upWhy ?? undefined} onClick={() => void act({ type: "s2", op: "upgrade", id: c.id })}>
-                    Niveau {c.level + 1} · 🧱 {formatNumber(concessionCost(c.level + 1))} · {dur(concessionBuildMs(c.level + 1))}
-                  </button>
-                )}
-                {s2.conc.length > 1 && (
-                  <button className="btn btn-small" disabled={busy} onClick={() => void act({ type: "s2", op: "drop", id: c.id })}>Abandonner</button>
-                )}
-              </div>
-            </div>
-          );
-        })}
-      </div>
-      {s2.conc.length < slots && <p className="row-desc">Une place libre : choisis un site sur la carte.</p>}
-      {slots < 2 && <p className="row-desc">🔓 Deuxième concession : monte une concession au niveau {SECOND_SLOT_LEVEL} (palier Exploitation), ou attends la première étape du beffroi.</p>}
-      {s2.bought < CONCESSION_GOLD.length && (
-        <button className="btn" disabled={busy || !!buyConcessionBlocker(s2)} title={buyConcessionBlocker(s2) ?? undefined} onClick={() => void act({ type: "s2", op: "buy" })}>
-          Acheter une concession · 🪙 {formatNumber(CONCESSION_GOLD[s2.bought])}
+      {!risky || sure ? (
+        <button className="btn btn-primary" data-tuto="lord-attack" disabled={busy || armySize(mine) === 0} onClick={attack}>
+          {risky ? `Attaquer quand même (${pct} %)` : `Attaquer (${pct} %)`}
+        </button>
+      ) : (
+        <button className="btn" disabled={busy || armySize(mine) === 0} onClick={() => setSure(true)}>
+          Attaquer…
         </button>
       )}
-
-      <h3>Bâtiments d&apos;appui</h3>
-      <div className="list">
-        {BUILDING_IDS.map((id: BuildingId) => {
-          const def = BUILDINGS[id];
-          const work = s2.works.filter((w) => w.id === id);
-          const next = Math.max(s2.bld[id], ...work.map((w) => w.level)) + 1;
-          const why = buildBlocker(s2, id, live.stone, discount);
-          return (
-            <div key={id} className="row">
-              <div>
-                <div className="row-title">{def.icon} {def.name} <span className="badge">niv. {s2.bld[id]}</span></div>
-                <div className="row-desc">{def.text}</div>
-                {work.map((w) => <Work key={w.level} icon="🔨" label={`Niveau ${w.level}`} start={w.until - buildingMs(w.level)} until={w.until} now={now} />)}
-              </div>
-              <button className="btn btn-small btn-primary" data-tuto={`bld-${id}`} disabled={busy || !!why} title={why ?? undefined} onClick={() => void act({ type: "s2", op: "build", building: id })}>
-                Niveau {next} · 🪨 {formatNumber(Math.ceil(buildingCost(id, next) * discount))} · {dur(buildingMs(next))}
-              </button>
-            </div>
-          );
-        })}
-      </div>
-
-      <h3>Marché</h3>
-      <p className="row-desc">Échange immédiat au tiers de la valeur (1 or vaut 4 pierres, 1 fer en vaut 2).</p>
-      <div className="s2-market">
-        <input type="number" min={1} value={amount} onChange={(e) => setAmount(Math.max(0, Math.floor(Number(e.target.value) || 0)))} aria-label="Quantité" />
-        <select value={from} onChange={(e) => setFrom(e.target.value as Resource)} aria-label="Monnaie donnée">
-          {(["pierre", "fer", "or"] as Resource[]).map((r) => <option key={r} value={r}>{RESOURCE_ICON[r]} {RESOURCE_LABEL[r]}</option>)}
-        </select>
-        <span>→</span>
-        <select value={to} onChange={(e) => setTo(e.target.value as Resource)} aria-label="Monnaie reçue">
-          {(["pierre", "fer", "or"] as Resource[]).map((r) => <option key={r} value={r}>{RESOURCE_ICON[r]} {RESOURCE_LABEL[r]}</option>)}
-        </select>
-        <button className="btn btn-primary" disabled={busy || !!exWhy} title={exWhy ?? undefined} onClick={() => void act({ type: "s2", op: "exchange", from, to, amount })}>
-          Recevoir {from !== to ? formatNumber(marketQuote(from, to, amount)) : 0} {RESOURCE_LABEL[to]}
-        </button>
-      </div>
     </div>
   );
 }

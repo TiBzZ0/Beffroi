@@ -8,6 +8,12 @@ import { concessionSlots } from "@/lib/game/s2/economy";
 import type { PlayerState } from "@/lib/game/engine";
 
 const OPEN_EVENT = "beffroi:tutoriel";
+const DONE_EVENT = "beffroi:guide";
+
+/** Marque une étape du guide comme faite depuis un autre écran (par exemple : fiche d'un seigneur ouverte). */
+export function guideDone(id: string) {
+  window.dispatchEvent(new CustomEvent(DONE_EVENT, { detail: id }));
+}
 
 /** Rouvre le tutoriel depuis n'importe quel écran. */
 export function openTutorial() {
@@ -41,7 +47,7 @@ const PAGES: { icon: string; title: string; text: string[] }[] = [
       "🪨 La pierre bâtit : bâtiments d'appui, ravitaillement des concessions, caserne, fortifications, et le beffroi.",
       "⚔️ Le fer paie l'armée : recruter (20 à 300 fer l'homme) et entraîner. Tu démarres avec 30 000 fer ; les mines et les seigneurs en rapportent.",
       "🪙 L'or paie l'espionnage, le rythme intensif et les concessions en plus. Chaque convoi arrivé en rapporte 3 % de sa valeur, et les filons en produisent.",
-      "⚖️ Le marché, dans le domaine, échange tout de suite au tiers de la valeur (1 or = 2 fer = 4 pierre).",
+      "⚖️ Le marché, dans ton château, échange tout de suite au tiers de la valeur (1 or = 2 fer = 4 pierre).",
     ],
   },
   {
@@ -58,10 +64,11 @@ const PAGES: { icon: string; title: string; text: string[] }[] = [
     icon: "🎛️",
     title: "Gérer chaque concession",
     text: [
+      "Dans l'onglet Domaine, « Mes terres » (à droite, ou en haut sur téléphone) liste ton château et tes concessions : touche-en une pour la gérer. La barre du haut montre alors les ressources de ce lieu.",
       "Rythme : 🐢 prudent (−20 % de production, stock ×2, à l'abri des brigands) pour t'absenter ; normal ; 🔥 intensif (+25 %, contre 5 % de la valeur de chaque convoi en or).",
       "Départs : automatiques, ou à la main pour garder le stock sur place et payer les améliorations avec.",
       "Convois vers : ton château, le beffroi (chaque convoi compte comme un don entier), ou une autre de tes concessions pour remplir sa réserve.",
-      "La ligne « Charge / production par intervalle » passe en orange quand la charge ne suit plus : c'est le signal de monter la charronnerie ou l'écurie.",
+      "Un avis orange apparaît quand la charge des convois ne suit plus la production : c'est le signal de bâtir une écurie dans la concession ou de monter la charronnerie au château.",
     ],
   },
   {
@@ -78,17 +85,9 @@ const PAGES: { icon: string; title: string; text: string[] }[] = [
     icon: "🏗️",
     title: "Bâtiments d'appui (château)",
     text: [
-      "Payés en pierre du château, deux chantiers à la fois, jusqu'au niveau 20. Ils valent pour toutes tes concessions.",
+      "Choisis ton château dans « Mes terres ». Ses bâtiments se paient en pierre, deux chantiers à la fois, jusqu'au niveau 20, et valent pour toutes tes concessions.",
       "🛠️ Outils : +3 % de production par niveau. 🛞 Charronnerie : +10 % de charge par niveau. 🐎 Relais : un convoi 20 s plus tôt par niveau (5 min au plus court), et 3 % plus rapide.",
       "🏚️ Entrepôt : +30 min de stock local par niveau, et plus de pierre à l'abri au château en cas de raid.",
-    ],
-  },
-  {
-    icon: "🔨",
-    title: "Le marteau et l'élan",
-    text: [
-      "Le marteau ne taille plus la pierre : chaque coup allume l'élan. Tant qu'il dure, toute ta production gagne 25 %.",
-      "La jauge se remplit de quelques secondes par coup, jusqu'à un plafond. Passe la raviver de temps en temps.",
     ],
   },
   {
@@ -105,7 +104,8 @@ const PAGES: { icon: string; title: string; text: string[] }[] = [
     title: "Les seigneurs",
     text: [
       "Vingt seigneurs tiennent un fief : 🛡️ hobereaux (1 à 2 compagnies), barons, comtes, puis ducs près du centre. Ils n'attaquent jamais les joueurs.",
-      "Touche leur écu sur la carte pour voir leur garnison, puis « Attaquer ». Ton armée marche, se bat, et rentre avec le butin.",
+      "Touche leur écu sur la carte : la fiche montre leur garnison et ta chance de victoire avec tes troupes au château. Ton armée marche, se bat, et rentre avec le butin.",
+      "Une défaite coûte des hommes. Les seigneurs n'attaquent jamais : rien ne presse, attends d'avoir une bonne chance (au-dessus de 60 %).",
       "Une victoire emporte 60 % de leur fief (pierre, fer, or) et du fer pour chaque compagnie battue. La garnison se reforme ensuite, puis le fief se remplit à nouveau.",
       "Commence par les hobereaux loin du centre ; les ducs se battent en alliance.",
     ],
@@ -218,30 +218,21 @@ const STEPS: GuideStep[] = [
     done: (s) => !!s.s2?.castle,
   },
   {
-    id: "hammer",
-    title: "Frappe le marteau",
-    what: { hammer: "Frappe la pierre quelques fois." },
-    why: "Chaque coup allume l'élan : +25 % de production tant qu'il dure. Reviens le raviver quand tu passes.",
-    tab: () => null,
-    targets: () => ["hammer"],
-    done: (s) => (s.elanUntil ?? 0) > 0,
-  },
-  {
     id: "outils",
     title: "Bâtis les outils",
-    what: { "bld-outils": "Lance le niveau 1 des outils : 50 pierre, 5 secondes." },
+    what: { "bld-outils": "Lance le niveau 1 des outils : 50 pierre, 5 secondes.", "land-chateau": "Choisis ton château dans « Mes terres » : ses bâtiments s'y trouvent." },
     why: "Les outils ajoutent +3 % de production à toutes tes concessions, présentes et futures. Ce sont tes bâtiments d'appui, payés avec la pierre du château.",
     tab: () => "ateliers",
-    targets: () => ["bld-outils"],
+    targets: () => ["bld-outils", "land-chateau"],
     done: (s) => (s.s2?.bld.outils ?? 0) > 0 || !!s.s2?.works.some((w) => w.id === "outils"),
   },
   {
     id: "supply",
     title: "Ravitaille ta carrière",
-    what: { supply: "Envoie 100 pierre ou plus à ta carrière avec « Envoyer »." },
+    what: { supply: "Envoie 100 pierre ou plus à ta carrière avec « Envoyer ».", "land-conc0": "Choisis ta carrière dans « Mes terres » : chaque concession se gère à part, avec ses propres ressources." },
     why: "Une concession s'améliore avec ce qu'elle a sur place : sa réserve de chantier, puis son propre stock. Le convoi met quelques secondes par case à arriver.",
     tab: () => "ateliers",
-    targets: () => ["supply"],
+    targets: () => ["supply", "land-conc0"],
     done: (s) => {
       const c = conc0(s);
       return !!c && ((c.fund ?? 0) > 0 || c.level >= 2 || !!c.upUntil || !!s.s2?.convoys.some((v) => v.dest === "concession"));
@@ -250,10 +241,10 @@ const STEPS: GuideStep[] = [
   {
     id: "upgrade",
     title: "Monte ta carrière d'un niveau",
-    what: { "conc-upgrade": "Quand la réserve est arrivée, touche « Niveau 2 »." },
+    what: { "conc-upgrade": "Quand la réserve est arrivée, touche « Niveau 2 ».", "land-conc0": "Choisis ta carrière dans « Mes terres » : chaque concession se gère à part, avec ses propres ressources." },
     why: "Chaque niveau donne +15 % de production à cette concession, et ses convois emportent davantage. Au niveau 5, elle devient une Exploitation et t'ouvre une deuxième concession.",
     tab: () => "ateliers",
-    targets: () => ["conc-upgrade"],
+    targets: () => ["conc-upgrade", "land-conc0"],
     done: (s) => {
       const c = conc0(s);
       return !!c && (c.level >= 2 || !!c.upUntil);
@@ -262,10 +253,10 @@ const STEPS: GuideStep[] = [
   {
     id: "atelier",
     title: "Bâtis un atelier dans ta carrière",
-    what: { "cbuild-atelier": "Lance l'atelier de ta carrière." },
+    what: { "cbuild-atelier": "Lance l'atelier de ta carrière.", "land-conc0": "Choisis ta carrière dans « Mes terres » : chaque concession se gère à part, avec ses propres ressources." },
     why: "L'atelier ajoute +8 % de production par niveau à cette concession seulement. Il ne peut pas dépasser le niveau de la concession : monte les deux ensemble.",
     tab: () => "ateliers",
-    targets: () => ["cbuild-atelier"],
+    targets: () => ["cbuild-atelier", "land-conc0"],
     done: (s) => {
       const c = conc0(s);
       return !!c && ((c.cb?.atelier ?? 0) > 0 || c.cwork?.id === "atelier");
@@ -281,18 +272,6 @@ const STEPS: GuideStep[] = [
     done: (s) => (s.recruits?.length ?? 0) > 0 || (s.companies?.length ?? 0) > 1 || (s.companies ?? []).some((c) => c.train > 0 || c.trainUntil > 0),
   },
   {
-    id: "lord",
-    title: "Attaque un hobereau",
-    what: {
-      "lord-attack": "Lance l'attaque. Ton armée part, se bat, puis rentre avec le butin.",
-      map: "Touche un écu rouge sans couronne, de préférence loin du centre : c'est un hobereau, le seigneur le plus faible.",
-    },
-    why: "Une victoire emporte une part de son fief (pierre, fer, or) et du fer pour chaque compagnie battue. Les seigneurs n'attaquent jamais : c'est le meilleur moyen de gagner du fer.",
-    tab: () => "carte",
-    targets: () => ["lord-attack", "map"],
-    done: (s) => (s.marches ?? []).some((m) => m.kind === "raid") || (s.questFlags ?? []).includes("lord"),
-  },
-  {
     id: "belfry",
     title: "Aide à bâtir le beffroi",
     what: { contribute: "Verse 10 % de ta pierre au beffroi." },
@@ -302,16 +281,30 @@ const STEPS: GuideStep[] = [
     done: (s) => s.totalContributed > 0 || !!s.titheSet,
   },
   {
+    id: "lord",
+    title: "Repère un seigneur à ta portée",
+    what: {
+      "lord-attack": "Lis ta chance de victoire. N'attaque que si elle est bonne (vert) ; sinon, renforce d'abord ton armée.",
+      map: "Touche un écu rouge sans couronne, loin du centre : c'est un hobereau, le seigneur le plus faible. Sa fiche affiche ta chance de victoire.",
+    },
+    why: "Battre un seigneur rapporte une part de son fief et du fer. Mais une défaite coûte des hommes, et les seigneurs n'attaquent jamais : rien ne presse, attaque quand ta chance dépasse 60 %.",
+    tab: () => "carte",
+    targets: () => ["lord-attack", "map"],
+    done: (s) => (s.marches ?? []).some((m) => m.kind === "raid") || (s.questFlags ?? []).includes("lord"),
+  },
+  {
     id: "second",
     title: "Ouvre une deuxième concession",
     what: {
       take: "Touche « Prendre une concession ici ».",
       map: "Une place est libre : touche un site sur la carte (hexagone gris pour la pierre, bleu pour le fer, jaune pour l'or).",
+      "land-free": "Touche « Place libre » : la carte s'ouvre pour choisir un site.",
       "conc-upgrade": "Continue de monter ta carrière : au niveau 5, une deuxième place s'ouvre.",
+      "land-conc0": "Choisis ta carrière dans « Mes terres » et continue de la monter : au niveau 5, une deuxième place s'ouvre.",
     },
     why: "Plus de concessions, c'est plus de production, et le fer et l'or se trouvent dans d'autres sites. Une mine de fer paie ton armée.",
     tab: (s, slots) => ((s.s2?.conc.length ?? 0) < slots ? "carte" : "ateliers"),
-    targets: (s, slots) => ((s.s2?.conc.length ?? 0) < slots ? ["take", "map"] : ["conc-upgrade"]),
+    targets: (s, slots) => ((s.s2?.conc.length ?? 0) < slots ? ["take", "map"] : ["conc-upgrade", "land-conc0"]),
     done: (s) => (s.s2?.conc.length ?? 0) >= 2,
   },
 ];
@@ -358,6 +351,18 @@ export function S2Guide({ seasonId, live, tab, stages }: { seasonId: number; liv
       writeSet(doneKey, stored.done);
     }
   });
+  const [, setMarked] = useState(0);
+  useEffect(() => {
+    const mark = (e: Event) => {
+      const id = String((e as CustomEvent).detail ?? "");
+      if (!id || stored.done.has(id)) return;
+      stored.done.add(id);
+      writeSet(doneKey, stored.done);
+      setMarked((n) => n + 1);
+    };
+    window.addEventListener(DONE_EVENT, mark);
+    return () => window.removeEventListener(DONE_EVENT, mark);
+  }, [doneKey, stored]);
   const isDone = (st: GuideStep) => done.has(st.id) || newly.includes(st.id) || skipped.has(st.id);
   const step = STEPS.find((st) => !isDone(st)) ?? null;
   const count = STEPS.filter(isDone).length;

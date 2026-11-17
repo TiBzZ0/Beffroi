@@ -2837,3 +2837,133 @@ use.g-enemy {
 
 .changelog-btn { position: relative; }
 .changelog-btn .dot { position: absolute; top: 4px; right: 4px; width: 8px; height: 8px; background: var(--accent); border-radius: 50%; }
+
+/* ---------- Saison 2 : domaine lieu par lieu ---------- */
+.s2-layout {
+  grid-template-areas: "lands" "main" "side";
+}
+.s2-lands-col { grid-area: lands; min-width: 0; }
+.s2-side-col { grid-area: side; min-width: 0; }
+.s2-main { grid-area: main; min-width: 0; }
+@media (min-width: 860px) {
+  .layout.s2-layout {
+    grid-template-columns: minmax(0, 1fr) 290px;
+    grid-template-areas: "main lands" "main side";
+    grid-template-rows: auto 1fr;
+  }
+  .s2-layout .hero { position: static; }
+}
+.hero-s2 { padding-top: 12px; }
+
+.notice-warn {
+  background: color-mix(in srgb, #d9822b 16%, transparent);
+  border: 1px solid color-mix(in srgb, #d9822b 45%, transparent);
+}
+.bar.bar-warn > span { background: linear-gradient(90deg, #d9822b, var(--accent)); }
+
+/* Barre de ressources (en haut du panneau) */
+.resbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: stretch;
+  gap: 6px 14px;
+  padding: 10px 14px;
+  border-bottom: 1px solid var(--line);
+  background: var(--panel-2);
+  border-radius: var(--radius) var(--radius) 0 0;
+}
+.resbar-place {
+  font-family: var(--font-display), Georgia, serif;
+  font-weight: 700;
+  align-self: center;
+  margin-right: auto;
+  white-space: nowrap;
+}
+.res {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  column-gap: 6px;
+  align-items: center;
+  min-width: 0;
+}
+.res-icon { grid-row: span 2; font-size: 1.25rem; }
+.res-val { font-weight: 700; line-height: 1.1; }
+.res-val small { font-weight: 400; color: var(--ink-soft); }
+.res-sub { font-size: 0.75rem; color: var(--ink-soft); line-height: 1.1; }
+.res-wide { min-width: 150px; }
+.res-wide .bar { grid-column: 2; margin-top: 3px; }
+@media (max-width: 600px) {
+  .resbar { gap: 6px 10px; padding: 8px 10px; }
+  .resbar-place { flex-basis: 100%; }
+  .res-icon { font-size: 1.05rem; }
+}
+
+/* Mes terres (liste des lieux) */
+.lands { padding: 12px; display: grid; gap: 6px; }
+.lands h3 { display: flex; justify-content: space-between; align-items: baseline; font-size: 1rem; margin: 0 0 2px; }
+.lands-count { font-size: 0.85rem; color: var(--ink-soft); font-weight: 400; }
+.land {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  padding: 8px 10px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--panel-2);
+  color: var(--ink);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+.land:hover { border-color: var(--gold); }
+.land[aria-pressed="true"] {
+  border-color: var(--accent);
+  box-shadow: inset 4px 0 0 var(--accent);
+  background: color-mix(in srgb, var(--accent) 8%, var(--panel));
+}
+.land-icon { font-size: 1.5rem; width: 1.8rem; text-align: center; flex: none; }
+.land-body { display: grid; gap: 2px; min-width: 0; flex: 1; }
+.land-name { font-weight: 700; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.land-sub { font-size: 0.78rem; color: var(--ink-soft); }
+.land-flag { flex: none; font-size: 0.95rem; }
+.land-empty { border-style: dashed; background: transparent; }
+.land-locked { opacity: 0.7; cursor: default; border-style: dashed; background: transparent; }
+.lands-buy { width: 100%; }
+@media (max-width: 859px) {
+  .lands { grid-auto-flow: column; grid-auto-columns: minmax(170px, 1fr); overflow-x: auto; padding: 8px; scroll-snap-type: x proximity; }
+  .lands h3 { display: none; }
+  .land { scroll-snap-align: start; }
+  .lands-buy { white-space: nowrap; }
+}
+
+/* Lieu choisi */
+.s2-place { display: grid; gap: 14px; }
+.place-head { display: flex; gap: 12px; align-items: flex-start; }
+.place-head > div:nth-child(2) { flex: 1; min-width: 0; }
+.place-head h2 { margin: 0; font-size: 1.25rem; }
+.place-head .row-desc { margin-top: 2px; }
+.place-icon { font-size: 2.2rem; line-height: 1; }
+.place-section h3 { margin: 0 0 6px; font-size: 1.05rem; }
+.place-section > .row-desc { margin: 0 0 8px; }
+.tiles { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 8px; }
+.tile { border: 1px solid var(--line); border-radius: 8px; padding: 8px 10px; background: var(--panel-2); display: grid; gap: 2px; align-content: start; }
+.tile-label { font-size: 0.8rem; color: var(--ink-soft); }
+.tile-val { font-size: 1.25rem; font-weight: 700; }
+.tile-val small { font-size: 0.8rem; font-weight: 400; color: var(--ink-soft); }
+.tile-sub { font-size: 0.78rem; color: var(--ink-soft); }
+.cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(210px, 1fr)); gap: 8px; }
+.card { border: 1px solid var(--line); border-radius: 8px; padding: 10px; background: var(--panel-2); display: flex; flex-direction: column; gap: 6px; }
+.card-main { border-color: color-mix(in srgb, var(--accent) 45%, var(--line)); }
+.card-head { display: flex; align-items: center; gap: 6px; }
+.card-icon { font-size: 1.35rem; }
+.card-name { font-weight: 700; flex: 1; }
+.card-text { margin: 0; font-size: 0.85rem; color: var(--ink-soft); flex: 1; }
+.card .btn { width: 100%; }
+.card-why { margin: 0; font-size: 0.78rem; color: var(--ink-soft); font-style: italic; }
+.work-link { display: block; width: 100%; padding: 0; border: 0; background: none; color: inherit; font: inherit; text-align: left; cursor: pointer; }
+.place-danger summary { cursor: pointer; color: var(--ink-soft); font-size: 0.9rem; }
+.lord-chance { font-weight: 700; }
+.lord-chance.good { color: var(--ok); }
+.lord-chance.bad { color: var(--accent); }
+.s2-settings .btn-primary:disabled { opacity: 1; cursor: default; }

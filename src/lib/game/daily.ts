@@ -70,6 +70,8 @@ function feasible(id: DailyQuestId, ctx: DailyContext): boolean {
   if (id === "don") return ctx.shareSize !== null && ctx.shareSize > 0;
   if (id === "savoir") return !ctx.s2 && ctx.upgradesLeft > 0;
   if (id === "seigneur") return ctx.troops > 0;
+  // Saison 2 : plus de marteau (donc plus de veines), et les seigneurs n'attaquent pas.
+  if (id === "veines" || id === "repousser") return !ctx.s2;
   if (id === "renforts") return ctx.allies > 0;
   if (id === "espion") return (ctx.spyLevel ?? 0) >= 1;
   return true;
