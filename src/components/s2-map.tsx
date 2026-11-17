@@ -391,10 +391,17 @@ export function S2Domain({ snap, live, now, run }: { snap: GameSnapshot; live: P
                 <div className="s2-settings">
                   <span>Convois vers</span>
                   {(["chateau", "beffroi"] as const).map((k) => (
-                    <button key={k} className={`btn btn-small${(c.dest ?? "chateau") === k ? " btn-primary" : ""}`} disabled={busy || (c.dest ?? "chateau") === k} title={k === "beffroi" ? "Chaque convoi arrivé compte entièrement comme un don au beffroi (paliers, part de chantier, classement), en plus de la dîme. L'or de 3 % te revient." : "Ton château."} onClick={() => void act({ type: "s2", op: "set", id: c.id, dest: k })}>
+                    <button key={k} className={`btn btn-small${!c.destConc && (c.dest ?? "chateau") === k ? " btn-primary" : ""}`} disabled={busy || (!c.destConc && (c.dest ?? "chateau") === k)} title={k === "beffroi" ? "Chaque convoi arrivé compte entièrement comme un don au beffroi (paliers, part de chantier, classement), en plus de la dîme. L'or de 3 % te revient." : "Ton château."} onClick={() => void act({ type: "s2", op: "set", id: c.id, dest: k })}>
                       {k === "beffroi" ? "🔔 Beffroi" : "🏰 Château"}
                     </button>
                   ))}
+                  {s2.conc
+                    .filter((o) => o.id !== c.id && map.sites[o.site])
+                    .map((o) => (
+                      <button key={o.id} className={`btn btn-small${c.destConc === o.id ? " btn-primary" : ""}`} disabled={busy || c.destConc === o.id} title="Les convois remplissent la réserve de chantier de cette concession. Quand elle est pleine, ils rentrent au château." onClick={() => void act({ type: "s2", op: "set", id: c.id, dest: o.id })}>
+                        {RESOURCE_ICON[map.sites[o.site].type]} {map.sites[o.site].name || RESOURCE_LABEL[map.sites[o.site].type]}
+                      </button>
+                    ))}
                   <button className="btn btn-small" disabled title="Bientôt : envoyer les convois à un membre de ton alliance.">🤝 Allié</button>
                 </div>
                 <div className="row-desc">

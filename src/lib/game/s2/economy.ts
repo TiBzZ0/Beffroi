@@ -98,6 +98,8 @@ export interface Concession {
   pace?: Pace;
   /** Destination des convois : absent pour le château. */
   dest?: Dest;
+  /** Convois envoyés à une autre de ses concessions (sa réserve de chantier) ; prime sur `dest`. */
+  destConc?: string;
   /** Réserve de chantier, en valeur pierre : ce que le château lui a envoyé, pour ses améliorations. */
   fund?: number;
 }
@@ -256,8 +258,15 @@ export function settleS2(s: S2State, ctx: S2Context, now: number): { s: S2State;
         const take = Math.min(c.stock, load);
         if (take >= 1) {
           c.stock -= take;
-          const to = c.dest === "beffroi" && !ctx.belfryDone ? S2_BELFRY : castle;
-          st.convoys.push({ conc: c.id, res: site.type, load: take, depart: dep, arrive: dep + convoyTravelMs(st, site.pos, to), from: site.pos, to, ...(to === castle ? {} : { dest: "beffroi" as const }) });
+          // Vers une autre concession tant que sa réserve a la place ; sinon le convoi rentre au château.
+          const target = c.destConc ? st.conc.find((x) => x.id === c.destConc) : undefined;
+          const targetSite = target ? ctx.map.sites[target.site] : undefined;
+          if (target && targetSite && fundRoom(st, target) >= take * VALUE[site.type] - 1e-6) {
+            st.convoys.push({ conc: target.id, res: site.type, load: take, depart: dep, arrive: dep + convoyTravelMs(st, site.pos, targetSite.pos), from: site.pos, to: targetSite.pos, dest: "concession" });
+          } else {
+            const to = c.dest === "beffroi" && !ctx.belfryDone ? S2_BELFRY : castle;
+            st.convoys.push({ conc: c.id, res: site.type, load: take, depart: dep, arrive: dep + convoyTravelMs(st, site.pos, to), from: site.pos, to, ...(to === castle ? {} : { dest: "beffroi" as const }) });
+          }
           if (c.pace === "intensif") {
             const fee = (take * VALUE[site.type] * INTENSIVE_GOLD) / VALUE.or;
             if (st.gold >= fee) st.gold -= fee;
@@ -338,7 +347,9 @@ export function setConcession(s: S2State, id: string, pace: unknown, dest: unkno
   const c = s.conc.find((x) => x.id === id);
   if (!c) return fail("Concession inconnue.");
   if (pace !== undefined && !(typeof pace === "string" && pace in PACES)) return fail("Rythme inconnu.");
-  if (dest !== undefined && dest !== "chateau" && dest !== "beffroi") return fail("Destination inconnue.");
+  const toConc = typeof dest === "string" && s.conc.some((x) => x.id === dest) ? dest : null;
+  if (toConc === id) return fail("Une concession ne s'envoie pas ses propres convois.");
+  if (dest !== undefined && dest !== "chateau" && dest !== "beffroi" && !toConc) return fail("Destination inconnue.");
   if (pace === "intensif" && s.gold <= 0) return fail("Il faut de l'or pour le rythme intensif.");
   const next: Concession = { ...c };
   if (pace !== undefined) {
@@ -346,8 +357,10 @@ export function setConcession(s: S2State, id: string, pace: unknown, dest: unkno
     else next.pace = pace as Pace;
   }
   if (dest !== undefined) {
-    if (dest === "chateau") delete next.dest;
-    else next.dest = "beffroi";
+    delete next.dest;
+    delete next.destConc;
+    if (dest === "beffroi") next.dest = "beffroi";
+    else if (toConc) next.destConc = toConc;
   }
   return { ok: true, value: { ...s, conc: s.conc.map((x) => (x.id === id ? next : x)) } };
 }
@@ -355,7 +368,7 @@ export function setConcession(s: S2State, id: string, pace: unknown, dest: unkno
 export function dropConcession(s: S2State, id: string): R<S2State> {
   if (!s.conc.some((c) => c.id === id)) return fail("Concession inconnue.");
   if (s.conc.length <= 1) return fail("Garde au moins une concession.");
-  return { ok: true, value: { ...s, conc: s.conc.filter((c) => c.id !== id), convoys: s.convoys } };
+  return { ok: true, value: { ...s, conc: s.conc.filter((c) => c.id !== id).map((c) => (c.destConc === id ? { ...c, destConc: undefined } : c)), convoys: s.convoys } };
 }
 
 /** Ce qu'une concession peut mettre dans ses travaux, en valeur pierre : sa réserve, puis son stock local. */
@@ -485,7 +498,7 @@ export function cleanS2(raw: unknown, now: number): S2State {
       .slice(0, CONCESSIONS_MAX)
       .map((c) => {
         const x = c as Record<string, unknown>;
-        return { id: String(x.id), site: Math.floor(num(x.site)), level: Math.min(CONCESSION_MAX_LEVEL, Math.max(1, Math.floor(num(x.level, 1)))), stock: num(x.stock), next: num(x.next) || now, ...(num(x.upUntil) > 0 ? { upUntil: num(x.upUntil) } : {}), ...(x.pace === "prudent" || x.pace === "intensif" ? { pace: x.pace } : {}), ...(x.dest === "beffroi" ? { dest: "beffroi" as const } : {}), ...(num(x.fund) > 0 ? { fund: num(x.fund) } : {}) };
+        return { id: String(x.id), site: Math.floor(num(x.site)), level: Math.min(CONCESSION_MAX_LEVEL, Math.max(1, Math.floor(num(x.level, 1)))), stock: num(x.stock), next: num(x.next) || now, ...(num(x.upUntil) > 0 ? { upUntil: num(x.upUntil) } : {}), ...(x.pace === "prudent" || x.pace === "intensif" ? { pace: x.pace } : {}), ...(x.dest === "beffroi" ? { dest: "beffroi" as const } : {}), ...(num(x.fund) > 0 ? { fund: num(x.fund) } : {}), ...(typeof x.destConc === "string" ? { destConc: x.destConc } : {}) };
       }),
     convoys: (Array.isArray(r.convoys) ? r.convoys : [])
       .filter((v) => v && typeof v === "object" && RES.includes((v as Convoy).res))

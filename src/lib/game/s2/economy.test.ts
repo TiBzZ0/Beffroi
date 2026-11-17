@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { generateMap, type S2Map } from "./map";
-import { build, buyConcession, localCap, setConcession, supplyBlocker, concessionRate, convoyLoad, firstConcessionSites, marketQuote, newS2State, REF, settleS2, stockFull, takeConcession, supplyConcession, upgradeConcession, VALUE, type S2State } from "./economy";
+import { build, buyConcession, localCap, setConcession, supplyBlocker, takeConcessionBlocker, concessionRate, convoyLoad, firstConcessionSites, marketQuote, newS2State, REF, settleS2, stockFull, takeConcession, supplyConcession, upgradeConcession, VALUE, type S2State } from "./economy";
 
 const T0 = Date.parse("2026-12-07T15:00:00Z");
 const H = 3_600_000;
@@ -75,6 +75,25 @@ describe("S2 : économie", () => {
     expect(poor.conc[0].pace).toBeUndefined();
     const careful = setConcession(s, id, "prudent", "chateau");
     expect(careful.ok && localCap(careful.value, careful.value.conc[0], map)).toBeCloseTo(localCap(s, s.conc[0], map) * 2 * 0.8, 6);
+  });
+
+  it("une concession envoie ses convois à la réserve d'une autre, puis au château quand elle est pleine", () => {
+    const s0 = start();
+    const other = map.sites.findIndex((_, id) => !takeConcessionBlocker(s0, { map, stageConcessions: 1 }, id, none));
+    const two = takeConcession(s0, { map, stageConcessions: 1 }, other, none, T0);
+    expect(two.ok).toBe(true);
+    if (!two.ok) return;
+    const [a, b] = two.value.conc;
+    expect(setConcession(two.value, a.id, undefined, a.id).ok).toBe(false);
+    const r = setConcession(two.value, a.id, undefined, b.id);
+    expect(r.ok).toBe(true);
+    if (!r.ok) return;
+    const { s: after, arrived } = settleS2(r.value, ctx(), T0 + 12 * H);
+    const fund = after.conc.find((x) => x.id === b.id)!.fund ?? 0;
+    expect(fund).toBeGreaterThan(0);
+    expect(fund).toBeLessThanOrEqual(450 + 675 + 1e-6);
+    // Réserve pleine : la suite rentre au château.
+    expect(arrived[map.sites[a.site].type]).toBeGreaterThan(0);
   });
 
   it("améliorations, bâtiments et concessions achetées", () => {
