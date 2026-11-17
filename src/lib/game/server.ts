@@ -4363,7 +4363,9 @@ async function runHallAction(
       if (!home) return { error: "Ton domaine n'est pas encore sur la carte." };
       const members = lodge ? [home] : [...entities.values()].filter((e) => !e.isLord && e.allianceId === me.allianceId).flatMap((e): MapPos[] => { const p = positions.get(e.id); return p ? [p] : []; });
       const taken = [...fixedPlaces(), ...positions.values(), ...guilds.map((g) => g.pos)];
-      const spot = hallSpots(home, members, taken)[0];
+      // Saison 2 : la halle se pose comme un château (hors du centre, loin des sites, seigneurs et forteresses).
+      const s2 = s2Map();
+      const spot = hallSpots(home, members, taken).find((c) => !s2 || !castleBlocker(s2, c as [number, number], taken as [number, number][]));
       if (!spot) return { error: "Aucune case libre près de ton domaine." };
       const { error } = await admin.from("guild_halls").insert({
         season_id: seasonId,

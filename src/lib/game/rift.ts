@@ -5,7 +5,7 @@
 import type { Army, BattleOptions, Boost, Levels } from "./battle";
 import { armyFromBudget } from "./battle";
 import { allocation, companiesOn, companyLevels, trainLevels, type ArmyHolder } from "./companies";
-import type { CombatantDef, CombatantId, UnitId } from "./config";
+import { stagePerkNow, type CombatantDef, type CombatantId, type UnitId } from "./config";
 import { afterBattle, armyBoost, hasTrait, relicShare, type Captain, type Relic, type RelicKind } from "./captains";
 
 // ---------------------------------------------------------------------------
@@ -166,7 +166,8 @@ export interface Floor {
 export function riftFloor(week: string, floor: number): Floor {
   const alterations = floorAlterations(week, floor);
   const shape = floorShape(week, floor);
-  const value = floorValue(floor) * (isGuardian(floor) ? 2.5 : 1);
+  // S6 (saison 2) : les gargouilles retirent 15 % de force aux gardiens.
+  const value = floorValue(floor) * (isGuardian(floor) ? 2.5 * (1 - stagePerkNow("guardianWeak")) : 1);
   const troops = alterations.includes("horde") ? { milicien: 1 } : alterations.includes("champions") ? { chevalier: 1 } : SHAPES[shape].troops;
   const army: Record<string, number> = { ...armyFromBudget(value * (alterations.includes("horde") ? 1.5 : 1), troops as Partial<Record<CombatantId, number>>) };
   if (alterations.includes("remparts")) {

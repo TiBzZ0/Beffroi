@@ -193,13 +193,17 @@ export interface StageDef {
     elan?: number;
     securedSeconds?: number;
     researchSpeed?: number;
+    /** Saison 2 : gardiens des failles affaiblis (part de leur force retirée). */
+    guardianWeak?: number;
+    /** Saison 2 : compagnies de plus au plafond. */
+    companies?: number;
     /** Écus versés à l'achèvement à chaque joueur qui a atteint au moins un palier de don. */
     donorEcus?: number;
   };
 }
 
 /** Le chantier commun : 8 étapes, chacune débloque un bonus permanent pour la saison. */
-export const STAGES: readonly StageDef[] = [
+const STAGES_S1: readonly StageDef[] = [
   { name: "Les fondations", description: "Creuser et poser les assises du beffroi.", basePerPlayer: 50_000, bonusLabel: "Production +10 % pour tous", bonus: { production: 1.1 } },
   { name: "La tour de guet", description: "Monter les murs de pierre jusqu'au chemin de ronde.", basePerPlayer: 5_000_000, bonusLabel: "Coups de marteau ×2 pour tous", bonus: { click: 2 } },
   { name: "La chambre des cloches", description: "Couronner la tour et hisser les cloches.", basePerPlayer: 500_000_000, bonusLabel: "Production +25 % pour tous", bonus: { production: 1.25 } },
@@ -209,13 +213,29 @@ export const STAGES: readonly StageDef[] = [
   { name: "L'horloge astronomique", description: "Une horloge qui suit le soleil, la lune et les saisons.", basePerPlayer: 7_000_000_000_000, bonusLabel: "Production +20 % et recherches 20 % plus rapides pour tous", bonus: { production: 1.2, researchSpeed: 0.2 } },
   { name: "Le beffroi légendaire", description: "On en parlera dans tout le royaume pendant des siècles.", basePerPlayer: 50_000_000_000_000, bonusLabel: "Production +25 % pour tous, et 20 écus à chaque joueur qui a atteint un palier de don", bonus: { production: 1.25, donorEcus: 20 } },
 ];
-/** Un seigneur bâtisseur ne verse jamais plus que cette part de l'étape en cours d'un coup. */
-export const LORD_GIFT_MAX_SHARE = 0.25;
+/**
+ * Saison 2 (S6) : les effets des étapes. Ceux qui dépendent de la vague B (vision et escortes, Faille changeante,
+ * règle du quart, quatre cartes) gardent leur nom et prendront effet quand la fonction arrivera.
+ */
+const STAGES_S2: readonly StageDef[] = [
+  { ...STAGES_S1[0], bonusLabel: "Une concession de plus pour tous", bonus: {} },
+  { ...STAGES_S1[1], bonusLabel: "Vision des convois et escortes +15 % (avec les combats de convois)", bonus: {} },
+  { ...STAGES_S1[2], bonusLabel: "Ouvre la Faille changeante (à venir)", bonus: {} },
+  { ...STAGES_S1[3], bonusLabel: "Gardiens des failles −15 % de force", bonus: { guardianWeak: 0.15 } },
+  { ...STAGES_S1[4], bonusLabel: "Règle du tiers ramenée au quart (avec les combats de convois)", bonus: {} },
+  { ...STAGES_S1[5], bonusLabel: "Faille changeante : quatre cartes au choix (à venir)", bonus: {} },
+  { ...STAGES_S1[6], bonusLabel: "Une compagnie de plus et savoirs 20 % plus rapides pour tous", bonus: { companies: 1, researchSpeed: 0.2 } },
+  { ...STAGES_S1[7], bonusLabel: "Production +10 % pour tous, et 20 écus à chaque joueur qui a atteint un palier de don", bonus: { production: 1.1, donorEcus: 20 } },
+];
+/** Étapes de la saison en cours (changées par setS2Geometry). */
+export let STAGES: readonly StageDef[] = STAGES_S1;
+/** Un seigneur bâtisseur ne verse jamais plus que cette part de l'étape en cours d'un coup (10 % en saison 2). */
+export let LORD_GIFT_MAX_SHARE = 0.25;
 
 /** G1 : après le beffroi, des embellissements sans fin (24 h de production chacun, +5 % de production cumulés, 10 écus aux donateurs). */
 export const EMBELLISH_NAMES: readonly string[] = ["Les vitraux", "Le carillon", "Les dorures", "Les statues des bâtisseurs", "Le parvis"];
 export const EMBELLISH_HOURS = 24;
-export const EMBELLISH_PRODUCTION = 0.05;
+export let EMBELLISH_PRODUCTION = 0.05;
 export const EMBELLISH_ECUS = 10;
 /** Nombre d'étapes envoyé à la base : les huit du beffroi puis assez d'embellissements pour ne jamais s'arrêter. */
 export const TOTAL_STAGES = STAGES.length + 200;
@@ -718,10 +738,11 @@ export const ELAN_PER_CLICK_MS = 3000;
 export const ELAN_MAX_MS = 600_000;
 
 // T1 : carte du royaume. Grille de 15 × 15 cases, numérotées de 1 à 15.
-export const MAP_SIZE = 15;
+// Saison 2 (S2, S5) : grille de 41 cases (0 à 40), beffroi en (20, 20), une forteresse au nord en (20, 13).
+export let MAP_SIZE = 15;
 export type MapPos = readonly [number, number];
-export const BELFRY_POS: MapPos = [8, 8];
-export const FORTRESS_POS: MapPos = [8, 4];
+export let BELFRY_POS: MapPos = [8, 8];
+export let FORTRESS_POS: MapPos = [8, 4];
 /** Un joueur arrive à 2 cases au moins de tout lieu et à 5 cases au plus du centre. */
 export const MAP_MIN_GAP = 2;
 export const MAP_SPAWN_RADIUS = 5;
@@ -753,6 +774,24 @@ export const LORD_POSITIONS: Record<LordKey, MapPos> = {
 let s2Geometry = false;
 export function setS2Geometry(on: boolean): void {
   s2Geometry = on;
+  STAGES = on ? STAGES_S2 : STAGES_S1;
+  MAP_SIZE = on ? 40 : 15;
+  BELFRY_POS = on ? [20, 20] : [8, 8];
+  FORTRESS_POS = on ? [20, 13] : [8, 4];
+  LORD_GIFT_MAX_SHARE = on ? 0.1 : 0.25;
+  // S6 : les embellissements donnent des écus, plus de production.
+  EMBELLISH_PRODUCTION = on ? 0 : 0.05;
+}
+/** Étapes du beffroi achevées à l'instant présent (fixé par worldFrom, côté serveur comme côté client). */
+let stagesDoneNow = 0;
+export function setStagesNow(n: number): void {
+  stagesDoneNow = n;
+}
+/** Somme d'un bonus additif des étapes achevées maintenant (pour les règles qui n'ont pas l'état du monde sous la main). */
+export function stagePerkNow(key: "guardianWeak" | "companies"): number {
+  let sum = 0;
+  for (let i = 0; i < Math.min(stagesDoneNow, STAGES.length); i++) sum += STAGES[i].bonus[key] ?? 0;
+  return sum;
 }
 export function travelMaxMin(): number {
   return s2Geometry ? 45 : TRAVEL_MAX_MIN;

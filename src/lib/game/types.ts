@@ -1,5 +1,5 @@
 import type { PlayerState } from "./engine";
-import type { EventKind, MerchantChoice } from "./config";
+import { setStagesNow, type EventKind, type MerchantChoice } from "./config";
 
 export interface WorksiteView {
   stage: number;
@@ -520,6 +520,9 @@ export type ActionResponse =
 
 /** Bâtit la vue du monde utile au moteur à partir du chantier. */
 export function worldFrom(worksite: WorksiteView) {
+  // Les effets d'étape lus sans l'état du monde (plafond des compagnies, gardiens) suivent le chantier courant.
+  const now = Date.now();
+  setStagesNow(worksite.stageCompletedAt.filter((t) => t <= now).length);
   return { stageCompletedAt: worksite.stageCompletedAt };
 }
 

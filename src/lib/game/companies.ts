@@ -6,7 +6,7 @@
 // les compagnies de ce type dans l'ordre (la première se remplit d'abord).
 import type { Army, Levels } from "./battle";
 import { REF } from "./s2/economy";
-import { DEFENSES, LEVEL_BONUS, UNITS, type CombatantId, type DefenseId, type UnitId } from "./config";
+import { DEFENSES, LEVEL_BONUS, stagePerkNow, UNITS, type CombatantId, type DefenseId, type UnitId } from "./config";
 
 export interface Company {
   id: string;
@@ -100,7 +100,7 @@ export function barracksLevel(s: ArmyHolder): number {
 }
 
 export function maxCompanies(s: ArmyHolder): number {
-  return BASE_COMPANIES + barracksLevel(s);
+  return BASE_COMPANIES + barracksLevel(s) + stagePerkNow("companies");
 }
 
 /** Files de recrutement en parallèle : une, deux au niveau 3, trois au niveau 6. */
