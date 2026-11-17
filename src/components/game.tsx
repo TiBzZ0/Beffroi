@@ -99,6 +99,8 @@ import {
   attackArmy,
   travelMs,
   counterCost,
+  spyBase,
+  researchBase,
   rumorCost,
   type SabotageAim,
   type PlayerState,
@@ -1634,7 +1636,7 @@ function Army({ snap, live, now, run }: { snap: GameSnapshot; live: PlayerState;
         </>
       )}
       {view === "espionnage" && <Spies snap={snap} live={live} now={now} run={run} />}
-      {view === "forge" && <Forge live={live} now={now} run={run} stagesDone={stagesDoneAt(worldFrom(snap.worksite), now)} base={baseRate(live, worldFrom(snap.worksite), now)} />}
+      {view === "forge" && <Forge live={live} now={now} run={run} stagesDone={stagesDoneAt(worldFrom(snap.worksite), now)} base={researchBase(live, worldFrom(snap.worksite), now)} />}
     </>
   );
 }
@@ -1659,7 +1661,7 @@ function Raids({ snap, live, now, run, focus }: { snap: GameSnapshot; live: Play
   const sabotage = (target: string, aim: SabotageAim) => act(target, { type: "sabotage", target, aim });
   const mole = (target: string) => act(target, { type: "mole", target });
   const row = (r: RivalView) => (
-    <RivalRow key={r.id} focus={fresh?.id === r.id ? fresh : undefined} r={r} now={now} busy={busy} onRaid={raid} onSpy={spy} spyPrice={spyPrice} stone={live.stone} onSabotage={sabotage} onMole={mole} stagesDone={stagesDoneAt(worldFrom(snap.worksite), now)} me={live} distance={distanceTo(r.id)} />
+    <RivalRow key={r.id} focus={fresh?.id === r.id ? fresh : undefined} r={r} now={now} busy={busy} onRaid={raid} onSpy={spy} spyPrice={spyPrice} stone={live.s2 ? live.s2.gold : live.stone} onSabotage={sabotage} onMole={mole} stagesDone={stagesDoneAt(worldFrom(snap.worksite), now)} me={live} distance={distanceTo(r.id)} />
   );
   const views: [RaidView, string][] = [
     ["seigneurs", `Seigneurs (${snap.rivals.filter((r) => r.isLord).length})`],
@@ -1953,13 +1955,13 @@ function RivalRow({
         {!r.allied && !(r.isLord && r.difficulty === 1) && (
           <Btn
             busy={busy !== null}
-            reason={!r.isLord && myStone < spyPrice ? "Pas assez de pierre." : null}
+            reason={!r.isLord && myStone < spyPrice ? (me?.s2 ? "Pas assez d'or." : "Pas assez de pierre.") : null}
             onClick={() => onSpy(r.id)}
             title="L'espion part sur la route ; son rapport dure 1 h et profite à ton alliance. Ce qu'il voit dépend de l'écart entre ton niveau d'espionnage et celui de la cible."
           >
             🕵️ Espion
             <span className="cost num">
-              {r.isLord ? "gratuit" : `${formatNumber(spyPrice)} 🪨`} · {countdown(spyTravelMs(distance ?? MAP_SPAWN_RADIUS))}
+              {r.isLord ? "gratuit" : `${formatNumber(spyPrice)} ${me?.s2 ? "🪙" : "🪨"}`} · {countdown(spyTravelMs(distance ?? MAP_SPAWN_RADIUS))}
               {r.spyGap !== null && r.spyGap !== undefined ? ` · 👁️ ${Math.round(spyRisk(r.spyGap, distance ?? MAP_SPAWN_RADIUS) * 100)} %` : ""}
             </span>
           </Btn>
@@ -1967,18 +1969,18 @@ function RivalRow({
         {onMole && r.moleUntil !== undefined && r.moleUntil <= now && (
           <Btn
             busy={busy !== null}
-            reason={myStone < (r.molePrice ?? 0) ? "Pas assez de pierre." : null}
+            reason={myStone < (r.molePrice ?? 0) ? (me?.s2 ? "Pas assez d'or." : "Pas assez de pierre.") : null}
             onClick={() => onMole(r.id)}
             title="La taupe s'installe tout de suite pour 2 h : elle te prévient quand il fait partir une armée, perd son bouclier, entre ou sort de couvre-feu. Il faut un niveau d'espionnage au moins un cran au-dessus du sien. Elle peut être démasquée, à demi-risque, à chaque alerte."
           >
             🐀 Taupe
-            <span className="cost num">{formatNumber(r.molePrice ?? 0)} 🪨</span>
+            <span className="cost num">{formatNumber(r.molePrice ?? 0)} {me?.s2 ? "🪙" : "🪨"}</span>
           </Btn>
         )}
         {r.sabotageBlocker !== undefined && (
-          <Btn busy={busy !== null} reason={myStone < sabotagePrice ? "Pas assez de pierre." : null} onClick={() => setAiming(!aiming)} title="Choisis ce que vise ton saboteur. La réussite dépend de l'écart de niveau d'espionnage ; raté, il est toujours repéré.">
+          <Btn busy={busy !== null} reason={myStone < sabotagePrice ? (me?.s2 ? "Pas assez d'or." : "Pas assez de pierre.") : null} onClick={() => setAiming(!aiming)} title="Choisis ce que vise ton saboteur. La réussite dépend de l'écart de niveau d'espionnage ; raté, il est toujours repéré.">
             🧨 Sabotage
-            <span className="cost num">{formatNumber(sabotagePrice)} 🪨</span>
+            <span className="cost num">{formatNumber(sabotagePrice)} {me?.s2 ? "🪙" : "🪨"}</span>
           </Btn>
         )}
       </div>
@@ -1988,7 +1990,7 @@ function RivalRow({
             <Btn
               key={aim}
               busy={busy !== null}
-              reason={r.sabotageBlockers![aim] ?? (myStone < sabotagePrice ? "Pas assez de pierre." : null)}
+              reason={r.sabotageBlockers![aim] ?? (myStone < sabotagePrice ? (me?.s2 ? "Pas assez d'or." : "Pas assez de pierre.") : null)}
               title={desc}
               onClick={() => {
                 setAiming(false);
@@ -2385,7 +2387,10 @@ function Spies({ snap, live, now, run }: { snap: GameSnapshot; live: PlayerState
   const [busy, setBusy] = useState(false);
   const moles = (live.moles ?? []).filter((m) => m.until > now);
   const nameOf = (key: string) => (key === "fortress" ? snap.fortress.name : key.startsWith("hall:") ? "une halle" : (snap.rivals.find((r) => r.id === key)?.name ?? "?"));
-  const base = baseRate(live, worldFrom(snap.worksite), now);
+  const base = spyBase(live, worldFrom(snap.worksite), now);
+  const purse = live.s2 ? live.s2.gold : live.stone;
+  const coin = live.s2 ? "🪙" : "🪨";
+  const poor = live.s2 ? "Pas assez d'or." : "Pas assez de pierre.";
   const counter = (live.counterUntil ?? 0) > now;
   const rumor = live.rumor && live.rumor.until > now ? live.rumor : null;
   const act = async (action: Parameters<typeof run>[0]) => {
@@ -2410,23 +2415,23 @@ function Spies({ snap, live, now, run }: { snap: GameSnapshot; live: PlayerState
       <div className="row-actions">
         <Btn
           busy={busy}
-          reason={live.stone < counterCost(base) ? "Pas assez de pierre." : null}
+          reason={purse < counterCost(base) ? poor : null}
           onClick={() => act({ type: "counter" })}
           title="Pendant 6 h, quiconque espionne, sabote ou pose une taupe chez toi a deux crans de moins. Un espion repéré chez toi rapporte des chiffres faussés. Racheter prolonge."
         >
           🛡️ Contre
-          <span className="cost num">{counter ? `${duration((live.counterUntil ?? 0) - now)} · ` : ""}{formatNumber(counterCost(base))} 🪨</span>
+          <span className="cost num">{counter ? `${duration((live.counterUntil ?? 0) - now)} · ` : ""}{formatNumber(counterCost(base))} {coin}</span>
         </Btn>
         {(["fort", "faible"] as const).map((mode) => (
           <Btn
             key={mode}
             busy={busy}
-            reason={live.stone < rumorCost(base) ? "Pas assez de pierre." : null}
+            reason={purse < rumorCost(base) ? poor : null}
             onClick={() => act({ type: "rumor", mode })}
             title={`Pendant 2 h, tout le monde voit ton armée ${mode === "fort" ? "deux fois plus grosse" : "deux fois plus petite"}, rapports d'espion compris, sauf ceux d'un espion au moins deux crans au-dessus de toi.`}
           >
             🗣️ {mode === "fort" ? "Fort" : "Faible"}
-            <span className="cost num">{rumor?.mode === mode ? `${duration(rumor.until - now)} · ` : ""}{formatNumber(rumorCost(base))} 🪨</span>
+            <span className="cost num">{rumor?.mode === mode ? `${duration(rumor.until - now)} · ` : ""}{formatNumber(rumorCost(base))} {coin}</span>
           </Btn>
         ))}
       </div>
@@ -3015,7 +3020,7 @@ function Fortress({ snap, live, now, run }: { snap: GameSnapshot; live: PlayerSt
               </span>
             </Btn>
             {!intel && (
-              <Btn busy={busy} reason={live.stone < spyPrice ? "Pas assez de pierre." : null} onClick={() => act({ type: "spy", target: "fortress" })} title="L'espion part sur la route ; son rapport montre la garnison et les murs pendant 1 h. Il peut être repéré.">
+              <Btn busy={busy} reason={(live.s2 ? live.s2.gold : live.stone) < spyPrice ? "Pas assez pour payer l'espion." : null} onClick={() => act({ type: "spy", target: "fortress" })} title="L'espion part sur la route ; son rapport montre la garnison et les murs pendant 1 h. Il peut être repéré.">
                 🕵️ Espion
                 <span className="cost num">{formatNumber(spyPrice)} 🪨</span>
               </Btn>
@@ -4090,7 +4095,7 @@ function KingdomMap({ snap, live, now, run, focus }: { snap: GameSnapshot; live:
                 distance={pickedDistance ?? undefined}
                 onSpy={(t) => act(t, { type: "spy", target: t })}
                 spyPrice={spyPrice}
-                stone={live.stone}
+                stone={live.s2 ? live.s2.gold : live.stone}
                 onSabotage={(t, aim) => act(t, { type: "sabotage", target: t, aim })}
                 onMole={(t) => act(t, { type: "mole", target: t })}
                 stagesDone={stagesDoneAt(worldFrom(snap.worksite), now)}

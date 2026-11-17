@@ -98,6 +98,7 @@ import {
   SECURED_SECONDS,
   SPY_COST_SECONDS,
   SPY_MIN_COST,
+  s2GeometryOn,
   MIN_EXPOSED_SHARE,
   SHIELD_MS,
   FORTRESS_PRODUCTION_BONUS,
@@ -175,7 +176,7 @@ import {
 import { armySize, armyValue, battle, cleanArmy, type Army, type BattleOptions, type Levels, type RoundLog } from "./battle";
 import { settleRift, type RiftState } from "./rift";
 import { armyBoost, hasTrait, type Captain, type Relic, type TraitId } from "./captains";
-import { productionValue, settleS2, type S2State } from "./s2/economy";
+import { productionValue, settleS2, VALUE as S2_VALUE, type S2State } from "./s2/economy";
 import type { LordS2State } from "./s2/lords";
 import { s2Map } from "./s2/rules";
 import { combatLevels, lockedMen, refRate, settleArmy, type ArmyWorks, type Company, type RecruitOrder } from "./companies";
@@ -354,26 +355,30 @@ export function counterActive(state: PlayerState, now: number): boolean {
 
 /** E4 : contre-espionnage et fausse rumeur se paient en minutes de production de base. */
 export function buyCounter(state: PlayerState, base: number, now: number): Result<PlayerState> {
-  const cost = Math.max(SPY_MIN_COST, Math.ceil(base * COUNTER_SECONDS));
+  const cost = Math.max(spyMin(), Math.ceil(base * COUNTER_SECONDS));
   if (cost > state.stone) return { ok: false, error: "Pas assez de pierre." };
   return { ok: true, value: { ...state, stone: state.stone - cost, counterUntil: Math.max(now, state.counterUntil ?? 0) + COUNTER_MS } };
 }
 
 export function buyRumor(state: PlayerState, mode: string, base: number, now: number): Result<PlayerState> {
   if (mode !== "fort" && mode !== "faible") return { ok: false, error: "Rumeur inconnue." };
-  const cost = Math.max(SPY_MIN_COST, Math.ceil(base * RUMOR_SECONDS));
+  const cost = Math.max(spyMin(), Math.ceil(base * RUMOR_SECONDS));
   if (cost > state.stone) return { ok: false, error: "Pas assez de pierre." };
   return { ok: true, value: { ...state, stone: state.stone - cost, rumor: { mode, until: now + RUMOR_MS } } };
 }
 
+/** Prix plancher de l'espionnage : 200 pierres, ou 1 or en saison 2. */
+function spyMin(): number {
+  return s2GeometryOn() ? 1 : SPY_MIN_COST;
+}
 export function counterCost(base: number): number {
-  return Math.max(SPY_MIN_COST, Math.ceil(base * COUNTER_SECONDS));
+  return Math.max(spyMin(), Math.ceil(base * COUNTER_SECONDS));
 }
 export function rumorCost(base: number): number {
-  return Math.max(SPY_MIN_COST, Math.ceil(base * RUMOR_SECONDS));
+  return Math.max(spyMin(), Math.ceil(base * RUMOR_SECONDS));
 }
 export function moleCost(base: number): number {
-  return Math.max(SPY_MIN_COST, Math.ceil(base * MOLE_SECONDS));
+  return Math.max(spyMin(), Math.ceil(base * MOLE_SECONDS));
 }
 
 /** E3 : durée du trajet d'un espion (vitesse 3, 1 minute au moins). */
@@ -1709,9 +1714,30 @@ export function resolveRaid(
 // Espions
 // ---------------------------------------------------------------------------
 
+/**
+ * Base des prix d'espionnage (par seconde). Saison 2 : payés en or, au prix d'aujourd'hui converti par la courbe de
+ * référence (la production de référence du jour, en or), au lieu de la production du joueur.
+ */
+export function spyBase(state: PlayerState, world: WorldState, now: number): number {
+  if (state.s2 && state.seasonStart) return refRate((now - state.seasonStart) / 3_600_000) / S2_VALUE.or;
+  return baseRate(state, world, now);
+}
+/** Base du prix du niveau d'espionnage (pierre par seconde) : en saison 2, la production de référence du jour. */
+export function researchBase(state: PlayerState, world: WorldState, now: number): number {
+  if (state.s2 && state.seasonStart) return refRate((now - state.seasonStart) / 3_600_000);
+  return baseRate(state, world, now);
+}
+/** Saison 2 : l'espionnage se paie en or. On prête l'or aux règles qui comptent en « stone ». */
+export function goldView(s: PlayerState): PlayerState {
+  return s.s2 ? { ...s, stone: s.s2.gold } : s;
+}
+export function fromGold(orig: PlayerState, s: PlayerState): PlayerState {
+  return orig.s2 && s.s2 ? { ...s, stone: orig.stone, s2: { ...s.s2, gold: s.stone } } : s;
+}
+
 export function spyCost(state: PlayerState, world: WorldState, now: number): number {
   const fog = eventActive(state, "brouillard", now) ? FOG_SPY_FACTOR : 1;
-  return Math.max(SPY_MIN_COST, Math.ceil(baseRate(state, world, now) * SPY_COST_SECONDS * fog));
+  return Math.max(state.s2 ? 1 : SPY_MIN_COST, Math.ceil(spyBase(state, world, now) * SPY_COST_SECONDS * fog));
 }
 
 
@@ -1832,7 +1858,7 @@ export function cancelResearch(state: PlayerState, endsAt: number, now: number, 
 export function sabotageCost(saboteur: PlayerState, target: PlayerState, world: WorldState, now: number): number {
   void target;
   // E4 : 10 minutes de production de base, quelle que soit la cible.
-  return Math.max(SABOTAGE_MIN_COST, Math.ceil(baseRate(saboteur, world, now) * SABOTAGE_COST_SECONDS * (lin(saboteur, "poudre") ? LIN_SABOTAGE : 1)));
+  return Math.max(saboteur.s2 ? 1 : SABOTAGE_MIN_COST, Math.ceil(spyBase(saboteur, world, now) * SABOTAGE_COST_SECONDS * (lin(saboteur, "poudre") ? LIN_SABOTAGE : 1)));
 }
 
 export type SabotageAim = "academie" | "grenier" | "guet";

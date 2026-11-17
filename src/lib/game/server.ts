@@ -145,6 +145,10 @@ import {
   lootOf,
   fuzzyArmy,
   spyCost,
+  spyBase,
+  researchBase,
+  goldView,
+  fromGold,
   attackArmy,
   defenseArmy,
   newPlayerState,
@@ -2329,7 +2333,7 @@ function rivalsFor(
               sabotageBlockers: { academie: sabotageBlocker(s, now, myState, "academie"), grenier: sabotageBlocker(s, now, myState, "grenier"), guet: sabotageBlocker(s, now, myState, "guet") },
               sabotageCost: sabotageCost(myState, s, world, now),
               moleUntil: (myState.moles ?? []).find((m) => m.target === e.id && m.until > now)?.until ?? 0,
-              molePrice: moleCost(baseRate(myState, world, now)),
+              molePrice: moleCost(spyBase(myState, world, now)),
             }),
       };
     })
@@ -2590,11 +2594,11 @@ function applySimpleAction(state: PlayerState, action: GameAction, now: number, 
       return r.ok ? { ok: true, value: { state: r.value, log: { action: `company_${op}`, details: { id, unit: action.unit ?? null, qty: action.qty ?? null } } } } : r;
     }
     case "research": {
-      const r = startResearch(state, String(action.id), now, stagesDoneAt(world, now), baseRate(state, world, now));
+      const r = startResearch(state, String(action.id), now, stagesDoneAt(world, now), researchBase(state, world, now));
       return r.ok ? { ok: true, value: { state: r.value, log: { action: "research", details: { id: action.id, level: queuedLevel(state, action.id as ResearchId) + 1 } } } } : r;
     }
     case "research_cancel": {
-      const r = cancelResearch(state, Number(action.endsAt), now, baseRate(state, world, now));
+      const r = cancelResearch(state, Number(action.endsAt), now, researchBase(state, world, now));
       return r.ok ? { ok: true, value: { state: r.value.state, message: `↩️ Recherche annulée : ${r.value.refund.toLocaleString("fr-FR")} pierres rendues.`, log: { action: "research_cancel", details: { endsAt: action.endsAt, refund: r.value.refund } } } } : r;
     }
     case "curfew": {
@@ -3001,7 +3005,7 @@ export async function runAction(admin: SupabaseClient, userId: string, action: G
       const cost = targetState ? sabotageCost(current, targetState, world, now) : 0;
       if (!target || !targetState || target.id === me.id || target.isLord) error = "Cible inconnue.";
       else if (isAllied(me, target)) error = "On ne sabote pas un allié.";
-      else if (current.stone < cost) error = `Il faut ${Math.ceil(cost).toLocaleString("fr-FR")} pierres pour payer un saboteur.`;
+      else if (goldView(current).stone < cost) error = `Il faut ${Math.ceil(cost).toLocaleString("fr-FR")} ${current.s2 ? "or" : "pierres"} pour payer un saboteur.`;
       else error = sabotageBlocker(targetState, now, current, aim);
       if (!error && target && targetState) {
         const gap = spyLevelOf(me) - defenseSpyLevel(target, now);
@@ -3012,7 +3016,7 @@ export async function runAction(admin: SupabaseClient, userId: string, action: G
         const to = positions.get(target.id);
         const spotted = !success || Math.random() < spyRisk(gap, from && to ? mapDistance(from, to) : MAP_SPAWN_RADIUS) + (lin(target.state, "sentinelles") ? LIN_SPY_CATCH : 0);
         const named = spotted && defenseSpyLevel(target, now) >= spyLevelOf(me) - 1;
-        const mine = { ...current, stone: current.stone - cost };
+        const mine = fromGold(current, { ...goldView(current), stone: goldView(current).stone - cost });
         const list = success ? [{ e: me, state: mine }, { e: target, state: applySabotage(targetState, now, aim) }] : [{ e: me, state: mine }];
         if ((await writeStates(admin, season.id, list, "sabotage", { target: target.id, cost, success, aim, spotted })) === "conflict") continue;
         finalState = mine;
@@ -3076,8 +3080,10 @@ export async function runAction(admin: SupabaseClient, userId: string, action: G
       }
     } else if (action.type === "counter" || action.type === "rumor") {
       // E4 : contre-espionnage (6 h) et fausse rumeur (2 h), payés en minutes de production de base.
-      const base = baseRate(current, world, now);
-      const r = action.type === "counter" ? buyCounter(current, base, now) : buyRumor(current, String(action.mode), base, now);
+      const base = spyBase(current, world, now);
+      const payer = goldView(current);
+      const paidR = action.type === "counter" ? buyCounter(payer, base, now) : buyRumor(payer, String(action.mode), base, now);
+      const r = paidR.ok ? { ok: true as const, value: fromGold(current, paidR.value) } : { ok: false as const, error: current.s2 ? paidR.error.replace("de pierre", "d'or") : paidR.error };
       const next = r.ok ? r.value : current;
       if (!r.ok) error = r.error;
       const { data, error: rpcError } = await admin.rpc("commit_state", {
@@ -3088,7 +3094,7 @@ export async function runAction(admin: SupabaseClient, userId: string, action: G
         p_stage_bases: stageSizes,
         p_active_window_days: ACTIVE_WINDOW_DAYS,
         p_action: r.ok ? action.type : null,
-        p_details: r.ok ? { cost: current.stone - next.stone, ...(action.type === "rumor" ? { mode: String(action.mode) } : {}) } : null,
+        p_details: r.ok ? { cost: current.s2 && next.s2 ? current.s2.gold - next.s2.gold : current.stone - next.stone, ...(action.type === "rumor" ? { mode: String(action.mode) } : {}) } : null,
       });
       if (rpcError) throw new Error(`Enregistrement impossible : ${rpcError.message}`);
       if ((data as { conflict?: boolean } | null)?.conflict) continue;
@@ -4731,7 +4737,7 @@ async function sendSpy(
   if ((current.spies ?? []).some((sp) => sp.target === key)) return { error: "Un de tes espions y va déjà." };
   // R5 : la reconnaissance d'un seigneur est gratuite.
   const cost = target?.isLord ? 0 : spyCost(current, world, now);
-  if (current.stone < cost) return { error: `Il faut ${Math.ceil(cost).toLocaleString("fr-FR")} pierres pour payer un espion.` };
+  if (goldView(current).stone < cost) return { error: `Il faut ${Math.ceil(cost).toLocaleString("fr-FR")} ${current.s2 ? "or" : "pierres"} pour payer un espion.` };
   // R9 : interdiction et positions se lisent en même temps.
   const [ban, positions] = await Promise.all([spyBanUntil(admin, seasonId, me.id, key, now), loadPositions(admin, seasonId, entities)]);
   if (ban > now) return { error: `Trop de tes espions ont été surpris là-bas : on les y attend jusqu'à ${new Date(ban).toLocaleTimeString("fr-FR", { hour: "2-digit", minute: "2-digit", timeZone: "Europe/Paris" })}.` };
@@ -4742,7 +4748,7 @@ async function sendSpy(
   const mission: SpyMission = { id: marchId(), kind: "recon", target: key, departAt: now, arriveAt: now + travel, distance };
   return {
     cost,
-    state: { ...current, stone: current.stone - cost, spies: [...(current.spies ?? []), mission] },
+    state: fromGold(current, { ...goldView(current), stone: goldView(current).stone - cost, spies: [...(current.spies ?? []), mission] }),
     message: `🕵️ Ton espion part : arrivée dans ${Math.max(1, Math.round(travel / 60_000))} min. Le rapport te parviendra à son arrivée.`,
   };
 }
@@ -4766,15 +4772,15 @@ async function placeMole(
   if (moles.some((m) => m.target === key)) return { error: "Tu as déjà une taupe chez lui." };
   const gap = spyLevelOf(me) - defenseSpyLevel(target, now);
   if (gap < MOLE_MIN_GAP) return { error: "Il faut un niveau d'espionnage au moins un cran au-dessus du sien pour poser une taupe." };
-  const cost = moleCost(baseRate(current, world, now));
-  if (current.stone < cost) return { error: `Il faut ${Math.ceil(cost).toLocaleString("fr-FR")} pierres pour poser une taupe.` };
+  const cost = moleCost(spyBase(current, world, now));
+  if (goldView(current).stone < cost) return { error: `Il faut ${Math.ceil(cost).toLocaleString("fr-FR")} ${current.s2 ? "or" : "pierres"} pour poser une taupe.` };
   const [ban, positions] = await Promise.all([spyBanUntil(admin, seasonId, me.id, key, now), loadPositions(admin, seasonId, entities)]);
   if (ban > now) return { error: "Trop de tes espions ont été surpris là-bas : on les y attend encore." };
   const from = positions.get(me.id);
   const to = positions.get(key);
   const distance = from && to ? mapDistance(from, to) : MAP_SPAWN_RADIUS;
   const caught = Math.random() < spyRisk(gap, distance) / 2 + (lin(target.state, "sentinelles") ? LIN_SPY_CATCH : 0);
-  const paid = { ...current, stone: current.stone - cost, moles };
+  const paid = fromGold(current, { ...goldView(current), stone: goldView(current).stone - cost, moles });
   if (caught) return { cost, caught, target, state: paid, message: `🐀 Ta taupe a été démasquée en s'installant chez ${target.name}.` };
   const t = target.state;
   const mole: Mole = { id: marchId(), target: key, until: now + MOLE_MS * (lin(current, "taupe") ? LIN_MOLE : 1), distance, seen: (t.marches ?? []).map((m) => m.id), shielded: t.shieldUntil > now, curfew: inCurfew(t, now) };
