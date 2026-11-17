@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { generateMap, type S2Map } from "./map";
-import { build, buyConcession, localCap, setConcession, shipNow, concBuild, concBuildBlocker, supplyBlocker, takeConcessionBlocker, concessionRate, convoyLoad, firstConcessionSites, marketQuote, newS2State, REF, settleS2, stockFull, takeConcession, supplyConcession, upgradeConcession, VALUE, type S2State } from "./economy";
+import { build, buyConcession, localCap, setConcession, shipNow, concBuild, concBuildBlocker, concBuildingCost, concessionCost, supplyBlocker, takeConcessionBlocker, concessionRate, convoyLoad, firstConcessionSites, marketQuote, newS2State, REF, settleS2, stockFull, takeConcession, supplyConcession, upgradeConcession, VALUE, type S2State } from "./economy";
 
 const T0 = Date.parse("2026-12-07T15:00:00Z");
 const H = 3_600_000;
@@ -149,7 +149,7 @@ describe("S2 : économie", () => {
     const r = concBuild(s, id, "atelier", map, T0);
     expect(r.ok).toBe(true);
     if (!r.ok) return;
-    expect(r.value.conc[0].fund).toBe(10_000 - 200);
+    expect(r.value.conc[0].fund).toBe(10_000 - concBuildingCost(1));
     expect(concBuildBlocker(r.value, id, "atelier", map, T0 + 1)).toMatch(/chantier/);
     const before = concessionRate(s, s.conc[0], map);
     const done = settleS2(r.value, ctx(), T0 + H).s;
@@ -164,26 +164,27 @@ describe("S2 : économie", () => {
     // Rien en réserve ni en stock : il faut ravitailler la concession.
     s = { ...s, conc: s.conc.map((c) => ({ ...c, stock: 0 })) };
     expect(upgradeConcession(s, s.conc[0].id, map, T0).ok).toBe(false);
-    // Plafond : le coût des deux prochains niveaux (450 + 675).
+    // Plafond : le coût des deux prochains niveaux.
+    const cap = concessionCost(2) + concessionCost(3);
     const have = { pierre: 1e6, fer: 1e6, or: 1e6 };
-    expect(supplyBlocker(s, s.conc[0].id, have, "pierre", 1_126)).not.toBeNull();
-    expect(supplyBlocker(s, s.conc[0].id, have, "pierre", 1_125)).toBeNull();
-    s = supplyConcession(s, s.conc[0].id, map, "pierre", 300, T0);
-    expect(supplyBlocker(s, s.conc[0].id, have, "pierre", 826)).not.toBeNull();
+    expect(supplyBlocker(s, s.conc[0].id, have, "pierre", cap + 1)).not.toBeNull();
+    expect(supplyBlocker(s, s.conc[0].id, have, "pierre", cap)).toBeNull();
+    s = supplyConcession(s, s.conc[0].id, map, "pierre", 30, T0);
+    expect(supplyBlocker(s, s.conc[0].id, have, "pierre", cap - 29)).not.toBeNull();
     const arrive = s.convoys[s.convoys.length - 1].arrive;
     s = settleS2(s, ctx(), arrive).s;
-    expect(s.conc[0].fund).toBe(300);
+    expect(s.conc[0].fund).toBe(30);
     // La réserve paie d'abord, le stock local le reste.
     s = { ...s, conc: s.conc.map((c) => ({ ...c, stock: 1_000 })) };
     const up = upgradeConcession(s, s.conc[0].id, map, arrive);
     expect(up.ok).toBe(true);
     if (!up.ok) return;
-    expect(up.value.cost).toBe(450);
+    expect(up.value.cost).toBe(concessionCost(2));
     expect(up.value.s.conc[0].fund).toBe(0);
-    expect(up.value.s.conc[0].stock).toBeCloseTo(1_000 - 150 / VALUE[map.sites[s.conc[0].site].type], 6);
+    expect(up.value.s.conc[0].stock).toBeCloseTo(1_000 - (concessionCost(2) - 30) / VALUE[map.sites[s.conc[0].site].type], 6);
     s = up.value.s;
     const b = build(s, "outils", 1e6, arrive);
-    expect(b.ok && b.value.cost).toBe(500);
+    expect(b.ok && b.value.cost).toBe(50);
     if (!b.ok) return;
     s = b.value.s;
     const later = settleS2(s, ctx(), arrive + H).s;

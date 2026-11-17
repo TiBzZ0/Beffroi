@@ -56,11 +56,21 @@ export function concessionLevelFactor(level: number): number {
   return 1 + 0.15 * (Math.max(1, level) - 1);
 }
 /** Prix du niveau n (2 à 15) d'une concession, en pierre. */
+/**
+ * Durée d'un chantier : 5 s au premier niveau, puis une montée régulière jusqu'à `topMs` au dernier.
+ * Le début de partie va vite, les derniers niveaux se préparent.
+ */
+export function rampMs(level: number, top: number, topMs: number): number {
+  const n = Math.min(top, Math.max(1, level));
+  return Math.round(5_000 * Math.pow(topMs / 5_000, top > 1 ? (n - 1) / (top - 1) : 1));
+}
+const H = 3_600_000;
+/** Prix du niveau n (2 à 15) d'une concession, en valeur pierre : bon marché au début, cher à la fin. */
 export function concessionCost(level: number): number {
-  return Math.round(300 * Math.pow(1.5, level - 1));
+  return Math.round(60 * Math.pow(1.7, Math.max(0, level - 2)));
 }
 export function concessionBuildMs(level: number): number {
-  return Math.round(5 * 60_000 * Math.pow(1.3, level - 1));
+  return rampMs(level - 1, 14, 8 * H);
 }
 
 export type BuildingId = "outils" | "charronnerie" | "relais" | "entrepot";
@@ -68,16 +78,16 @@ export const BUILDING_MAX = 20;
 export const BUILDING_SLOTS = 2;
 export const BUILDINGS: Record<BuildingId, { name: string; icon: string; base: number; text: string }> = {
   outils: { name: "Outils", icon: "🛠️", base: 500, text: "+3 % de production de toutes les concessions par niveau" },
-  charronnerie: { name: "Charronnerie", icon: "🛞", base: 400, text: "Charge d'un convoi : 60 min de production de base, +10 % par niveau" },
-  relais: { name: "Relais", icon: "🐎", base: 400, text: "Un convoi toutes les 60 min, 2 min de moins par niveau ; convois 3 % plus rapides par niveau" },
+  charronnerie: { name: "Charronnerie", icon: "🛞", base: 400, text: "Charge d'un convoi : un intervalle de production de base, +10 % par niveau" },
+  relais: { name: "Relais", icon: "🐎", base: 400, text: "Un convoi toutes les 15 min, 20 s de moins par niveau ; convois 3 % plus rapides par niveau" },
   entrepot: { name: "Entrepôt", icon: "🏚️", base: 300, text: "Stock local +30 min par niveau ; stock à l'abri au château +15 min par niveau" },
 };
 export const BUILDING_IDS = Object.keys(BUILDINGS) as BuildingId[];
 export function buildingCost(id: BuildingId, level: number): number {
-  return Math.round(BUILDINGS[id].base * Math.pow(1.5, level - 1));
+  return Math.round((BUILDINGS[id].base / 10) * Math.pow(1.7, level - 1));
 }
 export function buildingMs(level: number): number {
-  return Math.round(10 * 60_000 * Math.pow(1.25, level - 1));
+  return rampMs(level, BUILDING_MAX, 12 * H);
 }
 
 // ---------------------------------------------------------------------------
@@ -119,8 +129,8 @@ export const CONC_BUILDINGS: Record<ConcBuildingId, { name: string; icon: string
 };
 export const CONC_BUILDING_IDS = Object.keys(CONC_BUILDINGS) as ConcBuildingId[];
 export const CONC_BUILDING_MAX = 10;
-export const concBuildingCost = (level: number) => Math.round(200 * Math.pow(1.6, level - 1));
-export const concBuildingMs = (level: number) => Math.round(10 * 60_000 * Math.pow(1.3, level - 1));
+export const concBuildingCost = (level: number) => Math.round(30 * Math.pow(1.75, level - 1));
+export const concBuildingMs = (level: number) => rampMs(level, CONC_BUILDING_MAX, 4 * H);
 const cbLevel = (c: Concession, id: ConcBuildingId) => c.cb?.[id] ?? 0;
 /** Paliers d'une concession selon son niveau : un nom, et un dessin plus riche sur la carte. */
 export const TIERS = [
@@ -227,21 +237,23 @@ export function concessionRate(s: S2State, c: Concession, map: S2Map): number {
   const bonus = 0.03 * s.bld.outils + CONC_BUILDINGS.atelier.per * cbLevel(c, "atelier") + regionBonus(s, site.type) + (c.level >= CONCESSION_MAX_LEVEL ? DOMAIN_BONUS : 0);
   return BASE_PROD[site.type] * siteFactor(site.places) * concessionLevelFactor(c.level) * (1 + bonus) * PACES[c.pace ?? "normal"].prod;
 }
-/** Charge d'un convoi : 60 min de production de base de la concession, +10 % par niveau de charronnerie. */
+/** Convois : un départ toutes les 15 min au début (5 min au plus court), chargé d'un intervalle de production de base. */
+export const CONVOY_BASE_MIN = 15;
+/** Charge d'un convoi : 15 min de production de base de la concession, +10 % par niveau de charronnerie. */
 export function convoyLoad(s: S2State, c: Concession, map: S2Map): number {
   const site = map.sites[c.site];
   // La charge suit le niveau de la concession ; charronnerie, écurie et Grands chariots s'additionnent.
-  return site ? BASE_PROD[site.type] * siteFactor(site.places) * concessionLevelFactor(c.level) * (1 + 0.1 * s.bld.charronnerie + CONC_BUILDINGS.ecurie.per * cbLevel(c, "ecurie") + (s.loadBonus ?? 0)) : 0;
+  return site ? (BASE_PROD[site.type] * CONVOY_BASE_MIN) / 60 * siteFactor(site.places) * concessionLevelFactor(c.level) * (1 + 0.1 * s.bld.charronnerie + CONC_BUILDINGS.ecurie.per * cbLevel(c, "ecurie") + (s.loadBonus ?? 0)) : 0;
 }
 export function convoyIntervalMs(s: S2State): number {
-  return Math.max(20, 60 - 2 * s.bld.relais) * 60_000;
+  return Math.round(Math.max(5, CONVOY_BASE_MIN - s.bld.relais / 3) * 60_000);
 }
 export function localCap(s: S2State, c: Concession, map: S2Map): number {
   return concessionRate(s, c, map) * (LOCAL_STOCK_HOURS + 0.5 * s.bld.entrepot + (s.stockBonusHours ?? 0)) * PACES[c.pace ?? "normal"].stock * (1 + CONC_BUILDINGS.grenier.per * cbLevel(c, "grenier"));
 }
-/** Trajet d'un convoi : 2 min par case (Tchebychev), plafonné à 45 min, plus rapide avec le relais et en Plaine. */
+/** Trajet d'un convoi : 30 s par case (Tchebychev), plafonné à 15 min, plus rapide avec le relais et en Plaine. */
 export function convoyTravelMs(s: S2State, from: Pos, to: Pos): number {
-  const base = Math.min(45, 2 * cheb(from, to)) * 60_000;
+  const base = Math.min(15, 0.5 * cheb(from, to)) * 60_000;
   return Math.round(base / ((1 + 0.03 * s.bld.relais) * (s.region === "plaine" ? 1.1 : 1) * (1 + (s.convoySpeed ?? 0))));
 }
 /** Stock du château à l'abri des raids : 15 min de production par niveau d'entrepôt (au moins 30 min). */

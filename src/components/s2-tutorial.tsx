@@ -35,7 +35,7 @@ const PAGES: { icon: string; title: string; text: string[] }[] = [
     title: "Concessions et convois",
     text: [
       "Une concession, c'est une place sur un site : une carrière pour la pierre, une mine pour le fer, un filon pour l'or. Ta première carrière t'est donnée avec ton château.",
-      "La concession produit en continu dans son stock local. Toutes les heures, un convoi part vers ton château avec ce qui s'y trouve. Si le stock est plein, la concession s'arrête : la charronnerie et le relais règlent ça. Au-dessus de 90 %, des brigands rôdent et peuvent en voler une part chaque heure.",
+      "La concession produit en continu dans son stock local. Toutes les 15 minutes, un convoi part vers ton château avec ce qui s'y trouve. Si le stock est plein, la concession s'arrête : la charronnerie et le relais règlent ça. Au-dessus de 90 %, des brigands rôdent et peuvent en voler une part chaque heure.",
       "Tu prends d'autres concessions en touchant un site sur la carte. Les étapes du beffroi et l'or t'en ouvrent de nouvelles.",
       "Chaque concession se gère à part, dans l'onglet du domaine. Son rythme : prudent pour s'absenter, intensif pour produire plus contre un peu d'or. Ses convois : vers ton château, directement au beffroi (où ils comptent comme un don), ou vers une autre de tes concessions pour remplir sa réserve.",
       "Une concession s'améliore avec ce qu'elle a sur place : sa réserve de chantier, que tu remplis en lui envoyant des ressources depuis le château, puis son propre stock.",
@@ -164,7 +164,7 @@ const STEPS: GuideStep[] = [
   {
     id: "concession",
     title: "Regarde ta carrière",
-    text: "Dans Concessions, ta carrière remplit son stock et envoie un convoi de pierre vers ton château toutes les heures. Tu y verras aussi tes bâtiments d'appui et le marché.",
+    text: "Dans Concessions, ta carrière remplit son stock et envoie un convoi de pierre vers ton château toutes les 15 minutes. Tu y verras aussi tes bâtiments d'appui et le marché.",
     tab: "ateliers",
     go: "Voir mes concessions",
     done: (_, v) => v.has("ateliers"),

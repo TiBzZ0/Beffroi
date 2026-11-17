@@ -113,7 +113,7 @@ import { armySize, armyValue, battle, cleanArmy, estimateChance, seededRng, type
 import { worldFrom, type AwaySummary, type LotView, type AllianceSummary, type ChronicleEntry, type EventView, type GameSnapshot, type RivalView } from "@/lib/game/types";
 import { useChat, useGame, useLeaderboard, usePush, useTick } from "./use-game";
 import { BRANCHES, lineageMark, NODE_BY_ID, NODES, nodeBlocker, nodeEffect, RANK_COST, RANK_REQUIRED, RENOWN, RENOWN_CAPPED, RESPEC_FEE, respecBlocker, spentIn, type BranchId } from "@/lib/game/lineage";
-import { allocation, BARRACKS_MAX, companyEta, BARRACKS_MS, barracksBlocker, barracksCost, barracksLevel, COMPANY_CAP, fortBlocker, fortCost, fortCount, fortMs, FORT_MAX, maxCompanies, RECRUIT_MS, recruitPrice, recruitSlots, trainBlocker, trainCost, trainMs, TRAIN_MAX } from "@/lib/game/companies";
+import { allocation, BARRACKS_MAX, companyEta, barracksMs, barracksBlocker, barracksCost, barracksLevel, COMPANY_CAP, fortBlocker, fortCost, fortCount, fortMs, FORT_MAX, maxCompanies, RECRUIT_MS, recruitPrice, recruitSlots, trainBlocker, trainCost, trainMs, TRAIN_MAX } from "@/lib/game/companies";
 import { CAPTAIN_COST, CAPTAINS_MAX, captainLevel, captainOf, HUNT_TARGETS, RARITY_LABEL, RELICS, RELICS_MAX, relicOf, TRAITS } from "@/lib/game/captains";
 import { ALTERATIONS, riftCompanyBlocker, riftFightBlocker, riftOf, RIFT_IDLE_MS, RIFT_MAX_COMPANIES, SHAPES, type AlterationId } from "@/lib/game/rift";
 import { MapBoard, type BoardMarch, type BoardPlace } from "./kingdom-map";
@@ -4516,6 +4516,11 @@ function CaptainsPanel({ live, run, renown }: { live: PlayerState; run: ReturnTy
 
 /** C1 à C4 : caserne, compagnies, recrutement, entraînement et fortifications en niveaux (saison 1 et suivantes). */
 export function Companies({ live, now, run, renown = 0 }: { live: PlayerState; now: number; run: ReturnType<typeof useGame>["run"]; renown?: number }) {
+  // Saison 2 : l'armée se paie en fer.
+  const armyPurse = live.s2 ? live.s2.iron : live.stone;
+  const armyState = live.s2 ? { ...live, stone: live.s2.iron } : live;
+  const armyIcon = live.s2 ? "⚔️" : "🪨";
+  const armyWord = live.s2 ? "fer" : "pierre";
   const [busy, setBusy] = useState(false);
   const [open, setOpen] = useState<string | null>(null);
   const [newUnit, setNewUnit] = useState<string>("piquier");
@@ -4550,7 +4555,7 @@ export function Companies({ live, now, run, renown = 0 }: { live: PlayerState; n
             {list.length}/{maxCompanies(live)} compagnies · {recruitSlots(live)} file{recruitSlots(live) > 1 ? "s" : ""}
           </div>
           <div className="row-desc num">
-            {works.barracks ? `🔨 niveau ${works.barracks.level} dans ${countdown(works.barracks.until - now)}` : lv >= BARRACKS_MAX ? "Niveau maximal" : `Niveau ${lv + 1} : ${countdown(BARRACKS_MS[lv + 1])} de travaux`}
+            {works.barracks ? `🔨 niveau ${works.barracks.level} dans ${countdown(works.barracks.until - now)}` : lv >= BARRACKS_MAX ? "Niveau maximal" : `Niveau ${lv + 1} : ${countdown(barracksMs(lv + 1))} de travaux`}
           </div>
         </div>
         {lv < BARRACKS_MAX && !works.barracks && (
@@ -4567,7 +4572,7 @@ export function Companies({ live, now, run, renown = 0 }: { live: PlayerState; n
           const cap = COMPANY_CAP[c.unit];
           const room = Math.max(0, cap - a.men - a.queued);
           // Recruter ce que la pierre permet, jusqu'à remplir la compagnie.
-          const take = Math.min(room, Math.floor(live.stone / Math.max(1, recruitPrice(c.unit, 1))));
+          const take = Math.min(room, Math.floor(armyPurse / Math.max(1, recruitPrice(c.unit, 1))));
           const training = c.trainUntil > now;
           const isOpen = open === c.id;
           return (
@@ -4586,7 +4591,7 @@ export function Companies({ live, now, run, renown = 0 }: { live: PlayerState; n
                   <span style={{ width: `${Math.min(100, (a.men / cap) * 100)}%` }} />
                 </div>
                 <div className="row-desc num one-line">
-                  {formatNumber(a.men)}/{formatNumber(cap)} · {formatNumber(recruitPrice(c.unit, 1))} 🪨 l&apos;homme
+                  {formatNumber(a.men)}/{formatNumber(cap)} · {formatNumber(recruitPrice(c.unit, 1))} {armyIcon} l&apos;homme
                   {a.home < a.men ? ` · 🚶 ${formatNumber(a.men - a.home)} dehors` : ""}
                   {a.queued > 0 ? ` · ⏳ +${formatNumber(a.queued)}${(() => {
                     const e = eta.get(c.id);
@@ -4623,18 +4628,18 @@ export function Companies({ live, now, run, renown = 0 }: { live: PlayerState; n
               </div>
               <div className="row-actions">
                 {room > 0 && (
-                  <Btn className="btn btn-primary btn-small" busy={busy} reason={take <= 0 ? `Pas assez de pierre : ${formatNumber(recruitPrice(c.unit, 1))} 🪨 l'homme.` : null} onClick={() => void act({ type: "company", op: "recruit", id: c.id, qty: Math.max(1, take) })}>
+                  <Btn className="btn btn-primary btn-small" busy={busy} reason={take <= 0 ? `Pas assez de ${armyWord} : ${formatNumber(recruitPrice(c.unit, 1))} ${armyIcon} l'homme.` : null} onClick={() => void act({ type: "company", op: "recruit", id: c.id, qty: Math.max(1, take) })}>
                     +{formatNumber(Math.max(1, take))}
                     <span className="cost num">
-                      {formatNumber(recruitPrice(c.unit, Math.max(1, take)))} 🪨 · {countdown(Math.max(1, take) * RECRUIT_MS[c.unit])}
+                      {formatNumber(recruitPrice(c.unit, Math.max(1, take)))} {armyIcon} · {countdown(Math.max(1, take) * RECRUIT_MS[c.unit])}
                     </span>
                   </Btn>
                 )}
                 {c.train < TRAIN_MAX && !training && (
-                  <Btn className="btn btn-small" busy={busy} reason={trainBlocker(live, c.id, now)} onClick={() => void act({ type: "company", op: "train", id: c.id })}>
+                  <Btn className="btn btn-small" busy={busy} reason={trainBlocker(armyState, c.id, now)} onClick={() => void act({ type: "company", op: "train", id: c.id })}>
                     🎯 ⭐{c.train + 1}
                     <span className="cost num">
-                      {formatNumber(trainCost(c))} · {countdown(trainMs(c))}
+                      {formatNumber(trainCost(c))} {armyIcon} · {countdown(trainMs(c))}
                     </span>
                   </Btn>
                 )}
@@ -4651,7 +4656,7 @@ export function Companies({ live, now, run, renown = 0 }: { live: PlayerState; n
           <select className="input" value={newUnit} onChange={(e) => setNewUnit(e.target.value)} aria-label="Type de la nouvelle compagnie">
             {UNITS.map((u) => (
               <option key={u.id} value={u.id}>
-                {u.icon} {u.plural} ({formatNumber(COMPANY_CAP[u.id])} hommes · {formatNumber(recruitPrice(u.id, 1))} 🪨 l&apos;homme)
+                {u.icon} {u.plural} ({formatNumber(COMPANY_CAP[u.id])} hommes · {formatNumber(recruitPrice(u.id, 1))} {armyIcon} l&apos;homme)
               </option>
             ))}
           </select>

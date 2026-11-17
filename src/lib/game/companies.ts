@@ -5,7 +5,7 @@
 // un plafond d'effectif, un entraînement et un temps de recrutement. Les hommes d'un type se répartissent entre
 // les compagnies de ce type dans l'ordre (la première se remplit d'abord).
 import type { Army, Levels } from "./battle";
-import { REF } from "./s2/economy";
+import { rampMs, REF } from "./s2/economy";
 import { DEFENSES, LEVEL_BONUS, stagePerkNow, UNITS, type CombatantId, type DefenseId, type UnitId } from "./config";
 
 export interface Company {
@@ -311,7 +311,8 @@ export function trainCost(c: Pick<Company, "train">): number {
 
 export function trainMs(c: Pick<Company, "train">): number {
   // S6 (saison 2) : l'horloge astronomique accélère l'entraînement de 20 %.
-  return Math.round((TRAIN_BASE_MS * TRAIN_TIME_GROWTH ** c.train) / (1 + stagePerkNow("trainSpeed")));
+  const base = ironArmy ? rampMs(c.train + 1, TRAIN_MAX, 6 * HOUR) : TRAIN_BASE_MS * TRAIN_TIME_GROWTH ** c.train;
+  return Math.round(base / (1 + stagePerkNow("trainSpeed")));
 }
 
 export function fortCost(level: number): number {
@@ -322,7 +323,13 @@ export function fortCost(level: number): number {
 }
 
 export function fortMs(level: number): number {
+  // Saison 2 : 5 s au premier niveau, 4 h au dernier.
+  if (ironArmy) return rampMs(level + 1, FORT_MAX, 4 * HOUR);
   return Math.round(FORT_BASE_MS * FORT_TIME_GROWTH ** level);
+}
+/** Travaux de la caserne vers `level` (saison 2 : 5 s au premier niveau, 6 h au dernier). */
+export function barracksMs(level: number): number {
+  return ironArmy ? rampMs(level, BARRACKS_MS.length - 1, 6 * HOUR) : BARRACKS_MS[level];
 }
 
 export function recruitPrice(unit: UnitId, n: number, discount = 1): number {
@@ -509,7 +516,7 @@ export function buildBarracks<S extends ArmyHolder & { stone: number }>(s: S, no
   const why = barracksBlocker(s);
   if (why) return fail(why);
   const level = barracksLevel(s) + 1;
-  return { ok: true, value: { ...s, stone: s.stone - barracksCost(s), works: { ...(s.works ?? {}), barracks: { level, until: now + BARRACKS_MS[level] } } } };
+  return { ok: true, value: { ...s, stone: s.stone - barracksCost(s), works: { ...(s.works ?? {}), barracks: { level, until: now + barracksMs(level) } } } };
 }
 
 export function fortBlocker(s: ArmyHolder & { stone: number }, id: string): string | null {
