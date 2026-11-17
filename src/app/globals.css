@@ -2834,3 +2834,6 @@ use.g-enemy {
   overflow: hidden;
   text-overflow: ellipsis;
 }
+
+.changelog-btn { position: relative; }
+.changelog-btn .dot { position: absolute; top: 4px; right: 4px; width: 8px; height: 8px; background: var(--accent); border-radius: 50%; }

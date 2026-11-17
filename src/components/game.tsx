@@ -205,7 +205,6 @@ export function Game({ userId }: { userId: string }) {
       selectTab(where);
     } }}>
     <div className="game">
-      <WhatsNew season={snap.season.number} />
       {snap.s2 && <S2Tutorial seasonId={snap.season.id} />}
       {game.away && <AwayModal away={game.away} event={snap.event} onClose={game.dismissAway} />}
       <TopBar snap={snap} now={now} />
@@ -418,56 +417,33 @@ function AwayModal({ away, event, onClose }: { away: AwaySummary; event: EventVi
   );
 }
 
-function WhatsNew({ season }: { season: number }) {
-  const log = changelogFor(season);
-  // Rendu seulement côté navigateur (le jeu attend sa première synchronisation), on peut lire le stockage tout de suite.
+/** Notes de version : plus de fenêtre au démarrage, une pastille sur le bouton tant qu'il y a du nouveau. */
+function ChangelogButton({ season }: { season: number }) {
+  const [open, setOpen] = useState(false);
+  const last = changelogFor(season).at(-1)?.id ?? 0;
+  // Rendu seulement côté navigateur (le jeu attend sa première synchronisation) : on peut lire le stockage tout de suite.
   const [seen, setSeen] = useState<number>(() => {
     try {
       return Number(localStorage.getItem("beffroi.changes") ?? 0);
     } catch {
-      return log.at(-1)?.id ?? 0;
+      return last;
     }
   });
-  const fresh = log.filter((c) => c.id > seen);
-  if (fresh.length === 0) return null;
-  const close = () => {
-    const last = log.at(-1)?.id ?? 0;
+  const fresh = last > seen;
+  const show = () => {
+    setOpen(true);
     try {
       localStorage.setItem("beffroi.changes", String(last));
     } catch {
-      // pas de stockage : le panneau reviendra
+      // pas de stockage : la pastille reviendra
     }
     setSeen(last);
   };
   return (
-    <div className="modal-backdrop" role="dialog" aria-modal="true" aria-label="Ce qui change">
-      <div className="modal panel">
-        <h2>📜 Ce qui change</h2>
-        {fresh.map((c) => (
-          <section key={c.id}>
-            <h3>{c.date}</h3>
-            <ul>
-              {c.items.map((t) => (
-                <li key={t}>{t}</li>
-              ))}
-            </ul>
-          </section>
-        ))}
-        <button className="btn btn-primary" onClick={close}>
-          Compris
-        </button>
-      </div>
-    </div>
-  );
-}
-
-/** Bouton « Ce qui change » : tout l'historique des règles, du plus récent au plus ancien. */
-function ChangelogButton({ season }: { season: number }) {
-  const [open, setOpen] = useState(false);
-  return (
     <>
-      <button className="btn btn-ghost" title="Ce qui change" aria-label="Voir ce qui change (patchnote)" onClick={() => setOpen(true)}>
+      <button className="btn btn-ghost changelog-btn" title={fresh ? "Du nouveau dans le jeu" : "Ce qui change"} aria-label={fresh ? "Voir ce qui change (nouveautés non lues)" : "Voir ce qui change (patchnote)"} onClick={show}>
         📜
+        {fresh && <span className="dot" aria-hidden />}
       </button>
       {open && (
         <div className="modal-backdrop" role="dialog" aria-modal="true" aria-label="Ce qui change" onClick={() => setOpen(false)}>
