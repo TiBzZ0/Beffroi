@@ -1790,6 +1790,8 @@ export function queuedLevel(state: PlayerState, id: ResearchId): number {
 export function researchCost(state: PlayerState, id: ResearchId, base = 0): number {
   if (id === "espionnage") return Math.max(1, Math.ceil(SPY_LEVEL_SECONDS * base * SPY_LEVEL_GROWTH ** queuedLevel(state, id)));
   const def = COMBATANTS.get(id);
+  // Saison 2 : recalé sur la production de référence du jour (`base`) : 1 h pour un piquier niveau 1, au prorata du coût de la troupe.
+  if (state.s2 && base > 0) return Math.ceil(3600 * base * ((def?.cost ?? 0) / 400) * RESEARCH_COST_GROWTH ** queuedLevel(state, id));
   return Math.ceil((def?.cost ?? 0) * RESEARCH_COST_FACTOR * RESEARCH_COST_GROWTH ** queuedLevel(state, id));
 }
 
@@ -1815,12 +1817,14 @@ export function startResearch(state: PlayerState, id: string, now: number, stage
   return { ok: true, value: { ...s, stone: s.stone - cost, research: [...queue, { id: rid, endsAt: start + researchTime(s, rid, stagesDone), cost }] } };
 }
 
-export function academyCost(state: PlayerState): number {
+export function academyCost(state: PlayerState, base = 0): number {
+  // Saison 2 : 2 h de production de référence du jour (`base`), ×3 par niveau.
+  if (state.s2 && base > 0) return Math.ceil(2 * 3600 * base * ACADEMY_COST_GROWTH ** (state.academy ?? 0));
   return Math.ceil(ACADEMY_BASE_COST * ACADEMY_COST_GROWTH ** (state.academy ?? 0));
 }
 
-export function buyAcademy(state: PlayerState, now = 0): Result<PlayerState> {
-  const cost = academyCost(state);
+export function buyAcademy(state: PlayerState, now = 0, base = 0): Result<PlayerState> {
+  const cost = academyCost(state, base);
   if (cost > state.stone) return { ok: false, error: "Pas assez de pierre." };
   const level = state.academy ?? 0;
   // R2 : la recherche en cours et la file profitent tout de suite du nouveau niveau.

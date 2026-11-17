@@ -2507,13 +2507,13 @@ function Forge({ live, now, run, stagesDone, base }: { live: PlayerState; now: n
   // File de recherche : l'état local n'est pas encore « réglé », on ignore ce qui est déjà fini.
   const queue = live.research.filter((r) => r.endsAt > now);
   const full = queue.length >= RESEARCH_QUEUE_MAX;
-  const academyPrice = academyCost(live);
+  const academyPrice = academyCost(live, base);
   const rows = (defs: readonly CombatantDef<string>[]) =>
     defs.map((d) => {
       const id = d.id as CombatantId;
       const lv = levelOf(live, id);
       const next = queuedLevel(live, id) + 1;
-      const cost = researchCost(live, id);
+      const cost = researchCost(live, id, base);
       return (
         <div key={d.id} className="row">
           <div className="row-icon" aria-hidden>

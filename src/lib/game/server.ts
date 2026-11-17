@@ -2621,7 +2621,7 @@ function applySimpleAction(state: PlayerState, action: GameAction, now: number, 
       return r.ok ? { ok: true, value: { state: r.value, log: { action: "tithe", details: { percent: action.percent } } } } : r;
     }
     case "academy": {
-      const r = buyAcademy(state, now);
+      const r = buyAcademy(state, now, researchBase(state, world, now));
       return r.ok ? { ok: true, value: { state: r.value, log: { action: "academy", details: { level: r.value.academy } } } } : r;
     }
     case "upgrade": {
@@ -4345,7 +4345,8 @@ function masterLevelsOf(g: Guild, lots: Lot[]): number {
 function guildRate(allianceId: number | null, me: Entity, entities: Map<string, Entity>, world: WorldState, now: number): number {
   const members = allianceId === null ? [me] : [...entities.values()].filter((e) => !e.isLord && e.allianceId === allianceId);
   // Prix : production de base, sans élan ni autres coups de pouce passagers.
-  return members.reduce((s, e) => s + baseRate(e.state, world, now), 0);
+  // Saison 2 : production de référence du jour par membre (prix fixes, recalés sur REF(j)).
+  return members.reduce((s, e) => s + researchBase(e.state, world, now), 0);
 }
 
 async function loadChiefs(admin: SupabaseClient, seasonId: number): Promise<Map<number, string | null>> {
