@@ -49,7 +49,12 @@ import {
   type Pace,
   type S2State,
 } from "@/lib/game/s2/economy";
-import { cheb, REGIONS, type Resource, type S2Map } from "@/lib/game/s2/map";
+import { cheb, RANKS, REGIONS, S2_BELFRY, type Resource, type S2Map } from "@/lib/game/s2/map";
+import { escortBlocker, fightChance, HOSTILITY_LEVELS, patrolSide, protectedUntil, routeDangers, routeEnd } from "@/lib/game/s2/convoys";
+import { allocation, companyLevels } from "@/lib/game/companies";
+import { escortBoost } from "@/lib/game/engine";
+import { UNITS } from "@/lib/game/config";
+import type { Army } from "@/lib/game/battle";
 
 type Run = (action: GameAction) => Promise<unknown>;
 /** Lieu choisi : le château, ou l'identifiant d'une concession. */
@@ -579,6 +584,8 @@ function ConcessionView({ snap, live, s2, c, now, run, select }: { snap: GameSna
         <p className="row-desc">{PACES[c.pace ?? "normal"].text}{c.manual ? " Départs à la main : le stock reste ici pour les améliorations ; au-dessus de 90 %, les brigands rôdent (sauf en prudent)." : ""}</p>
       </section>
 
+      <RouteSection snap={snap} live={live} s2={s2} c={c} now={now} run={run} />
+
       {s2.conc.length > 1 && (
         <details className="place-danger">
           <summary>Abandonner cette concession</summary>
@@ -590,4 +597,83 @@ function ConcessionView({ snap, live, s2, c, now, run, select }: { snap: GameSna
       )}
     </div>
   );
+}
+
+/** Vague B : la route de la concession (zones des seigneurs, chance d'attaque) et son escorte. */
+function RouteSection({ snap, live, s2, c, now, run }: { snap: GameSnapshot; live: PlayerState; s2: S2State; c: Concession; now: number; run: Run }) {
+  const world = snap.s2!;
+  const map = world.map;
+  const site = map.sites[c.site];
+  const [pick, setPick] = useState("");
+  const end = routeEnd(s2, map, c, S2_BELFRY);
+  if (!site || !end) return null;
+  const dangers = routeDangers(s2, map, site.pos, end, now);
+  const escort = (live.escorts ?? []).find((e) => e.conc === c.id);
+  const company = escort ? live.companies?.find((x) => x.id === escort.company) : undefined;
+  const unit = company ? UNITS.find((u) => u.id === company.unit) : undefined;
+  const side = escort && company ? { army: { [company.unit]: escort.men } as Army, levels: companyLevels(live, [company.id], { [company.id]: escort.men }), boost: escortBoost(live, company.unit, stagesDone(snap, now)) } : null;
+  const alloc = allocation(live);
+  const free = (live.companies ?? []).filter((x) => !(live.escorts ?? []).some((e) => e.company === x.id) && (alloc.get(x.id)?.home ?? 0) > 0);
+  const chosen = pick || free[0]?.id || "";
+  const why = chosen ? escortBlocker(live, c.id, chosen, now) : "Aucune compagnie disponible au château.";
+  const lordView = (id: string) => world.lords.find((l) => l.id === id);
+  const shield = protectedUntil(s2) > now;
+  return (
+    <section className="place-section">
+      <h3>🛡️ Route et escorte</h3>
+      <p className="row-desc">
+        Un convoi ne perd jamais plus {stagesDone(snap, now) >= 5 ? "d'un quart" : "d'un tiers"} de sa charge. Sans escorte, tout combat est perdu.
+        {shield ? ` Protection des débutants : aucun joueur ne peut piller tes concessions avant ${dur(protectedUntil(s2) - now)}.` : ""}
+      </p>
+      {dangers.length === 0 ? (
+        <p className="row-desc">Aucune zone de seigneur sur la route : pas de patrouille.</p>
+      ) : (
+        <ul className="s2-route">
+          {dangers.map((d) => {
+            const l = lordView(d.lord.id);
+            const patrol = UNITS.find((u) => u.id === l?.patrol);
+            const win = side && !d.free ? fightChance(side, patrolSide(d.lord, live.seasonStart || 0, now)) : null;
+            return (
+              <li key={d.lord.id}>
+                <b>{l?.name ?? d.lord.id}</b> ({RANKS[d.lord.rank].name.toLowerCase()}) · {d.free ? "passage libre" : `${Math.round(d.chance * 100)} % d'attaque par convoi`}
+                {!d.free && patrol ? ` · patrouilles de ${patrol.icon} ${patrol.plural.toLowerCase()}` : ""}
+                {d.level > 0 ? ` · ${HOSTILITY_LEVELS[d.level].icon} ${HOSTILITY_LEVELS[d.level].name.toLowerCase()}` : ""}
+                {win !== null ? ` · ton escorte gagne ${Math.round(win * 100)} % du temps` : ""}
+              </li>
+            );
+          })}
+        </ul>
+      )}
+      {escort && company ? (
+        <div className="s2-settings">
+          <span>
+            Escorte : {unit?.icon} {formatNumber(escort.men)} {unit?.plural.toLowerCase()} (entraînement {company.train})
+          </span>
+          <button className="btn btn-small" onClick={() => void run({ type: "s2", op: "escort", id: c.id })}>Rappeler l&apos;escorte</button>
+        </div>
+      ) : (
+        <div className="s2-settings">
+          <span>Escorte</span>
+          <select value={chosen} onChange={(e) => setPick(e.target.value)} aria-label="Compagnie d'escorte" disabled={free.length === 0}>
+            {free.map((x) => {
+              const u = UNITS.find((v) => v.id === x.unit);
+              return (
+                <option key={x.id} value={x.id}>
+                  {u?.icon} {u?.plural} · {formatNumber(alloc.get(x.id)?.home ?? 0)} hommes · entr. {x.train}
+                </option>
+              );
+            })}
+          </select>
+          <button className="btn btn-small btn-primary" disabled={!!why} title={why ?? undefined} onClick={() => void run({ type: "s2", op: "escort", id: c.id, company: chosen })}>
+            Affecter
+          </button>
+        </div>
+      )}
+      <p className="row-desc">L&apos;escorte accompagne chaque convoi de cette route et la défend contre les brigands et les pillards. Elle ne défend pas le château et ne part pas en attaque. Ses blessés rentrent au château.</p>
+    </section>
+  );
+}
+
+function stagesDone(snap: GameSnapshot, now: number): number {
+  return snap.worksite.stageCompletedAt.filter((t) => t <= now).length;
 }

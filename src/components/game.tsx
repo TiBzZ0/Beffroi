@@ -2,6 +2,14 @@
 
 import { createContext, useContext, useEffect, useId, useRef, useState } from "react";
 import { setS2Map } from "@/lib/game/s2/rules";
+import { setLordNames, setVassals } from "@/lib/game/s2/convoys";
+import type { S2WorldView } from "@/lib/game/types";
+
+/** Vague B : suzerains et noms des seigneurs, pour que le calcul des routes du navigateur suive celui du serveur. */
+function syncLords(world: S2WorldView): void {
+  setVassals(Object.fromEntries(world.lords.filter((l) => l.vassal).map((l) => [l.id, { owner: l.vassal!.owner, alliance: l.vassal!.alliance, until: l.vassal!.until }])));
+  setLordNames(Object.fromEntries(world.lords.map((l) => [l.id, l.name])));
+}
 import { S2MapScreen } from "@/components/s2-map";
 import { placeOf, S2Domain, S2Lands, S2ResourceBar, type Place } from "@/components/s2-domain";
 import { S2Guide, S2Tutorial } from "@/components/s2-tutorial";
@@ -165,6 +173,7 @@ export function Game({ userId }: { userId: string }) {
   setS2Geometry(true);
   setIronArmy(true);
   setS2Map(snap.s2.map);
+  syncLords(snap.s2);
   const live: PlayerState = advance(snap.state, now, world);
   const here = placeOf(live.s2, place);
   const researchDone = tab !== "armee" && researchEnds.some((e) => e <= now && e > armySeenAt);
@@ -1628,7 +1637,10 @@ function targetName(snap: GameSnapshot, id: string): string {
   if (id.startsWith("convoy:")) return "Convoi";
   if (id.startsWith("siege:")) return "Beffroi";
   if (id.startsWith("hall:")) return snap.map?.halls?.find((h) => `hall:${h.id}` === id)?.name ?? "Halle";
-  return snap.rivals.find((r) => r.id === id)?.name ?? "?";
+  // Vague B : contrat d'un seigneur (« jour:seigneur »).
+  const contract = /^\d+:(.+)$/.exec(id);
+  if (contract) return `Contrat de ${snap.s2?.lords.find((l) => l.id === contract[1])?.name ?? "seigneur"}`;
+  return snap.rivals.find((r) => r.id === id)?.name ?? snap.s2?.lords.find((l) => l.id === id)?.name ?? snap.s2?.castles.find((c) => c.id === id)?.name ?? "?";
 }
 
 type MoveTone = "attack" | "out" | "back" | "ally" | "spy" | "camp";
@@ -1650,7 +1662,7 @@ interface MoveRow {
   recall?: string;
 }
 
-const MARCH_ICON: Record<string, string> = { raid: "⚔️", reinforce: "🛡️", station: "🛡️", hall_station: "🛡️", fortress: "🏰", hall_siege: "🏛️", event: "🎪" };
+const MARCH_ICON: Record<string, string> = { raid: "⚔️", reinforce: "🛡️", station: "🛡️", hall_station: "🛡️", fortress: "🏰", hall_siege: "🏛️", event: "🎪", pillage: "⛏️", contract: "📜" };
 
 /** U1 : tableau des mouvements, visible depuis tous les onglets. */
 export function Movements({ snap, live, now, run }: { snap: GameSnapshot; live: PlayerState; now: number; run: ReturnType<typeof useGame>["run"] }) {
@@ -2793,7 +2805,13 @@ function reportOf(e: ChronicleEntry, me: string, myAlliance: number | null, riva
     icon = "⚔️";
     cat = personal ? "combats" : allyOf(e.actorId) || allyOf(e.targetId) ? "alliance" : "royaume";
     const won = d.success !== false;
-    if (attacker) title = won ? `Victoire sur ${e.targetName}` : `Défaite contre ${e.targetName}`;
+    const site = (d as { pillage?: boolean; site?: string }).pillage ? (d as { site?: string }).site ?? "une concession" : null;
+    if (site) {
+      icon = "⛏️";
+      if (attacker) title = won ? `Pillage de ${site}` : `Pillage repoussé à ${site}`;
+      else if (e.targetId === me) title = won ? `${e.actorName} pille ${site}` : `Pillage de ${e.actorName} repoussé`;
+      else title = won ? `${e.actorName} pille ${e.targetName}` : `${e.targetName} repousse ${e.actorName}`;
+    } else if (attacker) title = won ? `Victoire sur ${e.targetName}` : `Défaite contre ${e.targetName}`;
     else if (e.targetId === me) title = won ? `Pillé par ${e.actorName}` : `Raid de ${e.actorName} repoussé`;
     else title = won ? `${e.actorName} pille ${e.targetName}` : `${e.targetName} repousse ${e.actorName}`;
     if (won && (d.stolen ?? 0) > 0) chips.push({ t: `${attacker ? "+" : e.targetId === me ? "−" : ""}${short(d.stolen ?? 0)} 🪨`, tone: attacker ? "gain" : e.targetId === me ? "loss" : undefined });
@@ -2909,7 +2927,7 @@ function buildReports(snap: GameSnapshot, live: PlayerState, now: number): Repor
   const myAlliance = snap.alliance?.id ?? null;
   const out: Report[] = (snap.chronicle ?? []).map((e) => reportOf(e, me, myAlliance, snap.rivals, snap.alliances));
   // Saison 2 : brigands sur les concessions trop pleines.
-  for (const [i, l] of (live.s2?.log ?? []).entries()) out.push({ key: `s2log${l.at}-${i}`, cat: "chantier", icon: l.text.startsWith("🗡️") ? "🗡️" : "⚠️", title: l.text.length > 48 ? `${l.text.slice(0, 46)}…` : l.text, chips: [], at: l.at, text: l.text });
+  for (const [i, l] of (live.s2?.log ?? []).entries()) out.push({ key: `s2log${l.at}-${l.key ?? i}`, cat: l.cat ?? "chantier", icon: [...l.text][0] ?? "⚠️", title: l.text.length > 48 ? `${l.text.slice(0, 46)}…` : l.text, chips: [], at: l.at, text: l.text });
   for (const [i, l] of (live.spyLog ?? []).entries()) out.push({ key: `log${l.at}-${i}`, cat: "espionnage", icon: "🐀", title: l.text.length > 48 ? `${l.text.slice(0, 46)}…` : l.text, chips: [], at: l.at, text: l.text });
   for (const r of snap.rivals) {
     if (!(r.intelUntil > now)) continue;

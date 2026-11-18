@@ -17,6 +17,13 @@ export interface Company {
   trainUntil: number;
 }
 
+/** Escorte d'une route : une compagnie, la concession dont elle accompagne les convois, ses hommes. */
+export interface Escort {
+  company: string;
+  conc: string;
+  men: number;
+}
+
 /** Une commande de recrutement : `n` hommes de `unit`, un toutes les `per` ms à partir de `from`, sur la file `slot`. */
 export interface RecruitOrder {
   unit: UnitId;
@@ -50,6 +57,8 @@ export interface ArmyHolder {
   relics?: { id: string; company: string | null }[];
   /** F1 : expédition en cours dans la faille (hommes par compagnie, blessés en route). */
   rift?: { exp?: { by: Record<string, number>; troops: Army; wounded: Army } | null } | null;
+  /** Saison 2, vague B : compagnies affectées à l'escorte d'une route (leurs hommes ne sont plus au château). */
+  escorts?: Escort[];
   /** Le modèle des compagnies est en vigueur (saison 1 et suivantes). Fixé par le serveur, jamais enregistré. */
   companyModel?: boolean;
 }
@@ -126,6 +135,7 @@ export function menOf(s: ArmyHolder, unit: UnitId): number {
   for (const m of s.marches ?? []) n += (m.troops as Record<string, number>)[unit] ?? 0;
   const exp = s.rift?.exp;
   if (exp) n += ((exp.troops as Record<string, number>)[unit] ?? 0) + ((exp.wounded as Record<string, number>)[unit] ?? 0);
+  for (const e of s.escorts ?? []) if ((s.companies ?? []).find((c) => c.id === e.company)?.unit === unit) n += e.men;
   return n;
 }
 
@@ -137,13 +147,14 @@ export function capacityOf(s: ArmyHolder, unit: UnitId): number {
 export function allocation(s: ArmyHolder): Map<string, { men: number; home: number; queued: number }> {
   const out = new Map<string, { men: number; home: number; queued: number }>();
   const queued = queuedMen(s);
-  const pinned = s.rift?.exp?.by ?? {};
+  // Compagnies parties dans la faille ou affectées à une escorte : leurs hommes leur restent.
+  const pinned: Record<string, number> = { ...(s.rift?.exp?.by ?? {}), ...Object.fromEntries((s.escorts ?? []).map((e) => [e.company, e.men])) };
   for (const u of UNITS) {
     const list = (s.companies ?? []).filter((c) => c.unit === u.id);
     let men = menOf(s, u.id);
     let home = s.troops[u.id] ?? 0;
     let q = queued[u.id] ?? 0;
-    // Les compagnies parties dans la faille gardent leurs hommes ; les autres se remplissent dans l'ordre.
+    // Les compagnies parties (faille, escorte) gardent leurs hommes ; les autres se remplissent dans l'ordre.
     for (const c of list) {
       if (pinned[c.id] === undefined) continue;
       const m = Math.min(COMPANY_CAP[u.id], Math.max(0, pinned[c.id]), men);

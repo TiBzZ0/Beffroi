@@ -276,8 +276,10 @@ export interface S2WorldView {
   castles: { id: string; name: string; pos: [number, number]; allianceId: number | null; me: boolean }[];
   /** Places prises sur chaque site par les autres (joueurs et seigneurs), par identifiant de site. */
   taken: Record<number, number>;
-  lords: { id: string; name: string; rank: Rank; pos: [number, number]; companies: number; home: number; patrol: UnitId; train: number; fief: number; reformAt: number }[];
+  lords: { id: string; name: string; rank: Rank; pos: [number, number]; companies: number; home: number; patrol: UnitId; train: number; fief: number; reformAt: number; vassal?: { owner: string; alliance: number | null; until: number; name: string } }[];
   convoys: { from: [number, number]; to: [number, number]; depart: number; arrive: number; res: Resource; size: "petite" | "moyenne" | "grosse"; mine: boolean }[];
+  /** Vague B : concessions des autres joueurs (pour le pillage), avec la raison d'un refus. */
+  occupants?: { owner: string; name: string; conc: string; site: number; level: number; escort: boolean; why?: string }[];
 }
 
 export interface GameSnapshot {
@@ -385,7 +387,11 @@ export type GameAction =
   | { type: "rift"; op: "send" | "fight" | "return"; ids?: string[] }
   | { type: "captain"; op: "draw" | "pick" | "assign" | "relic" | "drop"; id?: string; company?: string | null; trait?: string; target?: string }
   | { type: "company"; op: "create" | "dissolve" | "retype" | "recruit" | "train" | "barracks" | "fort"; id?: string; unit?: string; qty?: number }
-  | { type: "s2"; op: "place" | "take" | "drop" | "upgrade" | "build" | "buy" | "exchange" | "set" | "supply" | "ship" | "cbuild"; x?: number; y?: number; site?: number; id?: string; building?: string; from?: string; to?: string; amount?: number; pace?: string; dest?: string; manual?: boolean }
+  | { type: "s2"; op: "place" | "take" | "drop" | "upgrade" | "build" | "buy" | "exchange" | "set" | "supply" | "ship" | "cbuild" | "escort" | "safe"; x?: number; y?: number; site?: number; id?: string; building?: string; from?: string; to?: string; amount?: number; pace?: string; dest?: string; manual?: boolean; company?: string }
+  /** Vague B : piller une concession d'un autre joueur (l'armée part du château vers le site). */
+  | { type: "pillage"; target: string; conc: string; troops?: Record<string, number> }
+  /** Vague B : remplir un contrat d'un seigneur (l'armée part du château). */
+  | { type: "contract"; id: string; troops?: Record<string, number> }
   | { type: "contribute"; amount: number }
   | { type: "raid"; target: string; troops?: Record<string, number>; allies?: boolean }
   | { type: "spy"; target: string }

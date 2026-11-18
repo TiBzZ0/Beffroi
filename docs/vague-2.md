@@ -29,22 +29,38 @@ La règle de base reste la même : toute règle de jeu est une fonction pure dan
 5. **Combat contre un seigneur.** Le départ se fait par l'action `raid` dans `server.ts` (marche de type `raid`). La résolution est dans le bloc qui appelle `settleFief`, puis `fiefLoot` et `afterDefeat`. Le combat lui-même passe par `battle()` avec `playerAttackOpts`. `regionBoost` y applique déjà la région froid aux PV.
 6. **Garde-fous serveur.** `company-ops.ts` et `startResearch` refusent ce qui n'a pas de sens en saison 2 (fortifications). Une règle de la vague 2 qui doit être refusée côté serveur s'ajoute là, ou dans le blocage correspondant.
 
-## Chantiers de la vague 2 et où les poser
+## Vague 2 : ce qui est livré
+
+Tout est dans `src/lib/game/s2/convoys.ts` (règles pures, testées dans `convoys.test.ts`), branché dans `advance` (engine.ts) et dans le serveur.
+
+| Fonction | Où |
+|---|---|
+| Combat de route : l'escorte gagne avec Pa² / (Pa² + Pb²), P = `effectivePower` (battle.ts) ; le perdant subit les pertes du moteur, le vainqueur la moitié | `fightChance`, `routeFight` |
+| Escortes : une compagnie par route, ses hommes quittent le château (comptés par `menOf`, gardés par `allocation`) | `setEscort`, `releaseEscort`, action `{ type: "s2", op: "escort" }` |
+| Patrouilles : zones traversées (Bresenham), une attaque au plus par zone, chance selon le rang et l'hostilité, plafond 60 % | `convoyRisk`, appelé par `settleS2` à l'arrivée de chaque convoi (`ctx.risk`) |
+| Règle du tiers (le quart après « Le grand bourdon ») | `lossCap`, champ `Convoy.lost` |
+| Brigands : l'escorte défend comme contre une patrouille de hobereau | `banditGuard` (`ctx.guard`) |
+| Hostilité, décroissance de 10 par jour, niveaux, propagation d'un ennemi juré | `addHostility`, `hostilityAt`, `S2State.host` |
+| Sauf-conduits (l'or va au fief) | `buySafe`, action `op: "safe"`, `giveToFief` (server.ts) |
+| Rancune et expéditions des seigneurs hostiles | `afterLordAttack`, `S2State.grudge`, `S2State.expAt` |
+| Vassalité 24 h, tribut d'un quart en convois, passage libre pour le suzerain et son alliance | `LordS2State.vassal`, `S2State.vassals`, `vassalConvoys` (`ctx.extra`), `setVassals` |
+| Pillage de concession (25 % du stock, 15 % de la réserve, plafond du tiers, 6 h, protection 48 h) | action `pillage`, `settlePillage` (server.ts), `pillageLoot`, `pillageBlocker` |
+| Contrats du jour (escorte, interception, camp de bandits) | `contractsFor`, action `contract`, `settleContract` (server.ts) |
+| Renom : pillage (1, 4 par jour), vassal (3), contrat (3) | `RENOWN` (lineage.ts) |
+
+Les rapports de route vont dans `S2State.log` (catégorie « combats »), regroupés par heure pour les patrouilles (`pushLog` avec une clé).
+
+## Ce qui reste à faire
 
 | Chantier | Où le brancher |
 |---|---|
-| Escortes de convoi | Champ sur `Convoy` (economy.ts), réglage dans `setConcession`, effet dans `dispatch` et à l'arrivée |
-| Patrouilles des seigneurs | `patrolUnit` existe déjà (lords.ts) ; la rencontre se calcule au départ du convoi, avec la distance au fief |
-| Règle des tiers | Une fonction pure qui plafonne le butin à un tiers, appelée par les raids de concession et par `fiefLoot` |
-| Protection des débutants | Un instant `protectedUntil` dans `S2State` (posé dans `applyS2Action` au `place`), lu par tous les blocages d'attaque |
-| Rapports de convoi | `log(st, at, text)` dans `settleS2` alimente déjà la boîte de réception (`S2State.log`) |
-| Hostilité et sauf-conduits | Un nouvel état partagé côté serveur (table ou JSON d'alliance), passé dans `S2Others` |
-| Vassalité | Lien joueur → seigneur dans `LordS2State` ; le tribut se verse dans `settleFief` |
-| Interception (S8) | Une marche dont la cible est un convoi : nouvelle `March.kind`, résolue dans la boucle des marches du serveur |
-| Contrats | Une action `s2` plus une liste dans `S2State`, réglée à l'arrivée du convoi |
-| Bandits | Le système des brigands (`BANDIT_*` dans economy.ts) est la base : chance, part volée et passage horaire |
-| Raids de concession | 25 % du stock et 15 % de la réserve, plafonnés au tiers ; défense +10 % en région froid (`regionBoost` côté défenseur) |
-| Deux forteresses de plus | La forteresse est une ligne de la table `fortresses` et une position (`FORTRESS_POS`). Il faudra passer à une liste de positions et de lignes |
+| Interception et sabotage des convois des joueurs (S8) | Les convois des autres sont dans `S2WorldView.convoys` ; une marche `kind: "intercept"` réglée comme `settlePillage`, avec `Convoy.lost` pour la règle du tiers |
+| Routes commerciales | Un convoi sans charge entre deux châteaux, payé à l'arrivée dans `settleS2` |
+| Camps de bandits sur la carte | Les contrats les simulent ; un vrai camp serait une entité de la carte avec sa garnison |
+| Expéditions qui vident la garnison du seigneur | Aujourd'hui l'expédition se règle sans toucher au fief ; il faudrait enregistrer son départ dans `LordS2State` |
+| Vision des convois (« La tour de guet ») | Filtrer `S2WorldView.convoys` selon la distance aux sites du joueur |
+| Trois forteresses de plus | La forteresse est une ligne de la table `fortresses` et une position (`FORTRESS_POS`) : passer à une liste |
+| Rivalités, mercenaires, chute des seigneurs (vague C) | `LordS2State` et `contractsFor` |
 
 ## Régions : bonus provisoires
 

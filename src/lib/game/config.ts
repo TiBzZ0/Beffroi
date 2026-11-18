@@ -105,10 +105,10 @@ const STAGES_S1: readonly StageDef[] = [
  */
 const STAGES_S2: readonly StageDef[] = [
   { ...STAGES_S1[0], bonusLabel: "Une concession de plus pour tous", bonus: {} },
-  { ...STAGES_S1[1], bonusLabel: "Vision des convois et escortes +15 % (avec les combats de convois)", bonus: {} },
+  { ...STAGES_S1[1], bonusLabel: "Escortes +15 % de dégâts", bonus: {} },
   { ...STAGES_S1[2], bonusLabel: "Ouvre la Faille changeante (à venir)", bonus: {} },
   { ...STAGES_S1[3], bonusLabel: "Gardiens des failles −15 % de force", bonus: { guardianWeak: 0.15 } },
-  { ...STAGES_S1[4], bonusLabel: "Règle du tiers ramenée au quart (avec les combats de convois)", bonus: {} },
+  { ...STAGES_S1[4], bonusLabel: "Un convoi ou une concession ne perd plus qu'un quart au lieu d'un tiers", bonus: {} },
   { ...STAGES_S1[5], bonusLabel: "Faille changeante : quatre cartes au choix (à venir)", bonus: {} },
   { ...STAGES_S1[6], bonusLabel: "Une compagnie de plus et entraînement 20 % plus rapide pour tous", bonus: { companies: 1, trainSpeed: 0.2 } },
   { ...STAGES_S1[7], bonusLabel: "Production +10 % pour tous, et 20 écus à chaque joueur qui a atteint un palier de don", bonus: { production: 1.1, donorEcus: 20 } },

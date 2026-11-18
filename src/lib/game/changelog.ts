@@ -649,4 +649,18 @@ export const CHANGELOG: ChangeEntry[] = [
       "🧹 Événements de la saison 1 retirés (marchand, caravane, siège, brume, fête…) : il reste le colosse, payé en fer, et le tournoi.",
     ],
   },
+  {
+    id: 74,
+    date: "18 novembre",
+    minSeason: 2,
+    items: [
+      "🛡️ Escortes : affecte une compagnie à la route d'une concession (onglet de la concession). Elle accompagne chaque convoi et défend contre les patrouilles, les brigands et les pillards.",
+      "⚔️ Patrouilles : traverser la zone d'un seigneur expose tes convois (10 % par traversée pour un hobereau, jusqu'à 40 % pour un duc). Sans escorte, le combat est perdu. Un convoi ne perd jamais plus d'un tiers de sa charge (un quart après le grand bourdon).",
+      "⛏️ Pillage : depuis la carte, envoie ton armée piller la concession d'un autre joueur : 25 % de son stock et 15 % de sa réserve, contre son escorte s'il en a une. Une fois toutes les 6 h par concession, jamais un allié ni un joueur arrivé depuis moins de 48 h. 1 renom par pillage réussi (4 par jour).",
+      "😠 Hostilité : chaque seigneur t'en veut un peu plus quand tu traverses sa zone ou pilles son fief, et oublie de 10 par jour. Méfiant, hostile, ennemi juré : ses patrouilles attaquent plus souvent, et il envoie des expéditions contre tes convois.",
+      "📜 Sauf-conduit : paie un seigneur en or pour 24 h de passage libre dans sa zone. L'attaquer ensuite rompt le sauf-conduit.",
+      "👑 Vassalité : battre la garnison d'un seigneur en fait ton vassal pour 24 h. Sa zone laisse passer tes convois et ceux de ton alliance, et un quart de sa production part vers ton château (3 renom).",
+      "📜 Contrats : chaque jour, trois seigneurs neutres envers toi proposent un contrat (escorte, interception, camp de bandits) contre de l'or et 3 renom. Ils sont sous la carte.",
+    ],
+  },
 ];

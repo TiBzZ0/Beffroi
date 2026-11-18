@@ -5,6 +5,7 @@ import { lin, LIN_GENERATOR_DISCOUNT } from "../lineage";
 import type { GameAction } from "../types";
 import { build, buyConcession, concBuild, type ConcBuildingId, dropConcession, exchangeBlocker, firstConcessionSites, LAUNCH_MS, marketQuote, setConcession, shipNow, START_STONE, supplyBlocker, supplyConcession, takeConcession, upgradeConcession, type BuildingId } from "./economy";
 import { castleBlocker, regionAt, type Resource } from "./map";
+import { buySafe, releaseEscort, setEscort } from "./convoys";
 import { s2Map } from "./rules";
 
 export interface S2Outcome {
@@ -64,7 +65,24 @@ export function applyS2Action(state: PlayerState, action: Extract<GameAction, { 
     }
     case "drop": {
       const r = dropConcession(s2, String(action.id));
-      return r.ok ? done({ ...state, s2: r.value }, "drop", { id: action.id }) : r;
+      if (!r.ok) return r;
+      // Son escorte rentre au château.
+      const escort = (state.escorts ?? []).find((e) => e.conc === String(action.id));
+      const freed = escort ? releaseEscort(state, escort.company) : state;
+      return done({ ...freed, s2: r.value }, "drop", { id: action.id });
+    }
+    case "escort": {
+      const company = typeof action.company === "string" && action.company ? action.company : null;
+      const r = setEscort(state, String(action.id), company, now);
+      if (!r.ok) return r;
+      const conc = s2.conc.find((c) => c.id === String(action.id));
+      const name = conc ? map.sites[conc.site]?.name : "";
+      return done(r.value, "escort", { id: action.id, company }, company ? `🛡️ La compagnie escorte désormais les convois de ${name}.` : "🛡️ L'escorte rentre au château.");
+    }
+    case "safe": {
+      const r = buySafe(s2, map, String(action.id), state.seasonStart || now, now);
+      if (!r.ok) return r;
+      return done({ ...state, s2: r.value.s }, "safe", { lord: action.id, price: r.value.price }, `📜 Sauf-conduit acheté : 24 h de passage libre pour ${r.value.price.toLocaleString("fr-FR")} or.`);
     }
     case "upgrade": {
       const r = upgradeConcession(s2, String(action.id), map, now);

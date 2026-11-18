@@ -296,3 +296,17 @@ export function armyFromBudget(budget: number, shares: Partial<Record<CombatantI
   if (extra > 0) army[cheapest[0]] = (army[cheapest[0]] ?? 0) + extra;
   return army;
 }
+
+/** Points de vie totaux d'une armée, niveaux et bonus compris. */
+export function armyHp(army: Army, levels?: Levels, boost?: Boost): number {
+  return (Object.entries(army) as [CombatantId, number][]).reduce((s, [id, n]) => s + (n ?? 0) * (defOf(id)?.hp ?? 0) * levelFactor(levels, id) * (boost?.hp?.[id] ?? 1), 0);
+}
+
+/**
+ * Vague B : puissance effective d'une armée face à une autre (loi de Lanchester) : ses dégâts sur l'autre
+ * multipliés par ses propres points de vie. Celle qui a la plus grande tient le plus longtemps.
+ */
+export function effectivePower(a: Army, b: Army, aLevels?: Levels, bLevels?: Levels, aBoost?: Boost, bBoost?: Boost): number {
+  const dmg = [...damageOn(cleanArmy(a), cleanArmy(b), 1, aLevels, bLevels, 1, undefined, aBoost, bBoost).values()].reduce((s, d) => s + d, 0);
+  return dmg * armyHp(cleanArmy(a), aLevels, aBoost);
+}

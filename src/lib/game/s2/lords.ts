@@ -25,6 +25,8 @@ export interface LordS2State {
   at: number;
   /** Dernière défaite de la garnison (0 : jamais). */
   beatenAt: number;
+  /** Vague B : suzerain pendant 24 h après une défaite. */
+  vassal?: { owner: string; alliance: number | null; until: number };
 }
 
 export function newLordS2State(now: number): LordS2State {
@@ -121,15 +123,17 @@ export function fiefLoot(ls: LordS2State, companiesBeaten: number, seasonStart: 
 }
 
 /** Après une victoire : le fief perd sa part, la garnison se reforme à partir de maintenant. */
-export function afterDefeat(ls: LordS2State, now: number): LordS2State {
-  return { fief: { pierre: ls.fief.pierre * (1 - FIEF_LOOT_SHARE), fer: ls.fief.fer * (1 - FIEF_LOOT_SHARE), or: ls.fief.or * (1 - FIEF_LOOT_SHARE) }, at: ls.at, beatenAt: now };
+export function afterDefeat(ls: LordS2State, now: number, vassal?: LordS2State["vassal"]): LordS2State {
+  return { fief: { pierre: ls.fief.pierre * (1 - FIEF_LOOT_SHARE), fer: ls.fief.fer * (1 - FIEF_LOOT_SHARE), or: ls.fief.or * (1 - FIEF_LOOT_SHARE) }, at: ls.at, beatenAt: now, ...(vassal ? { vassal } : ls.vassal ? { vassal: ls.vassal } : {}) };
 }
 
 export function cleanLordS2(raw: unknown, now: number): LordS2State {
   const r = (raw ?? {}) as Partial<LordS2State>;
   const num = (v: unknown) => (Number.isFinite(Number(v)) ? Math.max(0, Number(v)) : 0);
   const f = (r.fief ?? {}) as Partial<Arrivals>;
-  return { fief: { pierre: num(f.pierre), fer: num(f.fer), or: num(f.or) }, at: num(r.at) || now, beatenAt: num(r.beatenAt) };
+  const v = r.vassal as { owner?: unknown; alliance?: unknown; until?: unknown } | undefined;
+  const vassal = v && typeof v.owner === "string" && num(v.until) > 0 ? { owner: v.owner, alliance: v.alliance === null || v.alliance === undefined ? null : Number(v.alliance), until: num(v.until) } : undefined;
+  return { fief: { pierre: num(f.pierre), fer: num(f.fer), or: num(f.or) }, at: num(r.at) || now, beatenAt: num(r.beatenAt), ...(vassal ? { vassal } : {}) };
 }
 
 /** Garnison telle que le joueur la voit sur la carte (compagnies présentes, entraînement) : pour estimer un combat côté navigateur. */

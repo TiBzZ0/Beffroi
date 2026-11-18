@@ -7,6 +7,8 @@ import { guideDone, openTutorial } from "@/components/s2-tutorial";
 import { armySize, estimateChance } from "@/lib/game/battle";
 import { attackArmy, playerAttackOpts } from "@/lib/game/engine";
 import { garrisonOfView } from "@/lib/game/s2/lords";
+import { CONTRACT_TEXT, contractFoe, contractsFor, fightChance, HOSTILITY_LEVELS, hostilityAt, hostilityLevel, safeBlocker, safePrice } from "@/lib/game/s2/convoys";
+import { dailyDay } from "@/lib/game/daily";
 import { drawBelfry, drawCastle, drawFort, drawLord, drawMap, drawRift, drawSite, toCell, type Layers, type View } from "@/components/s2-canvas";
 import { UNITS } from "@/lib/game/config";
 import { formatNumber } from "@/lib/game/format";
@@ -237,7 +239,12 @@ function LegendIcon({ label, draw }: { label: string; draw: (c: CanvasRenderingC
 function S2Panel({ snap, live, now, world, picked, busy, act, castlesOthers }: { snap: GameSnapshot; live: PlayerState; now: number; world: S2WorldView; picked: Pick | null; busy: boolean; act: (a: GameAction) => Promise<void>; castlesOthers: Pos[] }) {
   const s2 = live.s2!;
   const castle = s2.castle;
-  if (!picked) return <p className="row-desc s2-panel">Touche une case, un site ou un seigneur pour le voir ici.</p>;
+  if (!picked) return (
+    <>
+      <p className="row-desc s2-panel">Touche une case, un site ou un seigneur pour le voir ici.</p>
+      {castle && <Contracts snap={snap} live={live} now={now} busy={busy} act={act} />}
+    </>
+  );
   const regionOf = (p: Pos) => {
     const r = inCentre(p) ? -1 : (world.map.regions[p[1]]?.[p[0]] ?? -1);
     return r >= 0 ? REGIONS[r] : null;
@@ -272,6 +279,7 @@ function S2Panel({ snap, live, now, world, picked, busy, act, castlesOthers }: {
         {castle && (why ? <div className="row-desc">{why}</div> : (
           <button className="btn btn-primary" data-tuto="take" disabled={busy} onClick={() => void act({ type: "s2", op: "take", site: site.id })}>Prendre une concession ici</button>
         ))}
+        {castle && <Occupants world={world} live={live} siteId={site.id} busy={busy} act={act} />}
       </div>
     );
   }
@@ -289,6 +297,7 @@ function S2Panel({ snap, live, now, world, picked, busy, act, castlesOthers }: {
           Fief : environ {formatNumber(l.fief)} en valeur pierre (une victoire en emporte 60 %, plus du fer par compagnie battue).
           {l.reformAt > now ? ` La garnison se reforme : complète dans ${dur(l.reformAt - now)}.` : ""}
         </div>
+        <LordRelations snap={snap} live={live} lord={l} now={now} busy={busy} act={act} />
         {castle && <LordAttack live={live} lord={l} busy={busy} attack={() => void act({ type: "raid", target: l.id })} />}
       </div>
     );
@@ -333,6 +342,111 @@ function LordAttack({ live, lord, busy, attack }: { live: PlayerState; lord: S2W
         <button className="btn" disabled={busy || armySize(mine) === 0} onClick={() => setSure(true)}>
           Attaquer…
         </button>
+      )}
+    </div>
+  );
+}
+
+/** Vague B : hostilité du seigneur envers toi, sauf-conduit, vassalité. */
+function LordRelations({ snap, live, lord, now, busy, act }: { snap: GameSnapshot; live: PlayerState; lord: S2WorldView["lords"][number]; now: number; busy: boolean; act: (a: GameAction) => Promise<void> }) {
+  const s2 = live.s2!;
+  const ml = snap.s2!.map.lords.find((x) => x.id === lord.id);
+  if (!ml) return null;
+  const v = hostilityAt(s2, lord.id, now);
+  const lv = HOSTILITY_LEVELS[hostilityLevel(v)];
+  const safe = (s2.safe?.[lord.id] ?? 0) > now ? s2.safe![lord.id] : 0;
+  const price = safePrice(s2, ml, live.seasonStart || now, now);
+  const why = safeBlocker(s2, ml, live.seasonStart || now, now);
+  const vassal = lord.vassal && lord.vassal.until > now ? lord.vassal : null;
+  const mine = vassal?.owner === snap.userId;
+  return (
+    <div className="s2-relations">
+      <div className="row-desc">
+        Hostilité envers toi : {lv.icon} <b>{lv.name}</b> ({Math.round(v)}/100).
+        {lv.chance > 1 ? ` Ses patrouilles attaquent ${lv.chance === 2 ? "deux" : "une fois et demie"} fois plus souvent.` : ""}
+        {lv.every > 0 ? ` Il envoie une expédition contre tes convois toutes les ${Math.round(lv.every / 3_600_000)} h.` : ""}
+      </div>
+      {vassal && (
+        <div className="row-desc">
+          👑 {mine ? "Ton vassal" : `Vassal de ${vassal.name}`} encore {dur(vassal.until - now)} : sa zone laisse passer les convois {mine ? "de ton alliance" : "de son suzerain et de son alliance"}
+          {mine ? ", et un quart de sa production part en convoi vers ton château." : ". Bats sa garnison reformée pour le prendre."}
+        </div>
+      )}
+      {!mine && (
+        <div className="s2-settings">
+          <span>{safe ? `📜 Sauf-conduit encore ${dur(safe - now)}` : "📜 Sauf-conduit : 24 h de passage libre dans sa zone (pas contre les joueurs ni les brigands)"}</span>
+          <button className="btn btn-small" disabled={busy || !!why} title={why ?? undefined} onClick={() => void act({ type: "s2", op: "safe", id: lord.id })}>
+            {safe ? "Prolonger" : "Acheter"}{price !== null ? ` · 🪙 ${formatNumber(price)}` : ""}
+          </button>
+        </div>
+      )}
+      {safe > 0 && <div className="row-desc">L&apos;attaquer romprait le sauf-conduit : hostilité +30 et deux expéditions de rancune.</div>}
+    </div>
+  );
+}
+
+/** Vague B : les concessions des autres joueurs sur ce site, et le pillage. */
+function Occupants({ world, live, siteId, busy, act }: { world: S2WorldView; live: PlayerState; siteId: number; busy: boolean; act: (a: GameAction) => Promise<void> }) {
+  const list = (world.occupants ?? []).filter((o) => o.site === siteId);
+  const mine = attackArmy(live);
+  if (list.length === 0) return null;
+  return (
+    <div className="s2-occupants">
+      <div className="row-title">Concessions des autres</div>
+      <ul>
+        {list.map((o) => (
+          <li key={o.conc}>
+            <span>
+              {o.name} · niv. {o.level} · {o.escort ? "🛡️ escortée" : "sans escorte"}
+            </span>
+            {o.why ? (
+              <span className="row-desc"> · {o.why}</span>
+            ) : (
+              <button className="btn btn-small" disabled={busy || armySize(mine) === 0} title={armySize(mine) === 0 ? "Aucune troupe au château." : "Toutes tes troupes au château partent. Butin : 25 % du stock et 15 % de la réserve, au plus le tiers. Une fois toutes les 6 h."} onClick={() => void act({ type: "pillage", target: o.owner, conc: o.conc })}>
+                ⛏️ Piller
+              </button>
+            )}
+          </li>
+        ))}
+      </ul>
+      <p className="row-desc">Le pillage se joue contre l&apos;escorte de la route ; sans escorte, il réussit. Ton armée revient avec le butin.</p>
+    </div>
+  );
+}
+
+/** Vague B : contrats du jour des seigneurs neutres envers toi. */
+function Contracts({ snap, live, now, busy, act }: { snap: GameSnapshot; live: PlayerState; now: number; busy: boolean; act: (a: GameAction) => Promise<void> }) {
+  const map = snap.s2!.map;
+  const list = contractsFor(live.s2!, map, snap.userId, dailyDay(now), live.seasonStart || now, now);
+  const mine = attackArmy(live);
+  const name = (id: string) => snap.s2!.lords.find((l) => l.id === id)?.name ?? id;
+  return (
+    <div className="s2-panel s2-contracts">
+      <div className="row-title">📜 Contrats du jour</div>
+      {list.length === 0 ? (
+        <p className="row-desc">Plus de contrat aujourd&apos;hui. Les seigneurs neutres envers toi en proposent de nouveaux chaque jour à 4 h.</p>
+      ) : (
+        <ul>
+          {list.map((c) => {
+            const t = CONTRACT_TEXT[c.kind];
+            const foe = contractFoe(c, map, live.seasonStart || now, now);
+            const chance = armySize(mine) > 0 ? fightChance({ army: mine, levels: playerAttackOpts(live).attackerLevels, boost: playerAttackOpts(live).attackerBoost }, foe) : 0;
+            return (
+              <li key={c.id}>
+                <div>
+                  <b>{t.icon} {t.title(name(c.lord), c.rival ? name(c.rival) : undefined)}</b>
+                </div>
+                <div className="row-desc">
+                  {t.text} Récompense : 🪙 {formatNumber(c.gold)} et 🎖️ 3. À {live.s2?.castle ? cheb(live.s2.castle, c.pos) : "?"} cases.
+                  {armySize(mine) > 0 ? ` Chance avec toutes tes troupes au château : ${Math.round(chance * 100)} %.` : ""}
+                </div>
+                <button className="btn btn-small btn-primary" disabled={busy || armySize(mine) === 0} title={armySize(mine) === 0 ? "Aucune troupe au château." : undefined} onClick={() => void act({ type: "contract", id: c.id })}>
+                  Accepter
+                </button>
+              </li>
+            );
+          })}
+        </ul>
       )}
     </div>
   );

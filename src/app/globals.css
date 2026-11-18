@@ -2100,3 +2100,39 @@ a {
 .lord-chance.good { color: var(--ok); }
 .lord-chance.bad { color: var(--accent); }
 .s2-settings .btn-primary:disabled { opacity: 1; cursor: default; }
+
+/* Vague B : routes, relations avec les seigneurs, pillage et contrats. */
+.s2-route,
+.s2-contracts ul,
+.s2-occupants ul {
+  list-style: none;
+  margin: 8px 0;
+  padding: 0;
+  display: grid;
+  gap: 8px;
+}
+.s2-route li {
+  font-size: 0.9rem;
+  color: var(--ink-soft);
+  padding: 6px 10px;
+  border-left: 3px solid var(--line);
+  background: var(--panel-2);
+  border-radius: 4px;
+}
+.s2-contracts li,
+.s2-occupants li {
+  display: grid;
+  gap: 4px;
+  justify-items: start;
+  padding-bottom: 8px;
+  border-bottom: 1px solid var(--line);
+}
+.s2-contracts li:last-child,
+.s2-occupants li:last-child {
+  border-bottom: 0;
+}
+.s2-relations {
+  display: grid;
+  gap: 6px;
+  margin: 8px 0;
+}

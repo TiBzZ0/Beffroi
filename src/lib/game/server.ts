@@ -184,7 +184,10 @@ import {
   lordLootCapOf,
   tributeLeft,
   spendTribute,
+  escortBoost,
+  regionBoost,
 } from "./engine";
+import { armyBoost } from "./captains";
 import {
   worksiteFromRow,
   worldFrom,
@@ -220,12 +223,13 @@ import { armyFromBudget, armySize, armyValue, battle, cleanArmy, estimateChance,
 import { recordContribution } from "@/lib/redis";
 import { addRelics, assignCaptain, assignRelic, CAPTAIN_COST, cleanCaptains, cleanOffer, cleanRelics, drawTraits, dropRelic, addCaptain, HUNT_TARGETS, expeditionSpeed, makeCaptain, makeRelic, RARITY_LABEL, RELICS, TRAIT_IDS, TRAITS, type Relic, type TraitId } from "./captains";
 import { applyRiftFight, cleanRift, expeditionOpts, floorRenown, floorTrain, guardianBattle, isGuardian, splitLosses, riftFightBlocker, riftFloor, riftOf, riftReturn, riftSend, riftWeek, RIFT_CHEST_EVERY, RIFT_CHEST_SECONDS } from "./rift";
-import { COMPANY_VALUE, FIXED_EVENT_COMPANIES, FIXED_TRAIN, FORTRESS_COMPANIES, LORD_COMPANIES, LORD_RAID_SHARE, LORD_TRAIN, trainLevels, cleanCompanies, cleanFortLevels, cleanRecruits, cleanWorks, setIronArmy } from "./companies";
+import { combatLevels, companyLevels, COMPANY_VALUE, FIXED_EVENT_COMPANIES, FIXED_TRAIN, FORTRESS_COMPANIES, LORD_COMPANIES, LORD_RAID_SHARE, LORD_TRAIN, trainLevels, cleanCompanies, cleanFortLevels, cleanRecruits, cleanWorks, setIronArmy } from "./companies";
 import { castleBlocker, generateMap, REGION_BONUS, type S2Map } from "./s2/map";
 import { s2Map, setS2Map, s2Enabled } from "./s2/rules";
 import { applyS2Action, type S2Others } from "./s2/apply";
 import { applyCompanyOp } from "./company-ops";
-import { REF, VALUE, cleanS2 } from "./s2/economy";
+import { REF, VALUE, cleanS2, type S2State } from "./s2/economy";
+import { contractFoe, contractsFor, takeContract, afterLordAttack, cleanEscorts, concRes, HOSTILITY, pillageBlocker, pillaged, pillageLoot, routeFight, setLordNames, setVassals, VASSAL_MS, withHostility, type Vassal } from "./s2/convoys";
 import { afterDefeat, cleanLordS2, companiesHome, fiefLoot, garrison, lordTrain, patrolUnit, REFORM_MS, settleFief } from "./s2/lords";
 import { buyNode, cleanLineage, lin, lineageMark, LIN_MOLE, LIN_SPY_CATCH, NODE_BY_ID, nodeEffect, parisDay, RENOWN, RENOWN_GIFT_SEASON, renownAvailable, respec, type RenownSource } from "./lineage";
 import { notify, notifyEach, type PushMessage } from "@/lib/push";
@@ -243,7 +247,7 @@ interface PlayerRow {
   upgrades: string[];
   total_produced: number;
   total_contributed: number;
-  military?: { levels?: Record<string, number>; research?: { id: string; endsAt: number; cost?: number }[] | { id: string; endsAt: number } | null; academy?: number; sabotageImmuneUntil?: number; ruinImmuneUntil?: number; elanUntil?: number; tithe?: number; titheOwed?: number; titheSet?: boolean; share?: StageShare | null; donorTiers?: number; curfew?: Curfew | null; seen?: PlayerState["seen"] | null; veinAt?: number; frenzyUntil?: number; quest?: number | null; questFlags?: string[]; wounded?: Record<string, number>; healAt?: number; marches?: unknown; boostProdUntil?: number; boostSafeUntil?: number; merchantEvent?: number; daily?: unknown; dailyBoostUntil?: number; dailyBoost?: number; hallTithe?: number; spyLevel?: number; spies?: unknown; moles?: unknown; counterUntil?: number; rumor?: { mode?: string; until?: number } | null; granaryCutUntil?: number; blindUntil?: number; spyLog?: unknown; tribute?: { seconds?: number; at?: number } | null; inboxRead?: Record<string, unknown> | null; lineage?: unknown; companies?: unknown; barracks?: number; works?: unknown; fortLevels?: unknown; recruits?: unknown; rift?: unknown; captains?: unknown; relics?: unknown; captainOffer?: unknown; s2?: unknown; lordS2?: unknown } | null;
+  military?: { levels?: Record<string, number>; research?: { id: string; endsAt: number; cost?: number }[] | { id: string; endsAt: number } | null; academy?: number; sabotageImmuneUntil?: number; ruinImmuneUntil?: number; elanUntil?: number; tithe?: number; titheOwed?: number; titheSet?: boolean; share?: StageShare | null; donorTiers?: number; curfew?: Curfew | null; seen?: PlayerState["seen"] | null; veinAt?: number; frenzyUntil?: number; quest?: number | null; questFlags?: string[]; wounded?: Record<string, number>; healAt?: number; marches?: unknown; boostProdUntil?: number; boostSafeUntil?: number; merchantEvent?: number; daily?: unknown; dailyBoostUntil?: number; dailyBoost?: number; hallTithe?: number; spyLevel?: number; spies?: unknown; moles?: unknown; counterUntil?: number; rumor?: { mode?: string; until?: number } | null; granaryCutUntil?: number; blindUntil?: number; spyLog?: unknown; tribute?: { seconds?: number; at?: number } | null; inboxRead?: Record<string, unknown> | null; lineage?: unknown; companies?: unknown; barracks?: number; works?: unknown; fortLevels?: unknown; recruits?: unknown; rift?: unknown; captains?: unknown; relics?: unknown; captainOffer?: unknown; s2?: unknown; lordS2?: unknown; escorts?: unknown } | null;
   total_clicks: number;
   last_ip?: string | null;
   last_update: string;
@@ -326,6 +330,12 @@ function cleanCurfew(c: Curfew | null | undefined): Curfew {
   if (!c) return { start: null };
   const next = c.next && Number.isFinite(Number(c.next.from)) ? { start: curfewMinute(c.next.start), from: Number(c.next.from) } : null;
   return next ? { start: curfewMinute(c.start), next } : { start: curfewMinute(c.start) };
+}
+
+/** Saison 2 : état du joueur (château, concessions, convois), qui il est, et ses escortes. */
+function s2Of(row: PlayerRow): Pick<PlayerState, "s2" | "escorts"> {
+  const s2 = { ...cleanS2(row.military?.s2, Date.now()), who: { id: row.user_id, alliance: row.alliance_id ?? null } };
+  return { s2, escorts: cleanEscorts(row.military?.escorts, cleanCompanies(row.military?.companies), s2.conc) };
 }
 
 function toEntity(row: PlayerRow): Entity {
@@ -414,10 +424,17 @@ function toEntity(row: PlayerRow): Entity {
         ? { companyModel: true, companies: cleanCompanies(row.military?.companies), barracks: Math.max(0, Math.floor(Number(row.military?.barracks ?? 0) || 0)), works: cleanWorks(row.military?.works), fortLevels: cleanFortLevels(row.military?.fortLevels), recruits: cleanRecruits(row.military?.recruits), rift: cleanRift(row.military?.rift), captains: cleanCaptains(row.military?.captains), relics: cleanRelics(row.military?.relics), captainOffer: cleanOffer(row.military?.captainOffer) }
         : {}),
       // Saison 2 : château, concessions et convois des joueurs ; fief des seigneurs.
-      ...(!s2Enabled(currentSeasonNumber) ? {} : lord ? { lordS2: cleanLordS2(row.military?.lordS2, Date.now()) } : row.profiles?.is_bot ? {} : { s2: cleanS2(row.military?.s2, Date.now()) }),
+      ...(!s2Enabled(currentSeasonNumber) ? {} : lord ? { lordS2: cleanLordS2(row.military?.lordS2, Date.now()) } : row.profiles?.is_bot ? {} : s2Of(row)),
       ...(row.military?.seen ? { seen: { produced: Number(row.military.seen.produced ?? 0), contributed: Number(row.military.seen.contributed ?? 0), levels: armyCounts(row.military.seen.levels ?? {}, [...UNIT_IDS, ...DEFENSE_IDS]) } } : {}),
     },
   };
+}
+
+/** Ce qui ne s'enregistre pas : l'identité, refixée à chaque lecture. */
+function stripS2(s: S2State): S2State {
+  const { who, ...rest } = s;
+  void who;
+  return rest;
 }
 
 function toJson(e: Entity, state: PlayerState, extra: Record<string, unknown> = {}) {
@@ -443,7 +460,7 @@ function toJson(e: Entity, state: PlayerState, extra: Record<string, unknown> = 
     troops: state.troops,
     defenses: state.defenses,
     stationed: state.stationed,
-    military: { levels: state.levels, research: state.research, academy: state.academy, sabotageImmuneUntil: state.sabotageImmuneUntil, ruinImmuneUntil: state.ruinImmuneUntil, elanUntil: state.elanUntil, tithe: state.tithe, titheOwed: state.titheOwed, titheSet: state.titheSet, share: state.share, donorTiers: state.donorTiers, curfew: state.curfew, seen: state.seen ?? null, veinAt: state.veinAt, frenzyUntil: state.frenzyUntil, quest: state.quest, questFlags: state.questFlags, wounded: state.wounded, healAt: state.healAt, marches: state.marches ?? [], boostProdUntil: state.boostProdUntil, boostSafeUntil: state.boostSafeUntil, merchantEvent: state.merchantEvent, daily: state.daily ?? null, dailyBoostUntil: state.dailyBoostUntil, dailyBoost: state.dailyBoost, hallTithe: state.hallTithe, spyLevel: state.spyLevel ?? 0, spies: state.spies ?? [], moles: state.moles ?? [], counterUntil: state.counterUntil ?? 0, rumor: state.rumor ?? null, granaryCutUntil: state.granaryCutUntil ?? 0, blindUntil: state.blindUntil ?? 0, spyLog: (state.spyLog ?? []).slice(-SPY_LOG_MAX), tribute: state.tribute ?? null, inboxRead: state.inboxRead ?? {}, lineage: state.lineage ?? null, ...(state.companyModel ? { companies: state.companies ?? [], barracks: state.barracks ?? 0, works: state.works ?? {}, fortLevels: state.fortLevels ?? {}, recruits: state.recruits ?? [], rift: state.rift ?? null, captains: state.captains ?? [], relics: state.relics ?? [], captainOffer: state.captainOffer ?? null } : {}), ...(state.s2 ? { s2: state.s2 } : {}), ...(state.lordS2 ? { lordS2: state.lordS2 } : {}) },
+    military: { levels: state.levels, research: state.research, academy: state.academy, sabotageImmuneUntil: state.sabotageImmuneUntil, ruinImmuneUntil: state.ruinImmuneUntil, elanUntil: state.elanUntil, tithe: state.tithe, titheOwed: state.titheOwed, titheSet: state.titheSet, share: state.share, donorTiers: state.donorTiers, curfew: state.curfew, seen: state.seen ?? null, veinAt: state.veinAt, frenzyUntil: state.frenzyUntil, quest: state.quest, questFlags: state.questFlags, wounded: state.wounded, healAt: state.healAt, marches: state.marches ?? [], boostProdUntil: state.boostProdUntil, boostSafeUntil: state.boostSafeUntil, merchantEvent: state.merchantEvent, daily: state.daily ?? null, dailyBoostUntil: state.dailyBoostUntil, dailyBoost: state.dailyBoost, hallTithe: state.hallTithe, spyLevel: state.spyLevel ?? 0, spies: state.spies ?? [], moles: state.moles ?? [], counterUntil: state.counterUntil ?? 0, rumor: state.rumor ?? null, granaryCutUntil: state.granaryCutUntil ?? 0, blindUntil: state.blindUntil ?? 0, spyLog: (state.spyLog ?? []).slice(-SPY_LOG_MAX), tribute: state.tribute ?? null, inboxRead: state.inboxRead ?? {}, lineage: state.lineage ?? null, ...(state.companyModel ? { companies: state.companies ?? [], barracks: state.barracks ?? 0, works: state.works ?? {}, fortLevels: state.fortLevels ?? {}, recruits: state.recruits ?? [], rift: state.rift ?? null, captains: state.captains ?? [], relics: state.relics ?? [], captainOffer: state.captainOffer ?? null } : {}), ...(state.s2 ? { s2: stripS2(state.s2) } : {}), ...(state.escorts?.length ? { escorts: state.escorts } : {}), ...(state.lordS2 ? { lordS2: state.lordS2 } : {}) },
     click_strikes: state.clickStrikes,
     click_paused_until: iso(state.clickPausedUntil),
     ...extra,
@@ -533,6 +550,19 @@ async function loadWorksite(admin: SupabaseClient, seasonId: number): Promise<Wo
 }
 
 /** Charge tous les participants de la saison (au plus une dizaine de joueurs et 3 seigneurs). */
+function syncRoutes(entities: Map<string, Entity>): void {
+  const vassals: Record<string, Vassal> = {};
+  const names: Record<string, string> = {};
+  for (const e of entities.values()) {
+    if (!e.isLord) continue;
+    names[e.id] = e.name;
+    const v = e.state.lordS2?.vassal;
+    if (v && v.until > Date.now()) vassals[e.id] = v;
+  }
+  setVassals(vassals);
+  setLordNames(names);
+}
+
 async function loadEntities(admin: SupabaseClient, seasonId: number, userId: string): Promise<Map<string, Entity>> {
   const select = () =>
     admin.from("player_states").select("*, profiles(username, display_name, is_bot, ecus, legacy)").eq("season_id", seasonId);
@@ -571,6 +601,8 @@ async function loadEntities(admin: SupabaseClient, seasonId: number, userId: str
     const catchUp = catchUpBonus(e.state.totalProduced, leader);
     if (catchUp > 0) e.state = { ...e.state, catchUp };
   }
+  // Vague B : suzerains des seigneurs et noms, pour les routes (passage libre, rapports).
+  syncRoutes(entities);
   // Les seigneurs suivent les améliorations des joueurs (niveau médian de chaque type).
   const levels = medianLevels(entities);
   for (const e of entities.values()) if (e.isLord) e.state = { ...e.state, levels: currentCompanyModel && e.lord ? trainLevels(LORD_TRAIN[e.lord.difficulty as 1 | 2 | 3 | 4] ?? 1) : levels, research: [] };
@@ -2093,12 +2125,21 @@ function s2WorldView(entities: Map<string, Entity>, meId: string, now: number): 
   }
   const castles: S2WorldView["castles"] = [];
   const convoys: S2WorldView["convoys"] = [];
+  const occupants: S2WorldView["occupants"] = [];
+  const me = entities.get(meId);
   const ref = REF(Math.max(0, (now - currentSeasonStart) / 86_400_000));
   const size = (value: number) => (value < ref / 3 ? "petite" : value < ref ? "moyenne" : "grosse") as "petite" | "moyenne" | "grosse";
   for (const e of entities.values()) {
     const s2 = e.state.s2;
     if (!s2?.castle) continue;
     castles.push({ id: e.id, name: e.name, pos: [s2.castle[0], s2.castle[1]], allianceId: e.allianceId, me: e.id === meId });
+    // Vague B : les concessions des autres, pour le pillage (stock approché, escorte, raison d'un refus).
+    if (e.id !== meId && me) {
+      for (const c of s2.conc) {
+        const why = pillageBlocker(s2, c.id, now, { allied: isAllied(me, e), sameIp: sameIp(me, e) });
+        occupants.push({ owner: e.id, name: e.name, conc: c.id, site: c.site, level: c.level, escort: (e.state.escorts ?? []).some((x) => x.conc === c.id && x.men > 0), ...(why ? { why } : {}) });
+      }
+    }
     for (const v of s2.convoys) if (v.arrive > now) convoys.push({ from: [v.from[0], v.from[1]], to: [v.to[0], v.to[1]], depart: v.depart, arrive: v.arrive, res: v.res, size: size(v.load * VALUE[v.res]), mine: e.id === meId });
   }
   const lords: S2WorldView["lords"] = map.lords.map((l) => {
@@ -2116,9 +2157,10 @@ function s2WorldView(entities: Map<string, Entity>, meId: string, now: number): 
       train: lordTrain(l.rank, currentSeasonStart, now),
       fief: Math.floor(ls.fief.pierre * VALUE.pierre + ls.fief.fer * VALUE.fer + ls.fief.or * VALUE.or),
       reformAt: home < l.companies ? ls.beatenAt + REFORM_MS : 0,
+      ...(ls.vassal && ls.vassal.until > now ? { vassal: { ...ls.vassal, name: entities.get(ls.vassal.owner)?.name ?? "?" } } : {}),
     };
   });
-  return { map, castles, taken, lords, convoys };
+  return { map, castles, taken, lords, convoys, occupants };
 }
 
 function s2Others(entities: Map<string, Entity>, meId: string): S2Others {
@@ -2188,7 +2230,7 @@ export async function runAction(admin: SupabaseClient, userId: string, action: G
   const season = await getActiveSeason(admin);
   // L1 : on ne garde qu'une empreinte de l'adresse, pour refuser le renom entre comptes d'une même adresse.
   const ipHash = ip && ip !== "inconnue" ? createHash("sha256").update(`beffroi:${ip}`).digest("hex").slice(0, 16) : null;
-  const wantsChronicle = ["sync", "raid", "spy", "event_attack", "sabotage", "daily"].includes(action.type);
+  const wantsChronicle = ["sync", "raid", "spy", "event_attack", "sabotage", "daily", "pillage", "contract"].includes(action.type);
 
   for (let attempt = 0; attempt < MAX_ATTEMPTS; attempt++) {
     let [worksite, entities] = await Promise.all([loadWorksite(admin, season.id), loadEntities(admin, season.id, userId)]);
@@ -2637,8 +2679,62 @@ export async function runAction(admin: SupabaseClient, userId: string, action: G
           ? "🛡️ Contre-espionnage en place pour 6 h : quiconque agit contre toi perd deux crans, et ses espions repérés rapportent des chiffres faussés."
           : `🗣️ La rumeur court pour 2 h : on te croit ${String(action.mode) === "fort" ? "deux fois plus fort" : "deux fois plus faible"} que tu ne l'es.`;
       }
+    } else if (action.type === "pillage") {
+      // Vague B : l'armée part piller une concession d'un autre joueur ; le combat se joue à l'arrivée, contre son escorte.
+      const victim = entities.get(String(action.target));
+      const map = s2Map();
+      const vState = victim && !victim.isLord ? advanceEntity(victim, now, world, flat) : undefined;
+      const conc = vState?.s2?.conc.find((c) => c.id === String(action.conc));
+      const why = !map || !current.s2?.castle ? "Pose d'abord ton château." : !victim || victim.isLord || !vState ? "Cible inconnue." : victim.id === me.id ? "C'est ta propre concession." : pillageBlocker(vState.s2, String(action.conc), now, { allied: isAllied(me, victim), sameIp: sameIp(me, victim) });
+      if (why || !conc || !map || !victim) {
+        error = why ?? "Concession inconnue.";
+      } else {
+        const wanted = (action.troops && typeof action.troops === "object" ? action.troops : current.troops) as Army;
+        const sending = sendTroops(current, wanted);
+        if (!sending.ok) error = sending.error;
+        else {
+          const site = map.sites[conc.site];
+          const outMs = travelMs(sending.value.sent, mapDistance(current.s2!.castle!, site.pos), armySpeedBonus(current));
+          const march: March = { id: marchId(), kind: "pillage", target: victim.id, conc: conc.id, troops: sending.value.sent, departAt: now, arriveAt: now + outMs, status: "out", returnAt: 0, revealed: true, warned: true, loot: 0, ransom: 0 };
+          finalState = { ...sending.value.state, marches: [...(current.marches ?? []), march] };
+          const { data, error: rpcError } = await admin.rpc("commit_state", { p_season: season.id, p_state: toJson(me, finalState, {}), p_touch: true, p_contribution: 0, p_stage_bases: stageSizes, p_active_window_days: ACTIVE_WINDOW_DAYS, p_action: "march", p_details: { target: victim.id, conc: conc.id, troops: sending.value.sent, arriveAt: march.arriveAt } });
+          if (rpcError) throw new Error(`Départ impossible : ${rpcError.message}`);
+          if ((data as { conflict?: boolean } | null)?.conflict) continue;
+          message = `🏇 Ton armée part piller ${site.name} (${victim.name}) : arrivée dans ${Math.max(1, Math.round(outMs / 60_000))} min.`;
+          notify(admin, [victim.id], { title: "🔭 Une armée marche sur ta concession", body: `${me.name} vise ${site.name}, arrivée vers ${new Date(march.arriveAt).toLocaleTimeString("fr-FR", { hour: "2-digit", minute: "2-digit", timeZone: "Europe/Paris" })}.`, tag: "march" });
+        }
+      }
+      if (error) {
+        const { data } = await admin.rpc("commit_state", { p_season: season.id, p_state: toJson(me, current, {}), p_touch: true, p_contribution: 0, p_stage_bases: stageSizes, p_active_window_days: ACTIVE_WINDOW_DAYS, p_action: null, p_details: null });
+        if ((data as { conflict?: boolean } | null)?.conflict) continue;
+      }
+    } else if (action.type === "contract") {
+      // Vague B : contrat d'un seigneur, rempli par une armée envoyée du château.
+      const map = s2Map();
+      const day = dailyDay(now);
+      const c = map && current.s2 ? contractsFor(current.s2, map, me.id, day, currentSeasonStart, now).find((x) => x.id === String(action.id)) : undefined;
+      if (!map || !current.s2?.castle) error = "Pose d'abord ton château.";
+      else if (!c) error = "Contrat inconnu, ou déjà pris aujourd'hui.";
+      else {
+        const wanted = (action.troops && typeof action.troops === "object" ? action.troops : current.troops) as Army;
+        const sending = sendTroops(current, wanted);
+        if (!sending.ok) error = sending.error;
+        else {
+          const outMs = travelMs(sending.value.sent, mapDistance(current.s2.castle, c.pos), armySpeedBonus(current));
+          const march: March = { id: marchId(), kind: "contract", target: c.id, contract: { lord: c.lord, kind: c.kind, ...(c.rival ? { rival: c.rival } : {}), gold: c.gold }, troops: sending.value.sent, departAt: now, arriveAt: now + outMs, status: "out", returnAt: 0, revealed: true, warned: true, loot: 0, ransom: 0 };
+          finalState = { ...sending.value.state, s2: takeContract(sending.value.state.s2!, day, c.id), marches: [...(current.marches ?? []), march] };
+          const { data, error: rpcError } = await admin.rpc("commit_state", { p_season: season.id, p_state: toJson(me, finalState, {}), p_touch: true, p_contribution: 0, p_stage_bases: stageSizes, p_active_window_days: ACTIVE_WINDOW_DAYS, p_action: "contract", p_details: { id: c.id, kind: c.kind, troops: sending.value.sent } });
+          if (rpcError) throw new Error(`Départ impossible : ${rpcError.message}`);
+          if ((data as { conflict?: boolean } | null)?.conflict) continue;
+          message = `📜 Contrat accepté : ton armée part, arrivée dans ${Math.max(1, Math.round(outMs / 60_000))} min.`;
+        }
+      }
+      if (error) {
+        const { data } = await admin.rpc("commit_state", { p_season: season.id, p_state: toJson(me, current, {}), p_touch: true, p_contribution: 0, p_stage_bases: stageSizes, p_active_window_days: ACTIVE_WINDOW_DAYS, p_action: null, p_details: null });
+        if ((data as { conflict?: boolean } | null)?.conflict) continue;
+      }
     } else if (action.type === "raid") {
-      // T3 : l'armée choisie part sur la route ; le combat se jouera à l'arrivée.
+      // T3 : l'armée choisie part sur la route ; le combat se joue à l'arrivée.
       const victim = entities.get(String(action.target));
       if (!victim) {
         error = "Cible inconnue.";
@@ -2760,6 +2856,8 @@ export async function runAction(admin: SupabaseClient, userId: string, action: G
       const result = data as { ok: boolean; conflict?: boolean; worksite?: WorksiteRow };
       if (!result.ok && result.conflict) continue;
       if (result.worksite) worksite = worksiteFromRow(result.worksite);
+      // Vague B : l'or d'un sauf-conduit va dans le fief du seigneur (au-delà du plafond s'il le faut).
+      if (outcome.ok && outcome.value.log?.action === "s2_safe") await giveToFief(admin, season.id, entities, String(outcome.value.log.details.lord), Number(outcome.value.log.details.price) || 0, now);
       await stageRewards(admin, season.id, stageAtLoad, worksite.stage, userId);
       if (contribution > 0) await recordContribution(season.id, userId, finalState.totalContributed);
       if (toHall > 0 && myGuild) await giveToGuild(admin, myGuild, userId, toHall, guildRate(myGuild.allianceId, me, entities, world, now), entities);
@@ -2847,8 +2945,12 @@ function cleanMarches(raw: unknown): March[] {
     .map((m) => ({
       id: String(m.id),
       // Toutes les sortes d'armées doivent survivre à la relecture (sinon une marche d'événement redevient un raid).
-      kind: (["reinforce", "fortress", "station", "event", "hall_station", "hall_siege"].includes(m.kind) ? m.kind : "raid") as March["kind"],
+      kind: (["reinforce", "fortress", "station", "event", "hall_station", "hall_siege", "pillage", "contract"].includes(m.kind) ? m.kind : "raid") as March["kind"],
       target: String(m.target),
+      ...(typeof m.conc === "string" ? { conc: m.conc } : {}),
+      ...(m.contract && typeof m.contract === "object" && typeof m.contract.lord === "string" && ["escorte", "interception", "camp"].includes(m.contract.kind)
+        ? { contract: { lord: String(m.contract.lord), kind: m.contract.kind, ...(typeof m.contract.rival === "string" ? { rival: m.contract.rival } : {}), gold: Math.max(0, Number(m.contract.gold) || 0) } }
+        : {}),
       troops: armyCounts(m.troops ?? {}, UNIT_IDS) as Army,
       departAt: Number(m.departAt) || 0,
       arriveAt: Number(m.arriveAt) || 0,
@@ -3032,6 +3134,9 @@ async function settleMarches(
     return written === "conflict" ? "conflict" : "changed";
   }
 
+  if (m.kind === "pillage") return settlePillage(admin, seasonId, owner, m, at, entities, world, flat, replace, commit);
+  if (m.kind === "contract") return settleContract(admin, seasonId, owner, m, at, world, flat, replace, commit);
+
   if (!m.warned) {
     // T5 : alerte à mi-chemin ; E4 : un guet saboté laisse passer l'armée sans alerte.
     const fog = !!victim && !victim.isLord && (victim.state.blindUntil ?? 0) > at;
@@ -3083,7 +3188,10 @@ async function settleMarches(
   if (!fight.ok) return commit(owner, replace(owner.state, turn("turned")));
   const rep = fight.value.report;
   const lootS2 = held && fief && rep.success ? fiefLoot(fief, held.companies, currentSeasonStart, at) : undefined;
-  if (fief) fight.value.victim = { ...fight.value.victim, lordS2: rep.success ? afterDefeat(fief, at) : fief };
+  // Vague B : une victoire fait du seigneur le vassal du vainqueur pour 24 h ; hostilité, rancune, sauf-conduit rompu.
+  const vassal = held && rep.success ? { owner: owner.id, alliance: owner.allianceId, until: at + VASSAL_MS } : undefined;
+  if (fief) fight.value.victim = { ...fight.value.victim, lordS2: rep.success ? afterDefeat(fief, at, vassal) : fief };
+  if (mapLord && fight.value.attacker.s2) fight.value.attacker = { ...fight.value.attacker, s2: afterLordAttack(fight.value.attacker.s2, s2Map()!, victim.id, at, rep.success) };
   const minus = (a: Army, lost: Army) => cleanArmy(Object.fromEntries((Object.entries(a) as [string, number][]).map(([id, n]) => [id, n - ((lost as Record<string, number>)[id] ?? 0)])) as Army);
   // R3 : chaque allié perd sa part ; ses survivants rentrent avec l'armée, son butin et ses blessés vont chez lui.
   const allyLost = rep.allyLost ?? {};
@@ -3118,6 +3226,7 @@ async function settleMarches(
   // L1 : renom du vainqueur (jamais entre alliés ni entre comptes d'une même adresse).
   const fair = !isAllied(owner, victim) && !sameIp(owner, victim);
   if (rep.success && !owner.isLord && fair) await grantRenown(admin, seasonId, owner, victim.isLord ? "lord" : "raid", `Victoire sur ${victim.name}`);
+  if (vassal) await grantRenown(admin, seasonId, owner, "vassal", `${victim.name} devient ton vassal`);
   if (!rep.success && !victim.isLord && fair) await grantRenown(admin, seasonId, victim, "defense", `${owner.name} repoussé`);
   if (!victim.isLord) {
     notify(admin, [victim.id], rep.success
@@ -3129,6 +3238,120 @@ async function settleMarches(
       ? { title: "⚔️ Raid réussi", body: lootS2 ? `Contre ${victim.name} : ${lootS2.pierre.toLocaleString("fr-FR")} pierres, ${lootS2.fer.toLocaleString("fr-FR")} fer et ${lootS2.or.toLocaleString("fr-FR")} or rapportés au retour.` : `Contre ${victim.name} : ${Math.floor(rep.stolen + rep.ransom).toLocaleString("fr-FR")} pierres rapportées au retour.`, tag: "raid" }
       : { title: "💀 Raid repoussé", body: `${victim.name} a tenu. Tes survivants rentrent.`, tag: "raid" });
   }
+  return "changed";
+}
+
+/** Vague B : or versé au fief d'un seigneur (sauf-conduit). Sans conséquence si un autre écrit en même temps. */
+async function giveToFief(admin: SupabaseClient, seasonId: number, entities: Map<string, Entity>, lordId: string, gold: number, now: number): Promise<void> {
+  const map = s2Map();
+  const lord = entities.get(lordId);
+  const ml = map?.lords.find((l) => l.id === lordId);
+  if (!map || !lord || !ml || gold <= 0) return;
+  const ls = settleFief(map, ml, cleanLordS2(lord.state.lordS2, now), currentSeasonStart, now);
+  await writeStates(admin, seasonId, [{ e: lord, state: { ...lord.state, lordS2: { ...ls, fief: { ...ls.fief, or: ls.fief.or + gold } } } }], "safe_gift", { lord: lordId, gold });
+}
+
+/** Vague B : arrivée d'un pillage de concession. Combat contre l'escorte de la route, s'il y en a une. */
+async function settlePillage(
+  admin: SupabaseClient,
+  seasonId: number,
+  owner: Entity,
+  m: March,
+  at: number,
+  entities: Map<string, Entity>,
+  world: WorldState,
+  flat: Map<string, number>,
+  replace: (state: PlayerState, next: March | null) => PlayerState,
+  commit: (e: Entity, state: PlayerState) => Promise<"changed" | "conflict">,
+): Promise<"changed" | "conflict"> {
+  const outMs = m.arriveAt - m.departAt;
+  const turn = { ...m, status: "back" as const, returnAt: m.arriveAt + outMs, outcome: "turned" as const };
+  const victim = entities.get(m.target);
+  const map = s2Map();
+  if (!victim || victim.isLord || !map || !m.conc) return commit(owner, replace(owner.state, turn));
+  const aState = advanceEntity(owner, at, world, flat);
+  let vState = advanceEntity(victim, at, world, flat);
+  const why = pillageBlocker(vState.s2, m.conc, at, { allied: isAllied(owner, victim), sameIp: sameIp(owner, victim) });
+  const c = vState.s2?.conc.find((x) => x.id === m.conc);
+  if (why || !c || !vState.s2) {
+    notify(admin, [owner.id], { title: "🏇 Pillage annulé", body: `${why ?? "La concession a disparu."} Ton armée rentre.`, tag: "march" });
+    return commit(owner, replace(owner.state, turn));
+  }
+  const site = map.sites[c.site];
+  const stagesDone = stagesDoneAt(world, at);
+  const escort = (vState.escorts ?? []).find((e) => e.conc === c.id && e.men > 0);
+  const company = escort ? vState.companies?.find((x) => x.id === escort.company) : undefined;
+  let won = true;
+  let lost: Army = {};
+  let foeLost: Army = {};
+  let chance = 1;
+  if (escort && company) {
+    const def = { army: { [company.unit]: escort.men } as Army, levels: companyLevels(vState, [company.id], { [company.id]: escort.men }), boost: escortBoost(vState, company.unit, stagesDone) };
+    const att = { army: m.troops, levels: combatLevels(aState), boost: regionBoost(aState, armyBoost(aState, "attack")) };
+    const f = routeFight(att, def, `pillage:${m.id}`);
+    won = f.won;
+    chance = f.chance;
+    lost = f.lost;
+    foeLost = f.foeLost;
+    const dead = (foeLost as Record<string, number>)[company.unit] ?? 0;
+    vState = addWounded({ ...vState, escorts: (vState.escorts ?? []).map((e) => (e === escort ? { ...e, men: Math.max(0, e.men - dead) } : e)).filter((e) => e.men > 0) }, woundedOf(foeLost, won ? WOUNDED_DEFENDER_BEATEN : WOUNDED_WINNER), at);
+  }
+  const loot = won ? pillageLoot(c, map, stagesDone) : null;
+  const res = concRes(map, c);
+  const lootS2 = { pierre: 0, fer: 0, or: 0 };
+  if (loot) {
+    lootS2[res] += loot.stock;
+    lootS2.pierre += loot.fund;
+    vState = { ...vState, s2: pillaged(vState.s2!, c.id, loot, at) };
+  }
+  const value = lootS2.pierre * VALUE.pierre + lootS2.fer * VALUE.fer + lootS2.or * VALUE.or;
+  const fmt = (n: number) => Math.round(n).toLocaleString("fr-FR");
+  const icons = { pierre: "🪨", fer: "⚔️", or: "🪙" } as const;
+  const what = (Object.entries(lootS2) as [keyof typeof icons, number][]).filter(([, n]) => n > 0).map(([k, n]) => `${fmt(n)} ${icons[k]}`).join(", ") || "rien";
+  const vText = won ? `⛏️ ${owner.name} a pillé ${site.name}${escort ? " malgré ton escorte" : ""} : −${what}.` : `🛡️ Ton escorte a repoussé ${owner.name} à ${site.name}.`;
+  vState = { ...vState, s2: { ...vState.s2!, log: [...(vState.s2!.log ?? []), { at, text: vText, cat: "combats" as const }].slice(-40) } };
+  const survivors = cleanArmy(Object.fromEntries((Object.entries(m.troops) as [string, number][]).map(([id, n]) => [id, n - ((lost as Record<string, number>)[id] ?? 0)])) as Army);
+  const healed = addWounded(aState, woundedOf(lost, won ? WOUNDED_WINNER : WOUNDED_ATTACKER_BEATEN), at);
+  const back: March = { ...m, troops: survivors, status: "back", returnAt: at + outMs, outcome: won ? "won" : "lost", ...(value > 0 ? { lootS2 } : {}) };
+  const attackerAfter = replace(healed, armySize(survivors) > 0 || value > 0 ? back : null);
+  const written = await writeStates(admin, seasonId, [{ e: owner, state: attackerAfter }, { e: victim, state: vState }], "pillage", { conc: c.id, success: won });
+  if (written === "conflict") return "conflict";
+  await addChronicle(admin, seasonId, { kind: "raid", actor_id: owner.id, target_id: victim.id, details: { success: won, chance, pillage: true, site: site.name, stolen: value, loot: lootS2, attackerLost: lost, defenderLost: foeLost } });
+  if (won && !isAllied(owner, victim) && !sameIp(owner, victim)) await grantRenown(admin, seasonId, owner, "pillage", `Pillage de ${site.name}`);
+  notify(admin, [victim.id], won ? { title: "⛏️ Concession pillée", body: vText.slice(3), tag: "raid" } : { title: "🛡️ Pillage repoussé", body: vText.slice(3), tag: "raid" });
+  notify(admin, [owner.id], won ? { title: "⛏️ Pillage réussi", body: `${site.name} : ${what} rapportés au retour.`, tag: "raid" } : { title: "💀 Pillage repoussé", body: `L'escorte de ${victim.name} a tenu à ${site.name}.`, tag: "raid" });
+  return "changed";
+}
+
+/** Vague B : arrivée d'une armée partie remplir un contrat. */
+async function settleContract(
+  admin: SupabaseClient,
+  seasonId: number,
+  owner: Entity,
+  m: March,
+  at: number,
+  world: WorldState,
+  flat: Map<string, number>,
+  replace: (state: PlayerState, next: March | null) => PlayerState,
+  commit: (e: Entity, state: PlayerState) => Promise<"changed" | "conflict">,
+): Promise<"changed" | "conflict"> {
+  const outMs = m.arriveAt - m.departAt;
+  const map = s2Map();
+  const k = m.contract;
+  if (!map || !k) return commit(owner, replace(owner.state, { ...m, status: "back", returnAt: m.arriveAt + outMs, outcome: "turned" }));
+  const aState = advanceEntity(owner, at, world, flat);
+  const foe = contractFoe({ id: m.target, lord: k.lord, kind: k.kind, rival: k.rival, pos: [0, 0], gold: k.gold }, map, currentSeasonStart, at);
+  const f = routeFight({ army: m.troops, levels: combatLevels(aState), boost: regionBoost(aState, armyBoost(aState, "attack")) }, foe, `contract:${m.id}`);
+  const survivors = cleanArmy(Object.fromEntries((Object.entries(m.troops) as [string, number][]).map(([id, n]) => [id, n - ((f.lost as Record<string, number>)[id] ?? 0)])) as Army);
+  let healed = addWounded(aState, woundedOf(f.lost, f.won ? WOUNDED_WINNER : WOUNDED_ATTACKER_BEATEN), at);
+  const rival = k.rival ? map.lords.find((l) => l.id === k.rival) : undefined;
+  if (k.kind === "interception" && rival && healed.s2) healed = { ...healed, s2: withHostility(healed.s2, map, rival, HOSTILITY.intercept, at) };
+  const back: March = { ...m, troops: survivors, status: "back", returnAt: at + outMs, outcome: f.won ? "won" : "lost", ...(f.won ? { lootS2: { pierre: 0, fer: 0, or: k.gold } } : {}) };
+  const r = await commit(owner, replace(healed, armySize(survivors) > 0 || f.won ? back : null));
+  if (r === "conflict") return r;
+  const lordName = LORD_BY_ID.get(k.lord)?.name ?? k.lord;
+  if (f.won) await grantRenown(admin, seasonId, owner, "contract", `Contrat de ${lordName}`);
+  notify(admin, [owner.id], f.won ? { title: "📜 Contrat rempli", body: `${lordName} te doit ${k.gold.toLocaleString("fr-FR")} or, versés au retour de ton armée.`, tag: "march" } : { title: "📜 Contrat manqué", body: `Ton armée a été repoussée. Les survivants rentrent.`, tag: "march" });
   return "changed";
 }
 
@@ -3210,7 +3433,7 @@ async function travelBetween(admin: SupabaseClient, seasonId: number, entities: 
 function incomingFor(meId: string, entities: Map<string, Entity>, now: number): IncomingView[] {
   return [...entities.values()].flatMap((e) =>
     (e.state.marches ?? [])
-      .filter((m) => m.kind === "raid" && m.target === meId && m.status === "out" && m.warned && !m.hidden && m.arriveAt > now)
+      .filter((m) => (m.kind === "raid" || m.kind === "pillage") && m.target === meId && m.status === "out" && m.warned && !m.hidden && m.arriveAt > now)
       .map((m) => ({ id: m.id, arriveAt: m.arriveAt, from: m.revealed ? e.name : null, ...(wingLevel(entities.get(meId)?.state.hall, "guet") >= 3 || lin(entities.get(meId)?.state, "informateurs") ? { troops: m.troops } : {}) })),
   );
 }

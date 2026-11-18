@@ -46,6 +46,8 @@ describe("S2 : parcours d'un joueur", () => {
   });
 
   it("les convois rapportent de la pierre et un peu d'or", () => {
+    // Sauf-conduits chez tous les seigneurs : aucune patrouille, la comparaison avec settleS2 reste exacte.
+    p = { ...p, s2: { ...p.s2!, safe: Object.fromEntries(map.lords.map((l) => [l.id, T0 + 999 * H])) } };
     const after = advance(p, T0 + 6 * H, world);
     expect(after.stone).toBeGreaterThan(0);
     expect(after.s2!.gold).toBeGreaterThan(0);

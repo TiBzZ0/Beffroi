@@ -122,6 +122,8 @@ export interface Concession {
   warned?: boolean;
   /** Réserve de chantier, en valeur pierre : ce que le château lui a envoyé, pour ses améliorations. */
   fund?: number;
+  /** Vague B : dernier pillage par un joueur (une fois toutes les 6 h par concession). */
+  raidedAt?: number;
 }
 export type ConcBuildingId = "atelier" | "ecurie" | "grenier";
 export const CONC_BUILDINGS: Record<ConcBuildingId, { name: string; icon: string; per: number; text: string }> = {
@@ -167,6 +169,17 @@ export interface Convoy {
   to: Pos;
   /** Convoi parti vers le beffroi (sa charge compte comme un don à l'arrivée), ou du château vers la concession `conc` (sa réserve). */
   dest?: "beffroi" | "concession";
+  /** Vague B : charge déjà perdue en route (règle du tiers : jamais plus d'un tiers de la charge de départ). */
+  lost?: number;
+}
+/** Une ligne de la boîte de rapports ; `key` regroupe les lignes d'une même heure (patrouilles). */
+export interface S2Log {
+  at: number;
+  text: string;
+  cat?: "combats";
+  key?: string;
+  sum?: number;
+  n?: number;
 }
 export interface S2Work {
   id: BuildingId;
@@ -192,8 +205,22 @@ export interface S2State {
   giftOwed?: number;
   /** Lancement : production et charge ×LAUNCH_MULT jusqu'à cet instant (24 h après la pose du château). */
   launchUntil?: number;
-  /** Ce qui s'est passé sur les concessions (brigands), pour la boîte de réception. */
-  log?: { at: number; text: string }[];
+  /** Ce qui s'est passé sur les concessions et les routes (brigands, patrouilles, pillages), pour la boîte de réception. */
+  log?: S2Log[];
+  /** Vague B : hostilité de chaque seigneur envers le joueur (valeur à l'instant `at`). */
+  host?: Record<string, { v: number; at: number }>;
+  /** Sauf-conduits payés : seigneur → fin du passage libre. */
+  safe?: Record<string, number>;
+  /** Rancunes : expéditions promises contre un convoi du joueur, à partir de `due`. */
+  grudge?: { lord: string; due: number }[];
+  /** Dernière expédition de chaque seigneur hostile (rythme des expéditions). */
+  expAt?: Record<string, number>;
+  /** Seigneurs dont le joueur est le suzerain : seigneur → fin de la vassalité. */
+  vassals?: Record<string, number>;
+  /** Contrats déjà pris aujourd'hui. */
+  contracts?: { day: number; taken: string[] };
+  /** Fixé par le serveur à chaque lecture, jamais lu de la base : qui est le joueur, et son alliance. */
+  who?: { id: string; alliance: number | null };
   /** S10, Lignée (fixés à chaque calcul, jamais lus de la base) : Cave profonde, heures de stock local en plus. */
   stockBonusHours?: number;
   /** Charpentiers : convois plus rapides (part). */
@@ -219,6 +246,12 @@ export interface S2Context {
   belfryDone?: boolean;
   /** Pas de brigands avant cet instant (48 h après l'arrivée du joueur). */
   banditsFrom?: number;
+  /** Vague B : risques de la route d'un convoi, réglés à son arrivée ; renvoie la charge perdue. Peut écrire dans `st`. */
+  risk?: (st: S2State, v: Convoy) => number;
+  /** Vague B : l'escorte de la concession défend contre les brigands ; vrai si elle les repousse. */
+  guard?: (st: S2State, c: Concession, at: number) => boolean;
+  /** Vague B : convois en plus partis entre `from` et `to` (tribut des vassaux). */
+  extra?: (st: S2State, from: number, to: number) => void;
 }
 
 /**
@@ -337,7 +370,9 @@ export function settleS2(s: S2State, ctx: S2Context, now: number): { s: S2State;
         if (c.banditAt !== undefined && c.banditAt < c.next) {
           const at = c.banditAt;
           grow(Math.max(at, t));
-          if (c.pace !== "prudent" && at >= (ctx.banditsFrom ?? 0) && c.stock >= BANDIT_HIGH * cap - 1e-6 && roll(c.id, at) < BANDIT_CHANCE) {
+          if (c.pace !== "prudent" && at >= (ctx.banditsFrom ?? 0) && c.stock >= BANDIT_HIGH * cap - 1e-6 && roll(c.id, at) < BANDIT_CHANCE && ctx.guard?.(st, c, at)) {
+            log(st, at, `🛡️ Brigands repoussés à ${name} par l'escorte.`);
+          } else if (c.pace !== "prudent" && at >= (ctx.banditsFrom ?? 0) && c.stock >= BANDIT_HIGH * cap - 1e-6 && roll(c.id, at) < BANDIT_CHANCE) {
             const stolen = c.stock * BANDIT_SHARE;
             c.stock -= stolen;
             log(st, at, `🗡️ Brigands à ${name} : −${Math.round(stolen).toLocaleString("fr-FR")} ${site.type}.`);
@@ -378,10 +413,17 @@ export function settleS2(s: S2State, ctx: S2Context, now: number): { s: S2State;
     st.works = st.works.filter((w) => w.until > end);
     cursor = end;
   }
-  // Arrivées.
+  // Vague B : tribut des vassaux, en convois.
+  ctx.extra?.(st, s.at, now);
+  // Arrivées, dans l'ordre : les risques de la route se règlent à l'arrivée (patrouilles, expéditions).
   const still: Convoy[] = [];
   let produced = 0;
-  for (const v of st.convoys) {
+  for (const v0 of [...st.convoys].sort((a, b) => a.arrive - b.arrive)) {
+    let v = v0;
+    if (v.arrive <= now && ctx.risk) {
+      const lost = ctx.risk(st, v);
+      if (lost > 0) v = { ...v, load: Math.max(0, v.load - lost), lost: (v.lost ?? 0) + lost };
+    }
     if (v.arrive <= now) {
       if (v.dest === "concession") {
         // Ravitaillement : la réserve de la concession grossit, rien n'arrive au château.
@@ -485,7 +527,7 @@ export const BANDIT_SHARE = 0.2;
 export const BANDIT_EVERY_MS = 3_600_000;
 /** Pas de brigands pendant les 48 premières heures d'un joueur. */
 export const BANDIT_GRACE_MS = 48 * 3_600_000;
-const LOG_MAX = 30;
+const LOG_MAX = 40;
 function roll(id: string, at: number): number {
   let h = 2166136261 ^ Math.floor(at / 1000);
   for (let i = 0; i < id.length; i++) h = Math.imul(h ^ id.charCodeAt(i), 16777619);
@@ -494,6 +536,25 @@ function roll(id: string, at: number): number {
 }
 function log(st: S2State, at: number, text: string) {
   st.log = [...(st.log ?? []), { at: Math.round(at), text }].slice(-LOG_MAX);
+}
+/**
+ * Ajoute une ligne de rapport. Avec `key`, la ligne de même clé est remplacée : `amount` s'ajoute à sa somme,
+ * et `render(somme, nombre)` refait son texte (rapports de patrouille regroupés par heure).
+ */
+export function pushLog(st: S2State, at: number, text: string, opts: { cat?: "combats"; key?: string; amount?: number; render?: (sum: number, n: number) => string } = {}): void {
+  const list = [...(st.log ?? [])];
+  const i = opts.key ? list.findIndex((l) => l.key === opts.key) : -1;
+  if (i >= 0) {
+    const old = list[i];
+    const sum = (old.sum ?? 0) + (opts.amount ?? 0);
+    const n = (old.n ?? 1) + 1;
+    list[i] = { ...old, at: Math.round(at), sum, n, text: opts.render ? opts.render(sum, n) : text };
+  } else list.push({ at: Math.round(at), text: opts.render ? opts.render(opts.amount ?? 0, 1) : text, ...(opts.cat ? { cat: opts.cat } : {}), ...(opts.key ? { key: opts.key, sum: opts.amount ?? 0, n: 1 } : {}) });
+  st.log = list.slice(-LOG_MAX);
+}
+/** Tirage reproductible entre 0 et 1, d'après une clé et un instant. */
+export function rollAt(key: string, at: number): number {
+  return roll(key, at);
 }
 
 export function setConcession(s: S2State, id: string, pace: unknown, dest: unknown, manual?: unknown): R<S2State> {
@@ -677,6 +738,28 @@ const pos = (v: unknown): Pos | null => (Array.isArray(v) && v.length === 2 && v
 const RES: Resource[] = ["pierre", "fer", "or"];
 const REGION_IDS: RegionId[] = ["froid", "montagne", "plaine", "collines", "desert", "cote", "foret"];
 
+/** Vague B : hostilité, sauf-conduits, rancunes, expéditions et vassaux (clés limitées aux identifiants courts). */
+function cleanRelations(r: Record<string, unknown>): Pick<S2State, "host" | "safe" | "grudge" | "expAt" | "vassals" | "contracts"> {
+  const out: Pick<S2State, "host" | "safe" | "grudge" | "expAt" | "vassals" | "contracts"> = {};
+  const rec = (v: unknown) => (v && typeof v === "object" && !Array.isArray(v) ? Object.entries(v as Record<string, unknown>).slice(0, 40) : []);
+  const host = rec(r.host).flatMap(([k, v]) => {
+    const x = (v ?? {}) as { v?: unknown; at?: unknown };
+    return num(x.v) > 0 ? [[k, { v: Math.min(100, num(x.v)), at: num(x.at) }] as const] : [];
+  });
+  if (host.length) out.host = Object.fromEntries(host);
+  for (const key of ["safe", "expAt", "vassals"] as const) {
+    const list = rec(r[key]).filter(([, v]) => num(v) > 0).map(([k, v]) => [k, num(v)] as const);
+    if (list.length) out[key] = Object.fromEntries(list);
+  }
+  const k = r.contracts as { day?: unknown; taken?: unknown } | undefined;
+  if (k && Number.isInteger(Number(k.day)) && Array.isArray(k.taken)) out.contracts = { day: Number(k.day), taken: (k.taken as unknown[]).map(String).slice(-10) };
+  if (Array.isArray(r.grudge)) {
+    const g = (r.grudge as { lord?: unknown; due?: unknown }[]).filter((x) => x && typeof x.lord === "string").slice(0, 10).map((x) => ({ lord: String(x.lord), due: num(x.due) }));
+    if (g.length) out.grudge = g;
+  }
+  return out;
+}
+
 export function cleanS2(raw: unknown, now: number): S2State {
   const r = (raw ?? {}) as Record<string, unknown>;
   const base = newS2State(now);
@@ -692,13 +775,13 @@ export function cleanS2(raw: unknown, now: number): S2State {
       .slice(0, CONCESSIONS_MAX)
       .map((c) => {
         const x = c as Record<string, unknown>;
-        return { id: String(x.id), site: Math.floor(num(x.site)), level: Math.min(CONCESSION_MAX_LEVEL, Math.max(1, Math.floor(num(x.level, 1)))), stock: num(x.stock), next: num(x.next) || now, ...(num(x.upUntil) > 0 ? { upUntil: num(x.upUntil) } : {}), ...(x.pace === "prudent" || x.pace === "intensif" ? { pace: x.pace } : {}), ...(x.dest === "beffroi" ? { dest: "beffroi" as const } : {}), ...(num(x.fund) > 0 ? { fund: num(x.fund) } : {}), ...(typeof x.destConc === "string" ? { destConc: x.destConc } : {}), ...(num(x.banditAt) > 0 ? { banditAt: num(x.banditAt) } : {}), ...(x.warned === true ? { warned: true } : {}), ...(x.manual === true ? { manual: true } : {}), ...cleanCb(x.cb, x.cwork) };
+        return { id: String(x.id), site: Math.floor(num(x.site)), level: Math.min(CONCESSION_MAX_LEVEL, Math.max(1, Math.floor(num(x.level, 1)))), stock: num(x.stock), next: num(x.next) || now, ...(num(x.upUntil) > 0 ? { upUntil: num(x.upUntil) } : {}), ...(x.pace === "prudent" || x.pace === "intensif" ? { pace: x.pace } : {}), ...(x.dest === "beffroi" ? { dest: "beffroi" as const } : {}), ...(num(x.fund) > 0 ? { fund: num(x.fund) } : {}), ...(typeof x.destConc === "string" ? { destConc: x.destConc } : {}), ...(num(x.banditAt) > 0 ? { banditAt: num(x.banditAt) } : {}), ...(x.warned === true ? { warned: true } : {}), ...(x.manual === true ? { manual: true } : {}), ...(num(x.raidedAt) > 0 ? { raidedAt: num(x.raidedAt) } : {}), ...cleanCb(x.cb, x.cwork) };
       }),
     convoys: (Array.isArray(r.convoys) ? r.convoys : [])
       .filter((v) => v && typeof v === "object" && RES.includes((v as Convoy).res))
       .map((v) => {
         const x = v as Record<string, unknown>;
-        return { conc: String(x.conc), res: x.res as Resource, load: num(x.load), depart: num(x.depart), arrive: num(x.arrive), from: pos(x.from) ?? [0, 0], to: pos(x.to) ?? [0, 0], ...(x.dest === "beffroi" || x.dest === "concession" ? { dest: x.dest } : {}) };
+        return { conc: String(x.conc), res: x.res as Resource, load: num(x.load), depart: num(x.depart), arrive: num(x.arrive), from: pos(x.from) ?? [0, 0], to: pos(x.to) ?? [0, 0], ...(x.dest === "beffroi" || x.dest === "concession" ? { dest: x.dest } : {}), ...(num(x.lost) > 0 ? { lost: num(x.lost) } : {}) };
       }),
     bld: Object.fromEntries(BUILDING_IDS.map((id) => [id, Math.min(BUILDING_MAX, Math.floor(num(bld[id])))])) as Record<BuildingId, number>,
     works: (Array.isArray(r.works) ? r.works : [])
@@ -710,6 +793,7 @@ export function cleanS2(raw: unknown, now: number): S2State {
     produced: num(r.produced),
     ...(num(r.giftOwed) > 0 ? { giftOwed: num(r.giftOwed) } : {}),
     ...(num(r.launchUntil) > 0 ? { launchUntil: num(r.launchUntil) } : {}),
-    ...(Array.isArray(r.log) ? { log: (r.log as { at?: unknown; text?: unknown }[]).filter((l) => l && typeof l.text === "string").slice(-LOG_MAX).map((l) => ({ at: num(l.at), text: String(l.text).slice(0, 200) })) } : {}),
+    ...(Array.isArray(r.log) ? { log: (r.log as Record<string, unknown>[]).filter((l) => l && typeof l.text === "string").slice(-LOG_MAX).map((l) => ({ at: num(l.at), text: String(l.text).slice(0, 200), ...(l.cat === "combats" ? { cat: "combats" as const } : {}), ...(typeof l.key === "string" ? { key: l.key.slice(0, 80), sum: num(l.sum), n: Math.max(1, Math.floor(num(l.n, 1))) } : {}) })) } : {}),
+    ...cleanRelations(r),
   };
 }

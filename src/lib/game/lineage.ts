@@ -4,7 +4,7 @@
 
 import { s2GeometryOn } from "./config";
 
-export type RenownSource = "raid" | "defense" | "lord" | "recon" | "quest" | "event" | "podium" | "stage" | "gift" | "rift";
+export type RenownSource = "raid" | "defense" | "lord" | "recon" | "quest" | "event" | "podium" | "stage" | "gift" | "rift" | "pillage" | "vassal" | "contract";
 
 /** Renom par action, et limite par jour (heure de Paris). */
 export const RENOWN: Record<RenownSource, { amount: number; cap?: number; label: string; icon: string }> = {
@@ -18,9 +18,12 @@ export const RENOWN: Record<RenownSource, { amount: number; cap?: number; label:
   stage: { amount: 10, label: "Étapes", icon: "🏗️" },
   gift: { amount: 20, label: "Offert", icon: "🎁" },
   rift: { amount: 1, label: "Faille", icon: "🌀" },
+  pillage: { amount: 1, cap: 4, label: "Pillages de concession", icon: "⛏️" },
+  vassal: { amount: 3, label: "Vassaux", icon: "👑" },
+  contract: { amount: 3, label: "Contrats", icon: "📜" },
 };
 /** Sources affichées en jauges (celles qui ont une limite par jour). */
-export const RENOWN_CAPPED: RenownSource[] = ["raid", "defense", "lord", "recon"];
+export const RENOWN_CAPPED: RenownSource[] = ["pillage", "lord", "recon"];
 
 /** Pour l'essai de la saison 0 : 20 renom offerts, une fois. */
 export const RENOWN_GIFT_SEASON = 0;
