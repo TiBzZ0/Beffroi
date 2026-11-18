@@ -637,4 +637,16 @@ export const CHANGELOG: ChangeEntry[] = [
       "⚡ Les boutons répondent tout de suite : le serveur parle à sa base en direct et les actions s'affichent avant sa réponse.",
     ],
   },
+  {
+    id: 73,
+    date: "18 novembre",
+    minSeason: 2,
+    items: [
+      "📅 Quêtes du jour refaites pour la saison 2 : améliorer une concession ou un bâtiment, passer au marché, envoyer un convoi, vaincre un seigneur, participer au colosse ou au tournoi…",
+      "🌍 Régions : le froid donne +10 % de points de vie à tes troupes au combat, le désert +10 % d'or sur chaque convoi arrivé.",
+      "🏆 Classements : « Pillards » et « Meilleurs défenseurs » laissent la place à « Seigneurs vaincus » et « Plus grand domaine ». Les anciens podiums restent au Panthéon.",
+      "🧱 Plus de fortifications en saison 2 : personne n'attaque ton château.",
+      "🧹 Événements de la saison 1 retirés (marchand, caravane, siège, brume, fête…) : il reste le colosse, payé en fer, et le tournoi.",
+    ],
+  },
 ];
