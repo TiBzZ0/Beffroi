@@ -25,6 +25,8 @@ export interface LordS2State {
   at: number;
   /** Dernière défaite de la garnison (0 : jamais). */
   beatenAt: number;
+  /** Vague B : or des sauf-conduits, gardé à part (au-delà du plafond du fief). */
+  gifts?: number;
   /** Vague B : suzerain pendant 24 h après une défaite. */
   vassal?: { owner: string; alliance: number | null; until: number };
 }
@@ -118,13 +120,13 @@ export function fiefLoot(ls: LordS2State, companiesBeaten: number, seasonStart: 
   return {
     pierre: Math.floor(ls.fief.pierre * FIEF_LOOT_SHARE),
     fer: Math.floor(ls.fief.fer * FIEF_LOOT_SHARE + iron),
-    or: Math.floor(ls.fief.or * FIEF_LOOT_SHARE),
+    or: Math.floor((ls.fief.or + (ls.gifts ?? 0)) * FIEF_LOOT_SHARE),
   };
 }
 
 /** Après une victoire : le fief perd sa part, la garnison se reforme à partir de maintenant. */
 export function afterDefeat(ls: LordS2State, now: number, vassal?: LordS2State["vassal"]): LordS2State {
-  return { fief: { pierre: ls.fief.pierre * (1 - FIEF_LOOT_SHARE), fer: ls.fief.fer * (1 - FIEF_LOOT_SHARE), or: ls.fief.or * (1 - FIEF_LOOT_SHARE) }, at: ls.at, beatenAt: now, ...(vassal ? { vassal } : ls.vassal ? { vassal: ls.vassal } : {}) };
+  return { fief: { pierre: ls.fief.pierre * (1 - FIEF_LOOT_SHARE), fer: ls.fief.fer * (1 - FIEF_LOOT_SHARE), or: ls.fief.or * (1 - FIEF_LOOT_SHARE) }, at: ls.at, beatenAt: now, ...(ls.gifts ? { gifts: ls.gifts * (1 - FIEF_LOOT_SHARE) } : {}), ...(vassal ? { vassal } : ls.vassal ? { vassal: ls.vassal } : {}) };
 }
 
 export function cleanLordS2(raw: unknown, now: number): LordS2State {
@@ -133,7 +135,7 @@ export function cleanLordS2(raw: unknown, now: number): LordS2State {
   const f = (r.fief ?? {}) as Partial<Arrivals>;
   const v = r.vassal as { owner?: unknown; alliance?: unknown; until?: unknown } | undefined;
   const vassal = v && typeof v.owner === "string" && num(v.until) > 0 ? { owner: v.owner, alliance: v.alliance === null || v.alliance === undefined ? null : Number(v.alliance), until: num(v.until) } : undefined;
-  return { fief: { pierre: num(f.pierre), fer: num(f.fer), or: num(f.or) }, at: num(r.at) || now, beatenAt: num(r.beatenAt), ...(vassal ? { vassal } : {}) };
+  return { fief: { pierre: num(f.pierre), fer: num(f.fer), or: num(f.or) }, at: num(r.at) || now, beatenAt: num(r.beatenAt), ...(num(r.gifts) > 0 ? { gifts: num(r.gifts) } : {}), ...(vassal ? { vassal } : {}) };
 }
 
 /** Garnison telle que le joueur la voit sur la carte (compagnies présentes, entraînement) : pour estimer un combat côté navigateur. */

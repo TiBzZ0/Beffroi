@@ -2155,7 +2155,7 @@ function s2WorldView(entities: Map<string, Entity>, meId: string, now: number): 
       home,
       patrol: patrolUnit(l.id, l.rank),
       train: lordTrain(l.rank, currentSeasonStart, now),
-      fief: Math.floor(ls.fief.pierre * VALUE.pierre + ls.fief.fer * VALUE.fer + ls.fief.or * VALUE.or),
+      fief: Math.floor(ls.fief.pierre * VALUE.pierre + ls.fief.fer * VALUE.fer + (ls.fief.or + (ls.gifts ?? 0)) * VALUE.or),
       reformAt: home < l.companies ? ls.beatenAt + REFORM_MS : 0,
       ...(ls.vassal && ls.vassal.until > now ? { vassal: { ...ls.vassal, name: entities.get(ls.vassal.owner)?.name ?? "?" } } : {}),
     };
@@ -3248,7 +3248,7 @@ async function giveToFief(admin: SupabaseClient, seasonId: number, entities: Map
   const ml = map?.lords.find((l) => l.id === lordId);
   if (!map || !lord || !ml || gold <= 0) return;
   const ls = settleFief(map, ml, cleanLordS2(lord.state.lordS2, now), currentSeasonStart, now);
-  await writeStates(admin, seasonId, [{ e: lord, state: { ...lord.state, lordS2: { ...ls, fief: { ...ls.fief, or: ls.fief.or + gold } } } }], "safe_gift", { lord: lordId, gold });
+  await writeStates(admin, seasonId, [{ e: lord, state: { ...lord.state, lordS2: { ...ls, gifts: (ls.gifts ?? 0) + gold } } }], "safe_gift", { lord: lordId, gold });
 }
 
 /** Vague B : arrivée d'un pillage de concession. Combat contre l'escorte de la route, s'il y en a une. */
@@ -3346,10 +3346,16 @@ async function settleContract(
   let healed = addWounded(aState, woundedOf(f.lost, f.won ? WOUNDED_WINNER : WOUNDED_ATTACKER_BEATEN), at);
   const rival = k.rival ? map.lords.find((l) => l.id === k.rival) : undefined;
   if (k.kind === "interception" && rival && healed.s2) healed = { ...healed, s2: withHostility(healed.s2, map, rival, HOSTILITY.intercept, at) };
+  const lordName = LORD_BY_ID.get(k.lord)?.name ?? k.lord;
+  // Le rapport du contrat, gagné ou perdu, reste dans la boîte du joueur.
+  const dead = armySize(f.lost);
+  const text = f.won
+    ? `📜 Contrat de ${lordName} rempli : 🪙 ${k.gold.toLocaleString("fr-FR")} au retour de ton armée${dead > 0 ? `, ${dead} hommes perdus` : ""}.`
+    : `📜 Contrat de ${lordName} manqué (${Math.round(f.chance * 100)} % de chance) : ${dead} hommes perdus${armySize(survivors) > 0 ? ", les survivants rentrent" : ""}.`;
+  if (healed.s2) healed = { ...healed, s2: { ...healed.s2, log: [...(healed.s2.log ?? []), { at, text, cat: "combats" as const }].slice(-40) } };
   const back: March = { ...m, troops: survivors, status: "back", returnAt: at + outMs, outcome: f.won ? "won" : "lost", ...(f.won ? { lootS2: { pierre: 0, fer: 0, or: k.gold } } : {}) };
   const r = await commit(owner, replace(healed, armySize(survivors) > 0 || f.won ? back : null));
   if (r === "conflict") return r;
-  const lordName = LORD_BY_ID.get(k.lord)?.name ?? k.lord;
   if (f.won) await grantRenown(admin, seasonId, owner, "contract", `Contrat de ${lordName}`);
   notify(admin, [owner.id], f.won ? { title: "📜 Contrat rempli", body: `${lordName} te doit ${k.gold.toLocaleString("fr-FR")} or, versés au retour de ton armée.`, tag: "march" } : { title: "📜 Contrat manqué", body: `Ton armée a été repoussée. Les survivants rentrent.`, tag: "march" });
   return "changed";

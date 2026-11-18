@@ -420,6 +420,7 @@ function Contracts({ snap, live, now, busy, act }: { snap: GameSnapshot; live: P
   const list = contractsFor(live.s2!, map, snap.userId, dailyDay(now), live.seasonStart || now, now);
   const mine = attackArmy(live);
   const name = (id: string) => snap.s2!.lords.find((l) => l.id === id)?.name ?? id;
+  const [sure, setSure] = useState<string | null>(null);
   return (
     <div className="s2-panel s2-contracts">
       <div className="row-title">📜 Contrats du jour</div>
@@ -440,9 +441,16 @@ function Contracts({ snap, live, now, busy, act }: { snap: GameSnapshot; live: P
                   {t.text} Récompense : 🪙 {formatNumber(c.gold)} et 🎖️ 3. À {live.s2?.castle ? cheb(live.s2.castle, c.pos) : "?"} cases.
                   {armySize(mine) > 0 ? ` Chance avec toutes tes troupes au château : ${Math.round(chance * 100)} %.` : ""}
                 </div>
-                <button className="btn btn-small btn-primary" disabled={busy || armySize(mine) === 0} title={armySize(mine) === 0 ? "Aucune troupe au château." : undefined} onClick={() => void act({ type: "contract", id: c.id })}>
-                  Accepter
-                </button>
+                {chance < 0.6 && sure !== c.id ? (
+                  <button className="btn btn-small" disabled={busy || armySize(mine) === 0} title={armySize(mine) === 0 ? "Aucune troupe au château." : undefined} onClick={() => setSure(c.id)}>
+                    Accepter…
+                  </button>
+                ) : (
+                  <button className="btn btn-small btn-primary" disabled={busy || armySize(mine) === 0} onClick={() => void act({ type: "contract", id: c.id })}>
+                    {chance < 0.6 ? `Accepter quand même (${Math.round(chance * 100)} %)` : "Accepter"}
+                  </button>
+                )}
+                {chance < 0.6 && sure === c.id && <div className="row-desc">Une défaite coûte des hommes : renforce ton armée avant de partir.</div>}
               </li>
             );
           })}
