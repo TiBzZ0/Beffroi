@@ -60,7 +60,7 @@ describe("halle de guilde", () => {
     const base = newPlayerState(0);
     const world = { stageCompletedAt: [] };
     expect(productionMultiplier(s, world, 0) / productionMultiplier(base, world, 0)).toBeCloseTo(1.1);
-    expect(extraSecured(s, 0) - extraSecured(base, 0)).toBe(1800);
+    expect(extraSecured(s) - extraSecured(base)).toBe(1800);
     expect(armySpeedBonus(s)).toBeCloseTo(0.3);
     expect(armySpeedBonus(s, true)).toBeCloseTo(0.5);
     expect(travelMs({ piquier: 10 }, 8, 0.3)).toBeLessThan(travelMs({ piquier: 10 }, 8));

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { armyForChance, battle, estimateChance, seededRng } from "./battle";
+import { battle, estimateChance, seededRng } from "./battle";
 import { academyCost, advance, applySabotage, buyAcademy, newPlayerState, researchCost, researchTime, sabotageBlocker, startResearch } from "./engine";
 
 const world = { stageCompletedAt: [] };
@@ -63,15 +63,6 @@ describe("améliorations militaires", () => {
   });
 });
 
-describe("seigneurs attaquants", () => {
-  it("l'armée vise une chance d'environ un tiers contre la défense de la cible", () => {
-    const defense = { piquier: 300, arbaletrier: 200, tour: 50, palissade: 100, garde: 3 };
-    const army = armyForChance({ chevalier: 10, milicien: 30 }, defense, 1 / 3);
-    const chance = estimateChance(army, defense);
-    expect(chance).toBeGreaterThan(0.1);
-    expect(chance).toBeLessThan(0.6);
-  });
-});
 
 describe("rapport de bataille (B7)", () => {
   it("détaille chaque round et retombe sur les pertes totales", () => {

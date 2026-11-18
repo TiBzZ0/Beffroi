@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { buyArmy, newPlayerState, sendTroops, type PlayerState } from "./engine";
+import { newPlayerState, sendTroops, type PlayerState } from "./engine";
 import { allocation, buildFort, companyEta, combatLevels, createCompany, lockedMen, recruit, settleArmy, startTraining, trainMs, COMPANY_CAP, RECRUIT_MS } from "./companies";
 
 const T0 = Date.parse("2026-11-24T10:00:00Z");
@@ -13,8 +13,6 @@ describe("Compagnies", () => {
   it("rien ne s'active hors du modèle (saison 0)", () => {
     const s0 = { ...newPlayerState(T0), stone: 1e6 };
     expect(createCompany(s0, "piquier", T0).ok).toBe(false);
-    expect(buyArmy(s0, "unit", "piquier", 1).ok).toBe(true);
-    expect(buyArmy(model(), "unit", "piquier", 1).ok).toBe(false);
     expect(settleArmy(s0, T0 + 1e9)).toBe(s0);
   });
 

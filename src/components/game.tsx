@@ -1,30 +1,25 @@
 "use client";
 
 import { createContext, useContext, useEffect, useId, useRef, useState } from "react";
-import { s2Enabled, setS2Map } from "@/lib/game/s2/rules";
+import { setS2Map } from "@/lib/game/s2/rules";
 import { S2MapScreen } from "@/components/s2-map";
 import { placeOf, S2Domain, S2Lands, S2ResourceBar, type Place } from "@/components/s2-domain";
 import { S2Guide, S2Tutorial } from "@/components/s2-tutorial";
 import { setIronArmy } from "@/lib/game/companies";
-import { LAUNCH_MULT } from "@/lib/game/s2/economy";
 import { RANKS } from "@/lib/game/s2/map";
+import { VALUE } from "@/lib/game/s2/economy";
 import { signOut } from "@/app/(auth)/actions";
 import {
   setSeasonRules,
   setS2Geometry,
-  CATEGORY_LABELS,
   MAX_ALLIANCE_SIZE,
   HALL,
+  HALL_ALL,
   ONLINE_MS,
-  DIFFICULTY_LABELS,
   COMBATANTS,
   LEVEL_BONUS,
-  ELAN_MAX_MS,
   UNIT_SPEED,
   SPY_INTEL_MS,
-  TRIBUTE_MAX_SECONDS,
-  TRIBUTE_RECHARGE,
-  ELAN_PER_CLICK_MS,
   MAX_TITHE,
   ADVISED_TITHE,
   DONOR_TIER_ECUS,
@@ -33,72 +28,36 @@ import {
   LOT_ECUS,
   MASTER_BONUSES,
   type MasterBonusKind,
-  QUESTS,
-  questDef,
-  VEIN_VISIBLE_MS,
   ACADEMY_SPEED,
   RESEARCH_QUEUE_MAX,
   RESEARCH_REFUND,
-  DEFENSES,
-  GENERATORS,
   STAGES,
   LEGACY,
   TOTAL_STAGES,
   stageDef,
   embellishmentOf,
   UNITS,
-  UPGRADES,
   SPY_LEVEL_MAX,
   WINGS,
-  type Category,
   type CombatantDef,
   type CombatantId,
-  type GeneratorId,
   type HallUnit,
-  REVENGE_ATTACK_BONUS,
   MAP_SPAWN_RADIUS,
-  MAX_MARCHES,
-  MERCHANT_OFFERS,
-  type MerchantChoice,
   mapDistance,
 } from "@/lib/game/config";
 import {
-  armyPrice,
   donorThresholds,
-  elanMaxMs,
-  playerAttackOpts,
   advance,
-  inCurfew,
-  stagePerk,
-  productionPerSecond,
-  questProgress,
-  armyWorth,
-  clickValue,
-  generatorCost,
-  generatorRate,
-  tributeLeft,
   spyRisk,
   spyTravelMs,
   armySpeedBonus,
-  masteryBonus,
-  nextTiers,
-  lootOf,
   spyCost,
   academyCost,
   levelOf,
-  elanBonus,
   queuedLevel,
   researchCost,
   researchTime,
-  maxAffordable,
-  owned,
-  productionMultiplier,
-  rateAt,
-  ruinCost,
-  ruinsOf,
   stagesDoneAt,
-  upgradeCost,
-  upgradeUnlocked,
   travelMs,
   counterCost,
   spyBase,
@@ -109,23 +68,22 @@ import {
   INBOX_CATEGORIES,
   type InboxCategory,
 } from "@/lib/game/engine";
-import { formatNumber, formatRate } from "@/lib/game/format";
-import { armySize, armyValue, battle, cleanArmy, estimateChance, seededRng, type Army } from "@/lib/game/battle";
-import { worldFrom, type AwaySummary, type LotView, type AllianceSummary, type ChronicleEntry, type EventView, type GameSnapshot, type RivalView } from "@/lib/game/types";
+import { formatNumber } from "@/lib/game/format";
+import { armySize, armyValue, cleanArmy, type Army } from "@/lib/game/battle";
+import { worldFrom, type GameAction, type AwaySummary, type LotView, type AllianceSummary, type ChronicleEntry, type EventView, type GameSnapshot, type RivalView } from "@/lib/game/types";
 import { useChat, useGame, useLeaderboard, usePush, useTick } from "./use-game";
 import { BRANCHES, lineageMark, NODE_BY_ID, NODES, nodeBlocker, nodeEffect, RANK_COST, RANK_REQUIRED, RENOWN, RENOWN_CAPPED, RESPEC_FEE, respecBlocker, spentIn, type BranchId } from "@/lib/game/lineage";
-import { allocation, BARRACKS_MAX, companyEta, barracksMs, barracksBlocker, barracksCost, barracksLevel, COMPANY_CAP, fortBlocker, fortCost, fortCount, fortMs, FORT_MAX, maxCompanies, RECRUIT_MS, recruitPrice, recruitSlots, trainBlocker, trainCost, trainMs, TRAIN_MAX } from "@/lib/game/companies";
+import { allocation, BARRACKS_MAX, companyEta, barracksMs, barracksBlocker, barracksCost, barracksLevel, COMPANY_CAP, maxCompanies, RECRUIT_MS, recruitPrice, recruitSlots, trainBlocker, trainCost, trainMs, TRAIN_MAX } from "@/lib/game/companies";
 import { CAPTAIN_COST, CAPTAINS_MAX, captainLevel, captainOf, HUNT_TARGETS, RARITY_LABEL, RELICS, RELICS_MAX, relicOf, TRAITS } from "@/lib/game/captains";
 import { ALTERATIONS, riftCompanyBlocker, riftFightBlocker, riftOf, RIFT_IDLE_MS, RIFT_MAX_COMPANIES, SHAPES, type AlterationId } from "@/lib/game/rift";
-import { MapBoard, type BoardMarch, type BoardPlace } from "./kingdom-map";
 import { CHAT_MAX_LENGTH, CHAT_REACTIONS, type ChatChannel } from "@/lib/game/chat-config";
 import { changelogFor } from "@/lib/game/changelog";
 
-type Tab = "ateliers" | "ameliorations" | "chantier" | "armee" | "carte" | "raids" | "alliance" | "messages" | "classement" | "heritage" | "lignee" | "faille";
+type Tab = "ateliers" | "chantier" | "armee" | "carte" | "raids" | "alliance" | "messages" | "classement" | "heritage" | "lignee" | "faille";
 /** U3 : sept onglets, certains avec des sous-onglets. */
 type Group = "domaine" | "chantier" | "armee" | "carte" | "alliance" | "messages" | "rangs";
 const GROUPS: Record<Group, Tab[]> = {
-  domaine: ["ateliers", "ameliorations"],
+  domaine: ["ateliers"],
   chantier: ["chantier"],
   armee: ["armee"],
   carte: ["carte", "raids", "faille"],
@@ -133,9 +91,8 @@ const GROUPS: Record<Group, Tab[]> = {
   messages: ["messages"],
   rangs: ["classement", "lignee", "heritage"],
 };
-const SUBTAB_LABELS: Partial<Record<Tab, string>> = { ateliers: "Ateliers", ameliorations: "Savoirs", carte: "Carte", raids: "Cibles", faille: "🌀 Faille", classement: "Classements", lignee: "Lignée", heritage: "Héritage" };
+const SUBTAB_LABELS: Partial<Record<Tab, string>> = { ateliers: "Concessions", carte: "Carte", raids: "Cibles", faille: "🌀 Faille", classement: "Classements", lignee: "Lignée", heritage: "Héritage" };
 const groupOf = (t: Tab): Group => (Object.keys(GROUPS) as Group[]).find((g) => GROUPS[g].includes(t)) ?? "domaine";
-type Qty = 1 | 10 | "max";
 const DAY_MS = 86_400_000;
 
 export function Game({ userId }: { userId: string }) {
@@ -198,21 +155,21 @@ export function Game({ userId }: { userId: string }) {
 
   if (!snap) return <div className="loading">On allume les torches…</div>;
 
+  if (!snap.s2) return <div className="loading">La saison se prépare…</div>;
+
   const now = game.serverNow();
   const world = worldFrom(snap.worksite);
   const stagesDone = stagesDoneAt(world, now);
-  // État prévu « maintenant » : sert à savoir ce qui est achetable.
-  // Règles qui dépendent de la saison (beffroi étalé à partir de la saison 2).
+  // Règles de la saison en cours (géométrie, armée en fer, carte des concessions).
   setSeasonRules(snap.season.number);
-  setS2Geometry(s2Enabled(snap.season.number));
-  setIronArmy(s2Enabled(snap.season.number));
-  setS2Map(snap.s2?.map ?? null);
-  const live: PlayerState = { ...advance(snap.state, now, world), stone: game.predictedStone() };
-  const rate = rateAt(live, world, now);
+  setS2Geometry(true);
+  setIronArmy(true);
+  setS2Map(snap.s2.map);
+  const live: PlayerState = advance(snap.state, now, world);
   const here = placeOf(live.s2, place);
   const researchDone = tab !== "armee" && researchEnds.some((e) => e <= now && e > armySeenAt);
-  const eventLive = (isCombatEvent(snap.event) || isLocalEvent(snap.event)) && !!snap.event?.active && snap.event.endsAt > now;
-  const affordableUpgrades = UPGRADES.filter((u) => !live.upgrades.includes(u.id) && upgradeUnlocked(live, u) && upgradeCost(live, u) <= live.stone).length;
+  const eventLive = isCombatEvent(snap.event) && !!snap.event?.active && snap.event.endsAt > now;
+  const subtabs = GROUPS[group].filter((t) => t !== "faille" || !!snap.rift);
 
   return (
     <SnapContext.Provider value={{ snap, live, now, moveFocus, showMove: (key) => setMoveFocus({ key, at: now }), go: (where, id, army) => {
@@ -220,56 +177,46 @@ export function Game({ userId }: { userId: string }) {
       selectTab(where);
     } }}>
     <div className="game">
-      {snap.s2 && <S2Tutorial seasonId={snap.season.id} />}
-      {game.away && <AwayModal away={game.away} event={snap.event} onClose={game.dismissAway} s2={!!snap.s2} />}
+      <S2Tutorial seasonId={snap.season.id} />
+      {game.away && <AwayModal away={game.away} event={snap.event} onClose={game.dismissAway} />}
       <TopBar snap={snap} now={now} />
-      {snap.s2 && <S2Guide seasonId={snap.season.id} live={live} tab={tab} stages={stagesDone} />}
+      <S2Guide seasonId={snap.season.id} live={live} tab={tab} stages={stagesDone} />
       <Movements snap={snap} live={live} now={now} run={game.run} />
       <LastDayBanner snap={snap} now={now} />
       <SeasonEndCard snap={snap} />
       <PushPrompt raided={(snap.chronicle ?? []).some((c) => c.kind === "raid" && c.targetId === snap.userId) || (game.away?.raidsLost.length ?? 0) > 0} />
-      <div className={snap.s2 ? "layout s2-layout" : "layout"}>
-        {snap.s2 && (
-          <aside className="s2-lands-col">
-            <S2Lands snap={snap} live={live} now={now} place={here} select={selectPlace} openMap={() => selectTab("carte")} run={game.run} />
-          </aside>
-        )}
-        {snap.s2 ? (
-          <aside className="s2-side-col">
-            <Hero snap={snap} live={live} rate={rate} clickGain={clickValue(live, world, stagesDone)} game={game} />
-          </aside>
-        ) : (
-          <Hero snap={snap} live={live} rate={rate} clickGain={clickValue(live, world, stagesDone)} game={game} />
-        )}
-        <section className={`panel dom-${group}${snap.s2 ? " s2-main" : ""}`}>
-          {snap.s2 && <S2ResourceBar live={live} now={now} place={group === "domaine" ? here : "chateau"} map={snap.s2.map} />}
+      <div className="layout s2-layout">
+        <aside className="s2-lands-col">
+          <S2Lands snap={snap} live={live} now={now} place={here} select={selectPlace} openMap={() => selectTab("carte")} run={game.run} />
+        </aside>
+        <aside className="s2-side-col">
+          <Hero snap={snap} live={live} game={game} />
+        </aside>
+        <section className={`panel dom-${group} s2-main`}>
+          <S2ResourceBar live={live} now={now} place={group === "domaine" ? here : "chateau"} map={snap.s2.map} />
           <div className="tabs" role="tablist">
-            <TabButton id="domaine" tab={group} setTab={selectGroup} label={snap.s2 ? "🏰 Domaine" : "🏭 Domaine"} dot={!snap.s2 && affordableUpgrades > 0} />
+            <TabButton id="domaine" tab={group} setTab={selectGroup} label="🏰 Domaine" />
             <TabButton id="chantier" tab={group} setTab={selectGroup} label="⛪ Chantier" />
             <TabButton id="armee" tab={group} setTab={selectGroup} label="⚔️ Armée" dot={researchDone} />
-            <TabButton id="carte" tab={group} setTab={selectGroup} label={eventLive ? "🗺️ Carte ⚡" : "🗺️ Carte"} dot={eventLive || snap.rivals.some((r) => r.revenge && !r.blocker)} />
+            <TabButton id="carte" tab={group} setTab={selectGroup} label={eventLive ? "🗺️ Carte ⚡" : "🗺️ Carte"} dot={eventLive} />
             <TabButton id="alliance" tab={group} setTab={selectGroup} label="🤝 Alliance" dot={snap.invites.length > 0} />
             <TabButton id="messages" tab={group} setTab={selectGroup} label="✉️ Messages" dot={tab !== "messages" && unreadCount(snap, live, now) > 0} />
             <TabButton id="rangs" tab={group} setTab={selectGroup} label="🏆 Rangs" />
           </div>
-          {GROUPS[group].filter((t) => (t !== "faille" || !!snap.rift) && !(snap.s2 && t === "ameliorations")).length > 1 && (
+          {subtabs.length > 1 && (
             <div className="subtabs group-subtabs" role="group" aria-label="Sections">
-              {GROUPS[group].filter((t) => (t !== "faille" || !!snap.rift) && !(snap.s2 && t === "ameliorations")).map((t) => (
+              {subtabs.map((t) => (
                 <button key={t} className="btn btn-small" aria-pressed={tab === t} onClick={() => selectTab(t)} data-tuto={`tab-${t}`}>
-                  {snap.s2 && t === "ateliers" ? "Concessions" : SUBTAB_LABELS[t]}
-                  {t === "ameliorations" && affordableUpgrades > 0 ? " •" : ""}
+                  {SUBTAB_LABELS[t]}
                 </button>
               ))}
             </div>
           )}
           <div className="tab-body" role="tabpanel">
-            {tab === "ateliers" && snap.s2 && <S2Domain snap={snap} live={live} now={now} run={game.run} place={here} select={selectPlace} />}
-            {tab === "ateliers" && !snap.s2 && <Generators live={live} stagesDone={stagesDone} snap={snap} run={game.run} />}
-            {tab === "ameliorations" && !snap.s2 && <Upgrades live={live} run={game.run} />}
+            {tab === "ateliers" && <S2Domain snap={snap} live={live} now={now} run={game.run} place={here} select={selectPlace} />}
             {tab === "chantier" && <Worksite snap={snap} live={live} run={game.run} />}
             {tab === "armee" && <Army snap={snap} live={live} now={now} run={game.run} />}
-            {tab === "carte" && snap.s2 && <S2MapScreen snap={snap} live={live} now={now} run={game.run} />}
-            {tab === "carte" && !snap.s2 && <KingdomMap snap={snap} live={live} now={now} run={game.run} focus={focus} />}
+            {tab === "carte" && <S2MapScreen snap={snap} live={live} now={now} run={game.run} />}
             {tab === "raids" && <Raids snap={snap} live={live} now={now} run={game.run} focus={focus} />}
             {tab === "alliance" && <AllianceTab snap={snap} live={live} now={now} run={game.run} />}
             {tab === "messages" && <Inbox snap={snap} live={live} now={now} run={game.run} userId={userId} />}
@@ -288,31 +235,6 @@ export function Game({ userId }: { userId: string }) {
       )}
     </div>
     </SnapContext.Provider>
-  );
-}
-
-/** Panneau « Ce qui change » : les nouvelles règles, une fois à la connexion suivante. */
-/** B4 : accueil guidé, une quête à la fois. */
-function QuestCard({ snap }: { snap: GameSnapshot }) {
-  const i = snap.state.quest;
-  // Saison 2 : le guide pas à pas remplace l'accueil en quêtes.
-  if (snap.s2 || i === null || i === undefined || i >= QUESTS.length) return null;
-  const q = questDef(i);
-  const done = Math.min(q.goal, questProgress(snap.state, q.id, { alliance: snap.alliance !== null && snap.alliance !== undefined }));
-  return (
-    <div className="quest">
-      <div className="row-title">
-        📜 Quête {i + 1}/{QUESTS.length} : {q.label}
-      </div>
-      {q.goal > 1 && (
-        <div className="bar bar-thin">
-          <span style={{ width: `${(done / q.goal) * 100}%` }} />
-        </div>
-      )}
-      <div className="note num">
-        {q.goal > 1 ? `${done} / ${q.goal} · ` : ""}Récompense : 5 minutes de production{i === QUESTS.length - 1 ? " et 5 écus" : ""}.
-      </div>
-    </div>
   );
 }
 
@@ -389,24 +311,6 @@ function DailyCard({ daily, now, run }: { daily: GameSnapshot["daily"]; now: num
         </>
       )}
     </div>
-  );
-}
-
-/** C1 : la veine d'or apparaît 12 secondes ; le serveur décide de l'heure et de ce qu'elle rapporte. */
-function Vein({ veinAt, now, run }: { veinAt: number; now: number; run: ReturnType<typeof useGame>["run"] }) {
-  const [taken, setTaken] = useState(0);
-  if (!(veinAt > 0) || now < veinAt || now > veinAt + VEIN_VISIBLE_MS || taken === veinAt) return null;
-  // Position stable pour une veine donnée, autour de la pierre.
-  const angle = (veinAt % 360) * (Math.PI / 180);
-  const style = { left: `calc(50% + ${Math.round(Math.cos(angle) * 110)}px)`, top: `calc(50% + ${Math.round(Math.sin(angle) * 90)}px)` };
-  const take = () => {
-    setTaken(veinAt);
-    void run({ type: "vein" });
-  };
-  return (
-    <button className="vein" style={style} onClick={take} aria-label="Veine d'or : la toucher">
-      ✨
-    </button>
   );
 }
 
@@ -639,7 +543,7 @@ function SeasonEndCard({ snap }: { snap: GameSnapshot }) {
     }
   });
   if (!r || hidden) return null;
-  const label = (id: string) => HALL.find((h) => h.id === id)?.title ?? id;
+  const label = (id: string) => HALL_ALL.find((h) => h.id === id)?.title ?? id;
   const close = () => {
     try {
       localStorage.setItem(key, "1");
@@ -826,13 +730,6 @@ function TabButton<T extends string>({ id, tab, setTab, label, dot }: { id: T; t
   );
 }
 
-interface Floater {
-  id: number;
-  x: number;
-  y: number;
-  text: string;
-}
-
 /** B5 : le beffroi dessiné, une pièce par étape. L'étape en cours se remplit de bas en haut au fil des dons. */
 const BELFRY_PARTS: { box: [number, number]; draw: React.ReactNode }[] = [
   { box: [140, 156], draw: <><rect x="12" y="140" width="76" height="16" rx="1" /><rect x="6" y="152" width="88" height="4" /></> },
@@ -904,111 +801,18 @@ function Belfry({ done, pct }: { done: number; pct: number }) {
   );
 }
 
-function Hero({ snap, live, rate, clickGain, game }: { snap: GameSnapshot; live: PlayerState; rate: number; clickGain: number; game: ReturnType<typeof useGame> }) {
-  const counter = useRef<HTMLSpanElement>(null);
-  const [floaters, setFloaters] = useState<Floater[]>([]);
-  const nextId = useRef(0);
-  const { predictedStone } = game;
-
-  // Compteur animé à chaque image, sans re-rendu React.
-  useEffect(() => {
-    let raf = 0;
-    const loop = () => {
-      if (counter.current) counter.current.textContent = formatNumber(Math.floor(predictedStone()));
-      raf = requestAnimationFrame(loop);
-    };
-    raf = requestAnimationFrame(loop);
-    return () => cancelAnimationFrame(raf);
-  }, [predictedStone]);
-
-  const onHit = (e: React.PointerEvent<HTMLButtonElement>) => {
-    const gain = game.click();
-    if (gain <= 0 && !snap.s2) return;
-    const rect = e.currentTarget.getBoundingClientRect();
-    const id = nextId.current++;
-    const f = { id, x: e.clientX - rect.left || rect.width / 2, y: e.clientY - rect.top || rect.height / 2, text: gain > 0 ? `+${formatRate(gain)}` : "⚡" };
-    setFloaters((list) => [...list.slice(-12), f]);
-    setTimeout(() => setFloaters((list) => list.filter((x) => x.id !== id)), 900);
-  };
-
-  const paused = snap.state.clickPausedUntil > game.serverNow();
+function Hero({ snap, live, game }: { snap: GameSnapshot; live: PlayerState; game: ReturnType<typeof useGame> }) {
+  const now = game.serverNow();
   const w = snap.worksite;
   const finished = w.stage >= TOTAL_STAGES;
   const embellish = embellishmentOf(w.stage);
   const pct = finished ? 100 : Math.min(100, (w.progress / Math.max(1, w.target)) * 100);
 
   return (
-    <section className={`panel hero${snap.s2 ? " hero-s2" : ""}`}>
-      {!snap.s2 && (
-        <>
-      <div className="hero-main">
-        <div className="hero-stats">
-          <div className="stone-count num">
-            <span ref={counter}>{formatNumber(Math.floor(snap.state.stone))}</span>
-          </div>
-          <div className="stone-label">pierres taillées</div>
-          {live.s2 ? (
-            <>
-              <div className="rate num">
-                ⚔️ {formatNumber(Math.floor(live.s2.iron))} fer · 🪙 {formatNumber(Math.floor(live.s2.gold))} or
-              </div>
-              <div className="rate num">
-                Production : {formatNumber(rate * 3600 * ((live.s2.launchUntil ?? 0) > game.serverNow() ? LAUNCH_MULT : 1))} / h en valeur pierre
-                {live.s2.conc.length > 0 && ` · prochain convoi dans ${duration(Math.max(0, Math.min(...live.s2.conc.map((c) => c.next)) - game.serverNow()))}`}
-              </div>
-            </>
-          ) : (
-            <div className="rate num">{formatRate(rate)} / seconde</div>
-          )}
-          {(snap.state.catchUp ?? 0) > 0 && (
-            <div className="catch-up" title="Bonus accordé tant que tu es loin derrière le premier joueur. Il diminue à mesure que tu le rattrapes.">
-              🤝 Coup de pouce : +{Math.round((snap.state.catchUp ?? 0) * 100)} % de production et de défense
-            </div>
-          )}
-          {elanBonus(snap.state) > 0 && (
-            <ElanGauge
-              max={elanMaxMs(snap.state)}
-              left={Math.min(elanMaxMs(snap.state), Math.max(0, (snap.state.elanUntil ?? 0) - game.serverNow()) + game.pendingClicks() * ELAN_PER_CLICK_MS)}
-              bonus={elanBonus(snap.state) + stagePerk(snap.worksite.stageCompletedAt.length, "elan")}
-            />
-          )}
-          {(snap.state.lotBonusUntilStage ?? 0) > snap.worksite.stageCompletedAt.length && (
-            <div className="catch-up">🏗️ Prime de lot : +10 % de production jusqu&apos;à la fin de l&apos;étape suivante</div>
-          )}
-          {(snap.state.masterBonuses ?? [])
-            .filter((b) => b.until > game.serverNow() && b.from <= game.serverNow())
-            .map((b) => (
-              <div key={b.kind} className="catch-up">👑 Maître d&apos;œuvre : {MASTER_BONUSES[b.kind].label} encore {duration(b.until - game.serverNow())}</div>
-            ))}
-          {(snap.state.dailyBoostUntil ?? 0) > game.serverNow() && (
-            <div className="catch-up">
-              🎁 Coffre du jour : +{Math.round((snap.state.dailyBoost ?? 0) * 100)} % de production encore {duration((snap.state.dailyBoostUntil ?? 0) - game.serverNow())}
-            </div>
-          )}
-          {(snap.state.frenzyUntil ?? 0) > game.serverNow() && (
-            <div className="catch-up">✨ Frénésie : production doublée encore {Math.ceil((snap.state.frenzyUntil - game.serverNow()) / 1000)} s</div>
-          )}
-          <div className="hammer-hint">
-            {paused ? `🔨 Marteau confisqué encore ${Math.ceil((snap.state.clickPausedUntil - game.serverNow()) / 1000)} s` : snap.s2 ? "Frappe pour l'élan : +25 % de production tant qu'il dure" : `Frappe la pierre : +${formatRate(clickGain)} par coup`}
-          </div>
-        </div>
-        <div className="hammer-zone">
-          <Vein veinAt={snap.state.veinAt ?? 0} now={game.serverNow()} run={game.run} />
-          <button className="hammer" data-tuto="hammer" disabled={paused} onPointerDown={onHit} aria-label={snap.s2 ? "Frapper pour l'élan" : `Tailler la pierre (+${formatRate(clickGain)})`}>
-            🪨
-          </button>
-          {floaters.map((f) => (
-            <span key={f.id} className="float" style={{ left: f.x, top: f.y - 20 }}>
-              {f.text}
-            </span>
-          ))}
-        </div>
-      </div>
-        </>
-      )}
-      <DailyCard daily={snap.daily} now={game.serverNow()} run={game.run} />
-      <EventBanner e={snap.event} now={game.serverNow()} stone={snap.state.stone} run={game.run} />
-      <Status state={snap.state} now={game.serverNow()} />
+    <section className="panel hero hero-s2">
+      <DailyCard daily={snap.daily} now={now} run={game.run} />
+      <EventBanner e={snap.event} now={now} />
+      <Status state={live} now={now} />
       <div className="mini-site">
         <Belfry done={Math.min(w.stage, STAGES.length)} pct={pct} />
         <h3>{finished ? "Le beffroi est achevé !" : embellish > 0 ? `Embellissement : ${stageDef(w.stage).name}` : `Chantier : ${stageDef(w.stage).name}`}</h3>
@@ -1020,144 +824,10 @@ function Hero({ snap, live, rate, clickGain, game }: { snap: GameSnapshot; live:
           <span>{finished ? `${STAGES.length}/${STAGES.length}` : embellish > 0 ? `embellissement ${embellish}` : `étape ${w.stage + 1}/${STAGES.length}`}</span>
         </div>
       </div>
-      <QuestCard snap={snap} />
       {!finished && <ShareLine snap={snap} />}
       {!finished && !snap.state.titheSet && <TitheBanner run={game.run} />}
-      <ResearchLine state={snap.state} now={game.serverNow()} />
+      <ResearchLine state={snap.state} now={now} />
     </section>
-  );
-}
-
-export function Generators({ live, stagesDone, snap, run }: { live: PlayerState; stagesDone: number; snap: GameSnapshot; run: ReturnType<typeof useGame>["run"] }) {
-  const [qty, setQty] = useState<Qty>(1);
-  const [busy, setBusy] = useState<GeneratorId | null>(null);
-  const world = worldFrom(snap.worksite);
-  const mult = productionMultiplier(live, world, stagesDone);
-  // On montre les bâtiments possédés, plus le prochain à découvrir.
-  const visibleCount = Math.min(GENERATORS.length, Math.max(1, GENERATORS.findIndex((g) => owned(live, g.id) === 0 && live.totalProduced < g.baseCost * 0.5) + 1 || GENERATORS.length));
-
-  // B9 : l'achat le plus rentable (production gagnée par pierre dépensée) parmi les bâtiments connus,
-  // paliers de corps de métier et de compagnonnage compris : on regarde aussi l'achat qui complète la tranche.
-  const rate = productionPerSecond(live, world, stagesDone);
-  const best = GENERATORS.slice(0, visibleCount)
-    .filter((g) => owned(live, g.id) > 0 || live.totalProduced >= g.baseCost * 0.5)
-    .flatMap((g) => {
-      const t = nextTiers(live, g.id);
-      return [...new Set([1, t.mastery.missing, t.companion?.missing ?? 1])].map((q) => {
-        const after = { ...live, generators: { ...live.generators, [g.id]: owned(live, g.id) + q } };
-        return { id: g.id, qty: q, value: (productionPerSecond(after, world, stagesDone) - rate) / generatorCost(live, g.id, q) };
-      });
-    })
-    .sort((a, b) => b.value - a.value)[0];
-  const mastery = masteryBonus(live);
-  // L'achat s'affiche tout de suite (voir useGame) : pas besoin de bloquer le bouton.
-  const buy = (id: GeneratorId, n: number) => void run({ type: "buy", generator: id, qty: n });
-  const rebuild = async (id: GeneratorId) => {
-    setBusy(id);
-    await run({ type: "rebuild", generator: id });
-    setBusy(null);
-  };
-
-  return (
-    <>
-      <div className="qty" role="group" aria-label="Quantité">
-        {([1, 10, "max"] as Qty[]).map((q) => (
-          <button key={q} className="btn" aria-pressed={qty === q} onClick={() => setQty(q)}>
-            {q === "max" ? "Max" : `×${q}`}
-          </button>
-        ))}
-      </div>
-      {mastery > 0 && (
-        <p className="mastery-line num">
-          <span title="Une tranche par lot complet de 50 bâtiments d'un type">🛠️ Corps de métier +{Math.round(mastery * 100)} %</span>
-        </p>
-      )}
-      <div className="list">
-        {GENERATORS.slice(0, visibleCount).map((g, i) => {
-          const n = owned(live, g.id);
-          const hidden = i === visibleCount - 1 && n === 0 && live.totalProduced < g.baseCost * 0.5;
-          const count = qty === "max" ? Math.max(1, maxAffordable(live, g.id)) : qty;
-          const cost = generatorCost(live, g.id, count);
-          const each = generatorRate(live, g.id) * mult;
-          return (
-            <div key={g.id} className={`row${hidden ? " locked" : ""}`} title={hidden ? undefined : g.description}>
-              <div className="row-icon" aria-hidden>
-                {hidden ? "❔" : g.icon}
-              </div>
-              <div>
-                <div className="row-title row-title-one">
-                  <span className="row-name">{hidden ? "???" : g.name}</span>
-                  {n > 0 && <span className="row-count num">{n}</span>}
-                </div>
-                <div className="row-desc num">
-                  {!hidden && g.id === best?.id && (
-                    <span className="badge badge-best" title="La meilleure production gagnée par pierre dépensée, paliers compris">
-                      ⭐ rentable{best.qty > 1 ? ` ×${best.qty}` : ""}
-                    </span>
-                  )}
-                  {!hidden && g.id === best?.id ? " " : ""}
-                  {hidden ? (
-                    "Continue de bâtir pour le découvrir."
-                  ) : (
-                    <>
-                      <span className="nw">{formatRate(each)}/s</span> chacun
-                      {n > 0 && (
-                        <>
-                          {" · "}
-                          <span className="nw">Σ {formatRate(each * n)}/s</span>
-                        </>
-                      )}
-                    </>
-                  )}
-                  {!hidden && cost > live.stone && rate > 0 && (
-                    <>
-                      {" · "}
-                      <span className="nw">⏳ {duration(((cost - live.stone) / rate) * 1000)}</span>
-                    </>
-                  )}
-                </div>
-                {!hidden && n > 0 && <TierLine live={live} id={g.id} />}
-              </div>
-              <Btn className="btn btn-primary" reason={hidden ? "Continue de bâtir pour le découvrir." : cost > live.stone ? "Pas assez de pierre." : null} onClick={() => buy(g.id, count)}>
-                +{count}
-                <span className="cost num">{formatNumber(cost)} 🪨</span>
-              </Btn>
-              {ruinsOf(live, g.id) > 0 && (
-                <div className="ruins">
-                  <span>
-                    🏚️ {ruinsOf(live, g.id)} en ruine
-                  </span>
-                  <Btn busy={busy !== null} reason={ruinCost(live, g.id) > live.stone ? "Pas assez de pierre." : null} onClick={() => rebuild(g.id)}>
-                    Rebâtir · <span className="num">{formatNumber(ruinCost(live, g.id))} 🪨</span>
-                  </Btn>
-                </div>
-              )}
-            </div>
-          );
-        })}
-      </div>
-    </>
-  );
-}
-
-/** Prochains paliers d'un bâtiment : corps de métier et compagnonnage. */
-function TierLine({ live, id }: { live: PlayerState; id: GeneratorId }) {
-  const [open, setOpen] = useState(false);
-  const t = nextTiers(live, id);
-  const companion = t.companion;
-  const big = companion ? GENERATORS.find((g) => g.id === companion.target) : undefined;
-  return (
-    <button className="row-tier num link-btn tier-btn" aria-expanded={open} onClick={() => setOpen(!open)} title="Corps de métier et compagnonnage : combien en acheter pour le prochain palier">
-      <span className="nw">🛠️ +{t.mastery.missing}</span>
-      {open && <span className="nw">{` → +${t.mastery.bonus * 100} % de production`}</span>}
-      {companion && big && (
-        <>
-          {" · "}
-          <span className="nw">🤝 +{companion.missing}</span>
-          {open && <span className="nw">{` → ${big.icon} +${companion.bonus * 100} % aux ${big.plural.toLowerCase()}`}</span>}
-        </>
-      )}
-    </button>
   );
 }
 
@@ -1185,46 +855,6 @@ function SpyResearchRow({ live, base, stagesDone, full, queued, run }: { live: P
           {queued ? "En file" : "Améliorer"}
           <span className="cost num">{formatNumber(cost)} 🪨</span>
         </button>
-      )}
-    </div>
-  );
-}
-
-function Upgrades({ live, run }: { live: PlayerState; run: ReturnType<typeof useGame>["run"] }) {
-  const available = UPGRADES.filter((u) => !live.upgrades.includes(u.id) && upgradeUnlocked(live, u)).sort((a, b) => a.cost - b.cost);
-  const bought = UPGRADES.filter((u) => live.upgrades.includes(u.id));
-  const nextLocked = UPGRADES.filter((u) => !live.upgrades.includes(u.id) && !upgradeUnlocked(live, u)).sort((a, b) => a.cost - b.cost)[0];
-
-  const buy = (id: string) => void run({ type: "upgrade", upgrade: id });
-
-  return (
-    <div className="list">
-      {available.length === 0 && <p className="empty">Aucun savoir à acquérir pour l&apos;instant.</p>}
-      {available.map((u) => (
-        <div key={u.id} className="row">
-          <div className="row-icon" aria-hidden>
-            📜
-          </div>
-          <div>
-            <div className="row-title">{u.name}</div>
-            <div className="row-desc">{u.description}</div>
-          </div>
-          <Btn className="btn btn-primary" reason={upgradeCost(live, u) > live.stone ? "Pas assez de pierre." : null} onClick={() => buy(u.id)}>
-            Apprendre
-            <span className="cost num">{formatNumber(upgradeCost(live, u))} 🪨</span>
-          </Btn>
-        </div>
-      ))}
-      {nextLocked?.requires && (
-        <p className="note">
-          🔒 {nextLocked.requires.count} {GENERATORS.find((g) => g.id === nextLocked.requires!.generator)!.plural.toLowerCase()}
-        </p>
-      )}
-      {bought.length > 0 && (
-        <details className="info">
-          <summary>✓ {bought.length} savoirs acquis</summary>
-          <div className="note">{bought.map((u) => u.name).join(", ")}.</div>
-        </details>
       )}
     </div>
   );
@@ -1504,7 +1134,7 @@ function Ranking({ boards, userId }: { boards: ReturnType<typeof useLeaderboard>
                 Saison {season.season} · terminée le {new Date(season.endsAt).toLocaleDateString("fr-FR")}
               </h3>
               <ul className="hall-list">
-                {HALL.map((h) => {
+                {HALL_ALL.map((h) => {
                   const rows = season.podiums.find((p) => p.category === h.id)?.rows ?? [];
                   if (rows.length === 0) return null;
                   return (
@@ -1557,38 +1187,6 @@ function duration(msLeft: number): string {
   return countdown(msLeft);
 }
 
-/** Jauge d'élan : tant qu'elle n'est pas vide, la production est augmentée. */
-function ElanGauge({ left, bonus, max = ELAN_MAX_MS }: { left: number; bonus: number; max?: number }) {
-  const pct = Math.round((left / max) * 100);
-  return (
-    <div className="elan" title="Chaque coup ajoute 3 s d'élan (10 minutes au plus). Tant qu'il en reste, ta production est augmentée.">
-      <span>
-        ⚡ Élan {left > 0 ? `+${Math.round(bonus * 100)} % · ${left >= 60_000 ? `${Math.floor(left / 60_000)} min ${String(Math.floor((left % 60_000) / 1000)).padStart(2, "0")}` : `${Math.ceil(left / 1000)} s`}` : "vide : frappe pour l'allumer"}
-      </span>
-      <div className="bar">
-        <span style={{ width: `${pct}%` }} />
-      </div>
-    </div>
-  );
-}
-
-/** G5 : jauge du « Tribut des seigneurs ». */
-function TributeGauge({ live, now }: { live: PlayerState; now: number }) {
-  const left = tributeLeft(live, now);
-  const pct = Math.round((left / TRIBUTE_MAX_SECONDS) * 100);
-  const fullIn = ((TRIBUTE_MAX_SECONDS - left) / TRIBUTE_RECHARGE) * 1000;
-  return (
-    <div className="elan tribute" title="Les seigneurs ne cèdent que ce que contient cette réserve : 2 h de ta production de base au plus, 1 h au plus par raid. Elle se recharge de 20 minutes par heure.">
-      <span>
-        🏰 Tribut des seigneurs : {Math.floor(left / 60)} min / 2 h{fullIn > 1000 ? ` · pleine dans ${duration(fullIn)}` : " · pleine"}
-      </span>
-      <div className="bar">
-        <span style={{ width: `${pct}%` }} />
-      </div>
-    </div>
-  );
-}
-
 /** Améliorations en cours, sous le compteur de pierre. */
 function ResearchLine({ state, now }: { state: PlayerState; now: number }) {
   const queue = (state.research ?? []).filter((r) => r.endsAt > now);
@@ -1631,11 +1229,11 @@ function Status({ state, now }: { state: PlayerState; now: number }) {
 type RaidView = "seigneurs" | "joueurs";
 type ArmyView = "garnison" | "forge" | "espionnage";
 
-/** B8 : onglet Armée, avec la garnison et la Forge, sorties de l'onglet Raids. */
+/** Onglet Armée : les compagnies, la Forge et l'espionnage. */
 function Army({ snap, live, now, run }: { snap: GameSnapshot; live: PlayerState; now: number; run: ReturnType<typeof useGame>["run"] }) {
   const [view, setView] = useState<ArmyView>("garnison");
   const views: [ArmyView, string][] = [
-    ["garnison", "Garnison"],
+    ["garnison", "Compagnies"],
     ["forge", live.research.some((r) => r.endsAt > now) ? `Forge ⏳${live.research.length}` : "Forge"],
     ["espionnage", "Espionnage"],
   ];
@@ -1651,13 +1249,10 @@ function Army({ snap, live, now, run }: { snap: GameSnapshot; live: PlayerState;
       {view === "garnison" && (
         <>
           <Info>
-            Un raid est une bataille de 4 rounds au plus : toutes tes troupes (et les renforts de tes alliés) contre les troupes, fortifications et 3 gardes
-            de la cible. Chaque unité a ses forces et ses faiblesses, compose ton armée selon ce que tu vois en face. Tu gagnes si plus personne ne
-            riposte en face. Une partie des troupes perdues revient de l&apos;infirmerie au bout de 30 minutes.
+            Une bataille dure 4 rounds au plus : tes compagnies contre la garnison d&apos;un seigneur. Chaque type de troupe a ses forces et ses faiblesses, et à
+            nombre voisin, c&apos;est le nombre de compagnies qui décide. Une partie des pertes revient de l&apos;infirmerie au bout de 30 minutes.
           </Info>
-          {!live.s2 && <TributeGauge live={live} now={now} />}
-          {live.companyModel ? <Companies live={live} now={now} run={run} renown={snap.renown?.available ?? 0} /> : <Garrison live={live} run={run} />}
-          {!live.s2 && <CurfewCard live={live} now={now} run={run} />}
+          <Companies live={live} now={now} run={run} renown={snap.renown?.available ?? 0} />
         </>
       )}
       {view === "espionnage" && <Spies snap={snap} live={live} now={now} run={run} />}
@@ -1706,85 +1301,155 @@ function S2LordList({ snap, now }: { snap: GameSnapshot; now: number }) {
 function Raids({ snap, live, now, run, focus }: { snap: GameSnapshot; live: PlayerState; now: number; run: ReturnType<typeof useGame>["run"]; focus?: Focus | null }) {
   const fresh = focus && now - focus.at < 5000 ? focus : null;
   const [view, setView] = useState<RaidView>(() => (fresh && snap.rivals.find((r) => r.id === fresh.id && !r.isLord) ? "joueurs" : "seigneurs"));
-  const [level, setLevel] = useState<number | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
-  const spyPrice = spyCost(live, worldFrom(snap.worksite), now);
   const act = async (target: string, action: Parameters<typeof run>[0]) => {
     setBusy(target);
     await run(action);
     setBusy(null);
   };
-  const spy = (target: string) => act(target, { type: "spy", target });
-  const raid = (target: string, troops?: Record<string, number>, allies?: boolean) => act(target, { type: "raid", target, troops, allies });
-  const mine = snap.map?.places[snap.userId];
-  const distanceTo = (id: string) => (mine && snap.map?.places[id] ? mapDistance(mine, snap.map.places[id]) : undefined);
   const players = snap.rivals.filter((r) => !r.isLord && !r.allied);
-  const lords = snap.rivals.filter((r) => r.isLord && (level === null || r.difficulty === level));
-  const sabotage = (target: string, aim: SabotageAim) => act(target, { type: "sabotage", target, aim });
-  const mole = (target: string) => act(target, { type: "mole", target });
-  const row = (r: RivalView) => (
-    <RivalRow key={r.id} focus={fresh?.id === r.id ? fresh : undefined} r={r} now={now} busy={busy} onRaid={raid} onSpy={spy} spyPrice={spyPrice} stone={live.s2 ? live.s2.gold : live.stone} onSabotage={sabotage} onMole={mole} stagesDone={stagesDoneAt(worldFrom(snap.worksite), now)} me={live} distance={distanceTo(r.id)} />
-  );
+  const castles = snap.s2?.castles ?? [];
+  const mine = castles.find((c) => c.me)?.pos;
+  const distanceTo = (id: string) => {
+    const there = castles.find((c) => c.id === id)?.pos;
+    return mine && there ? mapDistance(mine, there) : MAP_SPAWN_RADIUS;
+  };
   const views: [RaidView, string][] = [
-    ["seigneurs", `Seigneurs (${snap.s2 ? snap.s2.lords.length : snap.rivals.filter((r) => r.isLord).length})`],
+    ["seigneurs", `Seigneurs (${snap.s2?.lords.length ?? 0})`],
     ["joueurs", `Joueurs (${players.length})`],
   ];
 
   return (
     <>
-      <div className="subtabs" role="group" aria-label="Sections des raids">
+      <div className="subtabs" role="group" aria-label="Sections des cibles">
         {views.map(([id, label]) => (
           <button key={id} className="btn" aria-pressed={view === id} onClick={() => setView(id)}>
             {label}
           </button>
         ))}
       </div>
-      {snap.event && isLocalEvent(snap.event) && snap.event.active && <LocalEventCard e={snap.event} live={live} now={now} run={run} />}
-      {snap.event && !(isLocalEvent(snap.event) && snap.event.active) && <EventCard
+      {snap.event?.kind === "tournoi" && snap.event.active && <TourneyCard e={snap.event} live={live} now={now} run={run} />}
+      {snap.event && snap.event.kind !== "tournoi" && (
+        <EventCard
           e={snap.event}
           now={now}
           busy={busy !== null}
           onAttack={() => act("event", { type: "event_attack" })}
           history={(snap.chronicle ?? []).filter((c) => c.kind === "event" && c.details.phase === "attack" && c.details.eventId === snap.event?.id)}
           me={snap.userId}
-        />}
-      {inCurfew(live, now) && <p className="raid-state">🌙 Tu es en couvre-feu : ni attaque ni sabotage, dans un sens comme dans l&apos;autre.</p>}
-      {view === "seigneurs" && snap.s2 && <S2LordList snap={snap} now={now} />}
-      {view === "seigneurs" && !snap.s2 && (
-        <Info>
-          Un raid réussi vole 25 % (40 % en revanche) de la pierre non sécurisée (les 2 dernières heures de production sont à l&apos;abri, mais jamais plus
-          de la moitié du stock), incendie les ateliers 30 min et ruine quelques bâtiments ; la victime reçoit 4 h de bouclier (10 min pour un seigneur) et un
-          droit de revanche (+50 % de dégâts). Les seigneurs difficiles ne frappent que ceux qui les ont attaqués. De loin, tu ne vois qu&apos;un ordre de grandeur
-          des armées et ta chance en un mot. Un espion part sur la route et rapporte ce qu&apos;il a vu pendant 1 h, à toute ton alliance : plus ton niveau
-          d&apos;espionnage dépasse celui de la cible, plus il en voit (armée, mouvements, stock, Forge) et moins il risque d&apos;être repéré. Ta garnison,
-          tes espions et la Forge sont dans l&apos;onglet Armée.
-        </Info>
+        />
       )}
-      {view === "seigneurs" && !snap.s2 && (
+      {view === "seigneurs" && <S2LordList snap={snap} now={now} />}
+      {view === "joueurs" && (
         <>
-          <div className="qty level-filter" role="group" aria-label="Difficulté">
-            <button className="btn" aria-pressed={level === null} onClick={() => setLevel(null)}>
-              Tous
-            </button>
-            {([1, 2, 3, 4] as const).map((d) => (
-              <button key={d} className="btn" aria-pressed={level === d} onClick={() => setLevel(d)}>
-                {DIFFICULTY_LABELS[d]}
-              </button>
+          <Info>
+            On ne pille pas les autres joueurs pour l&apos;instant : les raids reviendront avec la prochaine vague, sur les concessions et les convois. Tu peux
+            déjà espionner, poser une taupe ou saboter une académie ou un guet, payés en or.
+          </Info>
+          <div className="list">
+            {players.length === 0 && <p className="empty">Aucun autre joueur hors de ton alliance.</p>}
+            {players.map((r) => (
+              <PlayerRow key={r.id} r={r} live={live} now={now} busy={busy} distance={distanceTo(r.id)} focus={fresh?.id === r.id} act={act} spyPrice={spyCost(live, worldFrom(snap.worksite), now)} />
             ))}
           </div>
-          <div className="list">{lords.map(row)}</div>
         </>
       )}
-      {view === "joueurs" && snap.s2 && (
-        <p className="empty">En saison 2, on ne pille pas les autres joueurs : les raids entre joueurs reviendront avec la prochaine vague, sur les concessions. Espionnage et alliances restent ouverts.</p>
-      )}
-      {view === "joueurs" && !snap.s2 && (
-        <div className="list">
-          {players.length === 0 && <p className="empty">Aucun joueur à piller (tes alliés sont dans l&apos;onglet Alliance).</p>}
-          {players.map(row)}
+    </>
+  );
+}
+
+const SABOTAGE_AIMS: [SabotageAim, string, string][] = [
+  ["academie", "🎓 Académie", "un niveau perdu, recherche retardée"],
+  ["guet", "🔭 Guet", "aucune alerte d'approche pendant 1 h"],
+];
+
+/** Un autre joueur dans Cibles : renseignement et sabotage, sans raid. */
+function PlayerRow({ r, live, now, busy, distance, focus, act, spyPrice }: { r: RivalView; live: PlayerState; now: number; busy: string | null; distance: number; focus: boolean; act: (target: string, action: GameAction) => Promise<void>; spyPrice: number }) {
+  const [aiming, setAiming] = useState(false);
+  const rowRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (focus) rowRef.current?.scrollIntoView({ block: "center", behavior: "smooth" });
+  }, [focus]);
+  const gold = live.s2?.gold ?? 0;
+  const short = (price: number) => (gold < price ? "Pas assez d'or." : null);
+  const intel = r.intelUntil > now;
+  const sabotagePrice = r.sabotageCost ?? 0;
+  return (
+    <div className="row" ref={rowRef}>
+      <div className="row-icon" aria-hidden>
+        🛡️
+      </div>
+      <div>
+        <div className="row-title">
+          {r.name}
+          {r.mark ? ` ${r.mark}` : ""}
+          {r.allianceName && <span className="badge">🤝 {r.allianceName}</span>}
+          {r.atWar && <span className="badge badge-revenge">⚔️ en guerre</span>}
+          {(r.titles ?? []).map((t) => (
+            <span key={t} className="badge badge-title">
+              {t}
+            </span>
+          ))}
+          <Presence lastSeen={r.lastSeen} now={now} />
+        </div>
+        <div className="row-desc army-line num" title={r.armyHint ? "Vue de loin : envoie un espion pour voir l'armée exacte" : "Armée exacte"}>
+          {r.armyHint ? `Armée ${r.armyHint} que la tienne` : intel ? `🕵️ ${armyIcons(r.army)} (rapport encore ${duration(r.intelUntil - now)})` : armyIcons(r.army)}
+        </div>
+        {(r.rumorUnmasked || (r.moleUntil ?? 0) > now) && (
+          <div className="row-desc num">{[r.rumorUnmasked ? "🗣️ rumeur démasquée" : null, (r.moleUntil ?? 0) > now ? `🐀 ${duration((r.moleUntil ?? 0) - now)}` : null].filter(Boolean).join(" · ")}</div>
+        )}
+        {intel && <SpyReport r={r} now={now} />}
+      </div>
+      <div className="row-actions">
+        <Btn
+          busy={busy !== null}
+          reason={short(spyPrice)}
+          onClick={() => act(r.id, { type: "spy", target: r.id })}
+          title="L'espion part sur la route ; son rapport dure 1 h et profite à ton alliance. Ce qu'il voit dépend de l'écart entre ton niveau d'espionnage et celui de la cible."
+        >
+          🕵️ Espion
+          <span className="cost num">
+            {formatNumber(spyPrice)} 🪙 · {countdown(spyTravelMs(distance))}
+            {r.spyGap !== null && r.spyGap !== undefined ? ` · 👁️ ${Math.round(spyRisk(r.spyGap, distance) * 100)} %` : ""}
+          </span>
+        </Btn>
+        {r.moleUntil !== undefined && r.moleUntil <= now && (
+          <Btn
+            busy={busy !== null}
+            reason={short(r.molePrice ?? 0)}
+            onClick={() => act(r.id, { type: "mole", target: r.id })}
+            title="La taupe s'installe tout de suite pour 2 h : elle te prévient quand il fait partir une armée. Il faut un niveau d'espionnage au moins un cran au-dessus du sien. Elle peut être démasquée, à demi-risque, à chaque alerte."
+          >
+            🐀 Taupe
+            <span className="cost num">{formatNumber(r.molePrice ?? 0)} 🪙</span>
+          </Btn>
+        )}
+        {r.sabotageBlocker !== undefined && (
+          <Btn busy={busy !== null} reason={short(sabotagePrice)} onClick={() => setAiming(!aiming)} title="Choisis ce que vise ton saboteur. La réussite dépend de l'écart de niveau d'espionnage ; raté, il est toujours repéré.">
+            🧨 Sabotage
+            <span className="cost num">{formatNumber(sabotagePrice)} 🪙</span>
+          </Btn>
+        )}
+      </div>
+      {aiming && r.sabotageBlockers && (
+        <div className="row-actions">
+          {SABOTAGE_AIMS.map(([aim, label, desc]) => (
+            <Btn
+              key={aim}
+              busy={busy !== null}
+              reason={r.sabotageBlockers![aim] ?? short(sabotagePrice)}
+              title={desc}
+              onClick={() => {
+                setAiming(false);
+                void act(r.id, { type: "sabotage", target: r.id, aim });
+              }}
+            >
+              {label}
+            </Btn>
+          ))}
         </div>
       )}
-    </>
+    </div>
   );
 }
 
@@ -1844,325 +1509,6 @@ function localTime(utcMinute: number): string {
   return m ? `${h} h ${String(m).padStart(2, "0")}` : `${h} h`;
 }
 
-/** C2 : plage de 8 h par jour sans attaque ni sabotage, choisie en heure locale. */
-function CurfewCard({ live, now, run }: { live: PlayerState; now: number; run: ReturnType<typeof useGame>["run"] }) {
-  const [busy, setBusy] = useState(false);
-  const offset = new Date().getTimezoneOffset();
-  const current = live.curfew?.start ?? null;
-  const next = live.curfew?.next && live.curfew.next.from > now ? live.curfew.next : null;
-  const pick = async (value: string) => {
-    setBusy(true);
-    const start = value === "" ? null : (Number(value) * 60 + offset + 1440) % 1440;
-    await run({ type: "curfew", start });
-    setBusy(false);
-  };
-  const shown = next ? next.start : current;
-  const localHour = shown === null ? "" : String(Math.floor(((shown - offset + 1440) % 1440) / 60));
-  const span = (start: number) => `de ${localTime(start)} à ${localTime((start + CURFEW_MINUTES) % 1440)}`;
-  return (
-    <div className="curfew">
-      <div className="row-title">🌙 Couvre-feu</div>
-      <Info>
-        Pendant 8 heures par jour, tu ne peux ni attaquer ni être attaqué, ni saboter ni être saboté, seigneurs et guerre compris. Ta production et ta dîme continuent. Un changement prend effet 24 heures plus tard.
-      </Info>
-      <label className="note" htmlFor="curfew">
-        Plage :{" "}
-        <select id="curfew" className="input" disabled={busy} value={localHour} onChange={(e) => pick(e.target.value)}>
-          <option value="">aucune</option>
-          {Array.from({ length: 24 }, (_, h) => (
-            <option key={h} value={h}>
-              {h} h à {(h + CURFEW_MINUTES / 60) % 24} h
-            </option>
-          ))}
-        </select>
-      </label>
-      <p className="note">
-        {current === null ? "Aucun en vigueur" : `En vigueur ${span(current)}`}
-        {next ? ` · dès ${new Date(next.from).toLocaleString("fr-FR", { weekday: "short", hour: "2-digit", minute: "2-digit" })} : ${next.start === null ? "aucun" : span(next.start)}` : ""}
-      </p>
-    </div>
-  );
-}
-
-function RivalRow({
-  r,
-  now,
-  busy,
-  onRaid,
-  onSpy,
-  spyPrice,
-  stone: myStone,
-  onSabotage,
-  onMole,
-  stagesDone = 0,
-  me,
-  distance,
-  focus,
-}: {
-  focus?: Focus;
-  r: RivalView;
-  now: number;
-  busy: string | null;
-  onRaid: (id: string, troops?: Record<string, number>, allies?: boolean) => void;
-  onSpy: (id: string) => void;
-  spyPrice: number;
-  stone: number;
-  onSabotage: (id: string, aim: SabotageAim) => void;
-  onMole?: (id: string) => void;
-  stagesDone?: number;
-  me?: PlayerState;
-  distance?: number;
-}) {
-  const [sim, setSim] = useState<number | null>(null);
-  const [composing, setComposing] = useState(!!focus);
-  const [chosen, setChosen] = useState<Record<string, number> | null>(focus?.army ?? null);
-  const [aiming, setAiming] = useState(false);
-  const rowRef = useRef<HTMLDivElement>(null);
-  useEffect(() => {
-    if (focus) rowRef.current?.scrollIntoView({ block: "center", behavior: "smooth" });
-  }, [focus]);
-  const sabotagePrice = r.sabotageCost ?? 0;
-  const intel = r.intelUntil > now;
-  // La pierre du rival progresse en direct entre deux nouvelles du serveur.
-  const stone = r.stone + (r.rate * Math.max(0, now - r.stoneAt)) / 1000;
-  // Mêmes règles que le serveur : plafond PvP, coefficient d'équité, stock à l'abri des étapes.
-  const loot = lootOf(stone, r.rate, r.revenge, { lord: r.isLord, cap: r.lootCap, factor: r.fairness, stagesDone, extraSecured: r.lootSafe, securedFactor: r.granaryCut ? 0.5 : 1 });
-  const shielded = r.shieldUntil > now;
-  const pct = Math.round(r.chance * 100);
-  return (
-    <div className="row" ref={rowRef}>
-      <div className="row-icon" aria-hidden>
-        {r.isLord ? r.blazon : "🛡️"}
-      </div>
-      <div>
-        <div className="row-title">
-          {r.name}{r.mark ? ` ${r.mark}` : ""}
-          {r.isLord && <span className={`badge badge-level-${r.difficulty ?? 1}`}>{DIFFICULTY_LABELS[r.difficulty ?? 1]}</span>}
-          {r.revenge && <span className="badge badge-revenge">revanche !</span>}
-          {r.allianceName && <span className="badge">🤝 {r.allianceName}</span>}
-          {r.atWar && <span className="badge badge-revenge">⚔️ en guerre</span>}
-          {(r.titles ?? []).map((t) => (
-            <span key={t} className="badge badge-title">
-              {t}
-            </span>
-          ))}
-          <Presence lastSeen={r.lastSeen} now={now} />
-          {r.curfew && <span className="badge" title="En couvre-feu : ni attaque ni sabotage">🌙 couvre-feu</span>}
-        </div>
-        <div className="row-desc num">
-          {r.temper ? `${r.temper} · ` : ""}
-          {r.retaliateOnly ? "ne frappe qu'en représailles · " : ""}
-          {r.stoneKnown === false ? "stock inconnu" : `${formatNumber(stone)} pierres`} · {formatRate(r.rate)}/s
-          {shielded ? ` · bouclier ${duration(r.shieldUntil - now)}` : ""}
-          {r.burnedUntil > now ? " · 🔥" : ""}
-        </div>
-        <div className="row-desc army-line num" title={r.armyHint ? "Vue de loin : envoie un espion pour voir l'armée exacte" : "Armée exacte"}>
-          {r.armyHint
-            ? `Armée ${r.armyHint} que la tienne${intel ? " (ton espion n'a rien pu voir de plus)" : ""}`
-            : intel
-              ? `🕵️ ${armyIcons(r.army)} (rapport encore ${duration(r.intelUntil - now)})`
-              : armyIcons(r.army)}
-        </div>
-        {(r.rumorUnmasked || r.granaryCut || (r.moleUntil ?? 0) > now) && (
-          <div className="row-desc num">
-            {[r.rumorUnmasked ? "🗣️ rumeur démasquée" : null, r.granaryCut ? "🧨 grenier saboté" : null, (r.moleUntil ?? 0) > now ? `🐀 ${duration((r.moleUntil ?? 0) - now)}` : null].filter(Boolean).join(" · ")}
-          </div>
-        )}
-        {intel && <SpyReport r={r} now={now} />}
-        <div className="report-chips rival-chips">
-          <span className="chip num chip-gain" title={r.stoneKnown === false ? "Il faut un espion plus fort que sa garde" : "Butin estimé"}>
-            💰 {r.stoneKnown === false ? "?" : formatNumber(loot)}
-          </span>
-          {(r.ransom ?? 0) > 0 && (
-            <span className="chip num" title="Rançon estimée">
-              rançon {formatNumber(r.ransom ?? 0)}
-            </span>
-          )}
-          {(r.fairness ?? 1) < 1 && (
-            <span className="chip num" title={r.isLord ? "Seigneur plus petit que toi : butin réduit" : "Cible plus petite : butin réduit"}>
-              ⚖️ ×{(r.fairness ?? 1).toLocaleString("fr-FR", { maximumFractionDigits: 2 })}
-            </span>
-          )}
-          {r.isLord && r.lootCap !== undefined && r.stoneKnown !== false && loot >= Math.floor(r.lootCap) && (
-            <span className="chip" title="Plafonné par ton tribut des seigneurs">
-              🏰 tribut
-            </span>
-          )}
-        </div>
-        {composing && me && (
-          <SendArmy
-            now={now}
-            me={me}
-            r={r}
-            intel={intel}
-            distance={distance ?? MAP_SPAWN_RADIUS}
-            chosen={chosen ?? (me.troops as Record<string, number>)}
-            setChosen={setChosen}
-            busy={busy !== null}
-            onSend={(troops, allies) => {
-              setComposing(false);
-              onRaid(r.id, troops, allies);
-            }}
-            onClose={() => setComposing(false)}
-          />
-        )}
-        {sim !== null && me && <Simulator me={me} army={(chosen ?? me.troops) as Army} r={r} intel={intel} seed={sim} onReplay={() => setSim(sim + 1)} onClose={() => setSim(null)} />}
-      </div>
-      <div className="row-actions">
-        <Btn className="btn btn-primary" reason={r.blocker} busy={busy !== null} onClick={() => (me ? setComposing(!composing) : onRaid(r.id))}>
-          ⚔️ Raid
-          <span className="cost num">{r.chance >= 0 ? `${pct} %` : r.chanceWord ? r.chanceWord : "🌫️"}</span>
-        </Btn>
-        {me && sim === null && r.chance >= 0 && (
-          <button className="btn" onClick={() => setSim(1)} title="Joue une bataille pour de faux avec ton armée contre celle que tu vois en face.">
-            🎲 Simuler
-          </button>
-        )}
-        {!r.allied && !(r.isLord && r.difficulty === 1) && (
-          <Btn
-            busy={busy !== null}
-            reason={!r.isLord && myStone < spyPrice ? (me?.s2 ? "Pas assez d'or." : "Pas assez de pierre.") : null}
-            onClick={() => onSpy(r.id)}
-            title="L'espion part sur la route ; son rapport dure 1 h et profite à ton alliance. Ce qu'il voit dépend de l'écart entre ton niveau d'espionnage et celui de la cible."
-          >
-            🕵️ Espion
-            <span className="cost num">
-              {r.isLord ? "gratuit" : `${formatNumber(spyPrice)} ${me?.s2 ? "🪙" : "🪨"}`} · {countdown(spyTravelMs(distance ?? MAP_SPAWN_RADIUS))}
-              {r.spyGap !== null && r.spyGap !== undefined ? ` · 👁️ ${Math.round(spyRisk(r.spyGap, distance ?? MAP_SPAWN_RADIUS) * 100)} %` : ""}
-            </span>
-          </Btn>
-        )}
-        {onMole && r.moleUntil !== undefined && r.moleUntil <= now && (
-          <Btn
-            busy={busy !== null}
-            reason={myStone < (r.molePrice ?? 0) ? (me?.s2 ? "Pas assez d'or." : "Pas assez de pierre.") : null}
-            onClick={() => onMole(r.id)}
-            title="La taupe s'installe tout de suite pour 2 h : elle te prévient quand il fait partir une armée, perd son bouclier, entre ou sort de couvre-feu. Il faut un niveau d'espionnage au moins un cran au-dessus du sien. Elle peut être démasquée, à demi-risque, à chaque alerte."
-          >
-            🐀 Taupe
-            <span className="cost num">{formatNumber(r.molePrice ?? 0)} {me?.s2 ? "🪙" : "🪨"}</span>
-          </Btn>
-        )}
-        {r.sabotageBlocker !== undefined && (
-          <Btn busy={busy !== null} reason={myStone < sabotagePrice ? (me?.s2 ? "Pas assez d'or." : "Pas assez de pierre.") : null} onClick={() => setAiming(!aiming)} title="Choisis ce que vise ton saboteur. La réussite dépend de l'écart de niveau d'espionnage ; raté, il est toujours repéré.">
-            🧨 Sabotage
-            <span className="cost num">{formatNumber(sabotagePrice)} {me?.s2 ? "🪙" : "🪨"}</span>
-          </Btn>
-        )}
-      </div>
-      {aiming && r.sabotageBlockers && (
-        <div className="row-actions">
-          {SABOTAGE_AIMS.map(([aim, label, desc]) => (
-            <Btn
-              key={aim}
-              busy={busy !== null}
-              reason={r.sabotageBlockers![aim] ?? (myStone < sabotagePrice ? (me?.s2 ? "Pas assez d'or." : "Pas assez de pierre.") : null)}
-              title={desc}
-              onClick={() => {
-                setAiming(false);
-                onSabotage(r.id, aim);
-              }}
-            >
-              {label}
-            </Btn>
-          ))}
-        </div>
-      )}
-    </div>
-  );
-}
-
-const SABOTAGE_AIMS: [SabotageAim, string, string][] = [
-  ["academie", "🎓 Académie", "un niveau perdu, recherche retardée"],
-  ["grenier", "🌾 Grenier", "stock à l'abri ÷ 2 pendant 2 h"],
-  ["guet", "🔭 Guet", "aucune alerte d'approche pendant 1 h"],
-];
-
-/** T3 : composer l'armée envoyée, type par type ; trajet et chance portent sur ce choix. */
-function SendArmy({
-  me,
-  r,
-  distance,
-  chosen,
-  setChosen,
-  busy,
-  onSend,
-  onClose,
-  now,
-}: {
-  now: number;
-  me: PlayerState;
-  r: RivalView;
-  intel: boolean;
-  distance: number;
-  chosen: Record<string, number>;
-  setChosen: (a: Record<string, number>) => void;
-  busy: boolean;
-  onSend: (troops: Record<string, number>, allies: boolean) => void;
-  onClose: () => void;
-}) {
-  const [withAllies, setWithAllies] = useState(true);
-  const have = me.troops as Record<string, number>;
-  // R3 : renforts de mes alliés présents chez moi, emmenés si la case est cochée.
-  const guests = sumGroups(Object.values(me.stationed ?? {}) as Record<string, number>[]);
-  const hasGuests = Object.keys(guests).length > 0;
-  const army = Object.fromEntries(UNITS.map((u) => [u.id, Math.min(have[u.id] ?? 0, Math.max(0, Math.floor(chosen[u.id] ?? 0)))]).filter(([, n]) => (n as number) > 0)) as Record<string, number>;
-  const all = withAllies && hasGuests ? sumGroups([army, guests]) : army;
-  const out = travelMs(all as Army, distance, armySpeedBonus(me));
-  const chance = estimateChance(all as Army, r.army as Army, playerAttackOpts(me, { attackBonus: r.revenge ? REVENGE_ATTACK_BONUS : 1 }));
-  const away = (me.marches ?? []).length;
-  return (
-    <div className="simulator send-army">
-      <p>
-        <strong>Composer l&apos;armée</strong> · {distance.toLocaleString("fr-FR", { maximumFractionDigits: 1 })} cases
-      </p>
-      <TravelLine army={all as Army} out={out} now={now} bonus={armySpeedBonus(me)} />
-      {UNITS.filter((u) => (have[u.id] ?? 0) > 0).map((u) => (
-        <label key={u.id} className="send-line">
-          <span>
-            {u.icon} {u.name} <span className="num">({formatNumber(have[u.id] ?? 0)})</span>
-          </span>
-          <input
-            type="number"
-            min={0}
-            max={have[u.id] ?? 0}
-            value={army[u.id] ?? 0}
-            onChange={(e) => setChosen({ ...army, [u.id]: Math.max(0, Math.min(have[u.id] ?? 0, Math.floor(Number(e.target.value) || 0))) })}
-          />
-        </label>
-      ))}
-      {UNITS.every((u) => (have[u.id] ?? 0) === 0) && <p className="note">Toutes tes troupes sont en route ou à l&apos;infirmerie.</p>}
-      {hasGuests && (
-        <label className="send-line">
-          <span>
-            🤝 Renforts de mes alliés <span className="num">({armyIcons(guests)})</span>
-          </span>
-          <input type="checkbox" checked={withAllies} onChange={(e) => setWithAllies(e.target.checked)} />
-        </label>
-      )}
-      <p className="note">
-        {r.chance < 0
-          ? r.chanceWord
-            ? `Chance ${r.chanceWord} (avec toute ton armée). Pour un pourcentage précis, envoie un espion.`
-            : "Chance cachée par le brouillard : envoie un espion."
-          : `Chance estimée : ${Math.round(chance * 100)} %.`} Les troupes envoyées, renforts compris, ne défendent plus ton domaine pendant le trajet.
-        {away > 0 ? ` Armées déjà en route : ${away}/${MAX_MARCHES}.` : ""}
-      </p>
-      <div className="qty">
-        <button className="btn" onClick={() => setChosen({ ...have })}>
-          Tout envoyer
-        </button>
-        <button className="btn btn-primary" disabled={busy || Object.keys(army).length === 0 || away >= MAX_MARCHES} onClick={() => onSend(army, withAllies && hasGuests)}>
-          🏇 Envoyer
-        </button>
-        <button className="btn btn-ghost" onClick={onClose}>
-          Annuler
-        </button>
-      </div>
-    </div>
-  );
-}
-
 /** U1 : l'état du jeu à portée des cartes qui n'en reçoivent qu'une partie (temps de trajet). */
 const SnapContext = createContext<{
   snap: GameSnapshot;
@@ -2194,19 +1540,6 @@ function TravelTo({ place, pos, army, reinforce = false }: { place?: string; pos
   return <TravelLine army={clean} out={travelMs(clean, mapDistance(mine, to), bonus)} now={ctx.now} bonus={bonus} />;
 }
 
-/** U1 : caravane et colosse, toute l'armée part : durée et arrivée sous le bouton. */
-function EventTravel({ e, now }: { e: EventView; now: number }) {
-  const live = useContext(SnapContext)?.live;
-  const pos: [number, number] | undefined = e.path
-    ? (() => {
-        const f = Math.min(1, Math.max(0, (now - e.startsAt) / Math.max(1, e.endsAt - e.startsAt)));
-        return [e.path.from[0] + (e.path.to[0] - e.path.from[0]) * f, e.path.from[1] + (e.path.to[1] - e.path.from[1]) * f];
-      })()
-    : e.pos;
-  if (!live || !pos) return null;
-  return <TravelTo pos={pos} army={live.troops as Record<string, number>} />;
-}
-
 /** U1 : durée de l'aller à la seconde, heures d'arrivée et de retour, et ce qui fixe la vitesse. */
 function TravelLine({ army, out, now, bonus }: { army: Army; out: number; now: number; bonus: number }) {
   const ids = (Object.entries(army) as [string, number][]).filter(([, n]) => n > 0).map(([id]) => id);
@@ -2219,12 +1552,6 @@ function TravelLine({ army, out, now, bonus }: { army: Army; out: number; now: n
       {bonus > 0 ? ` · écuries +${Math.round(bonus * 100)} %` : ""}
     </p>
   );
-}
-
-function sumGroups(groups: Record<string, number>[]): Record<string, number> {
-  const out: Record<string, number> = {};
-  for (const g of groups) for (const [id, n] of Object.entries(g)) if (n > 0) out[id] = (out[id] ?? 0) + n;
-  return out;
 }
 
 /** U5 : bouton court ; grisé, il dit pourquoi au toucher au lieu de l'écrire en permanence. */
@@ -2537,34 +1864,6 @@ function SpyReport({ r, now }: { r: RivalView; now: number }) {
   );
 }
 
-/** B7 : simulateur avant l'attaque, une bataille pour de faux contre l'armée vue en face (rien n'est perdu). */
-function Simulator({ me, army, r, intel, seed, onReplay, onClose }: { me: PlayerState; army: Army; r: RivalView; intel: boolean; seed: number; onReplay: () => void; onClose: () => void }) {
-  const attack = army;
-  const opts = playerAttackOpts(me, { attackBonus: r.revenge ? REVENGE_ATTACK_BONUS : 1 });
-  const fight = battle(attack, r.army as Army, seededRng(seed * 7919), opts);
-  return (
-    <div className="simulator">
-      <p>
-        <strong>{fight.success ? "🏆 Victoire" : "💀 Défaite"}</strong> sur ce tirage. Tu perdrais {armyIcons(fight.attackerLost, "rien")}, il perdrait{" "}
-        {armyIcons(fight.defenderLost, "rien")}.
-      </p>
-      <RoundsReport log={fight.log} open />
-      <p className="note">
-        {intel ? "Contre son armée exacte" : "Contre une estimation de son armée (espionne-le pour un calcul juste)"}, sans ses améliorations ni ses bonus de
-        défense : la chance affichée sur le bouton reste la référence.
-      </p>
-      <div className="qty">
-        <button className="btn" onClick={onReplay}>
-          🎲 Rejouer
-        </button>
-        <button className="btn btn-ghost" onClick={onClose}>
-          Fermer
-        </button>
-      </div>
-    </div>
-  );
-}
-
 const SPY_RESEARCH = { icon: "🕵️", name: "Espionnage" };
 
 /** Forge : académie militaire et améliorations des troupes et fortifications (une recherche à la fois). */
@@ -2649,8 +1948,6 @@ function Forge({ live, now, run, stagesDone, base }: { live: PlayerState; now: n
       )}
       <h3 className="section-title">Troupes</h3>
       <div className="list">{rows(UNITS)}</div>
-      <h3 className="section-title">Fortifications</h3>
-      <div className="list">{rows(DEFENSES)}</div>
     </>
   );
 }
@@ -3222,22 +2519,12 @@ function eventAttackText(c: ChronicleEntry, me: string): string {
   const you = c.actorId === me;
   const who = you ? "Tu" : c.actorName;
   const lost = armyIcons(d.attackerLost ?? {}, "aucune");
-  if (d.event === "caravane")
-    return d.success
-      ? `🐪 ${who} ${you ? "as pillé" : "a pillé"} la caravane : ${formatNumber(d.stolen ?? 0)} pierres (pertes : ${lost}).`
-      : `🐪 ${who} ${you ? "as été repoussé" : "a été repoussé"} par l'escorte de la caravane (pertes : ${lost}).`;
-  return `🗿 ${who} ${you ? "as frappé" : "a frappé"} le Colosse : ${armyIcons(d.defenderLost ?? {}, "personne")} fauchés, ${formatNumber(d.dealt ?? 0)} 🪨 de dégâts (pertes : ${lost}).`;
+  return `🗿 ${who} ${you ? "as frappé" : "a frappé"} le Colosse : ${armyIcons(d.defenderLost ?? {}, "personne")} fauchés, ${formatNumber(d.dealt ?? 0)} de dégâts (pertes : ${lost}).`;
 }
 
 /** Événement en cours (ou le prochain) en tête de l'onglet Raids, avec ses derniers assauts. */
-const EVENT_ICONS: Record<EventView["kind"], string> = { caravane: "🐪", colosse: "🗿", foire: "🎪", fete: "🎉", etoiles: "🌠", treve: "🔔", marchand: "🧺", lune: "🌕", brouillard: "🌫️", filon: "⛏️", bandits: "🏕️", tresor: "💰", convoi: "👑", siege: "🏰", tournoi: "🏆" };
-const isLocalEvent = (e: EventView | null | undefined) => !!e && (e.kind === "filon" || e.kind === "bandits" || e.kind === "tresor" || e.kind === "convoi" || e.kind === "siege" || e.kind === "tournoi");
-const isCombatEvent = (e: EventView | null | undefined) => !!e && (e.kind === "caravane" || e.kind === "colosse");
-
-/** V7 à V9 : filon, camps de bandits, trésor. On y envoie une armée composée comme pour un raid. */
-function LocalEventCard(props: { e: EventView; live: PlayerState; now: number; run: ReturnType<typeof useGame>["run"] }) {
-  return props.e.kind === "tournoi" ? <TourneyCard {...props} /> : <PlaceEventCard {...props} />;
-}
+const EVENT_ICONS: Record<EventView["kind"], string> = { colosse: "🗿", tournoi: "🏆" };
+const isCombatEvent = (e: EventView | null | undefined) => !!e && e.kind === "colosse";
 
 /** V12 : composer une armée de tournoi avec le budget commun. */
 function TourneyCard({ e, now, run }: { e: EventView; live: PlayerState; now: number; run: ReturnType<typeof useGame>["run"] }) {
@@ -3294,132 +2581,13 @@ function TourneyCard({ e, now, run }: { e: EventView; live: PlayerState; now: nu
   );
 }
 
-/** Filon, camps de bandits, trésor, convoi et siège : on y envoie une armée composée comme pour un raid. */
-function PlaceEventCard({ e, live, now, run }: { e: EventView; live: PlayerState; now: number; run: ReturnType<typeof useGame>["run"] }) {
-  const [target, setTarget] = useState<string | null>(null);
-  const [chosen, setChosen] = useState<Record<string, number> | null>(null);
-  const [busy, setBusy] = useState(false);
-  const have = live.troops as Record<string, number>;
-  const army = Object.fromEntries(UNITS.map((u) => [u.id, Math.min(have[u.id] ?? 0, Math.max(0, Math.floor((chosen ?? have)[u.id] ?? 0)))]).filter(([, n]) => (n as number) > 0)) as Record<string, number>;
-  const send = async (camp?: string) => {
-    setBusy(true);
-    await run({ type: "event_attack", troops: army, ...(camp ? { camp } : {}) });
-    setBusy(false);
-    setTarget(null);
-  };
-  const composer = (camp?: string) => (
-    <div className="simulator send-army">
-      <TravelTo pos={camp ? e.camps?.find((c) => c.id === camp)?.pos : e.pos} army={army} />
-      {UNITS.filter((u) => (have[u.id] ?? 0) > 0).map((u) => (
-        <label key={u.id} className="send-line">
-          <span>
-            {u.icon} {u.name} <span className="num">({formatNumber(have[u.id] ?? 0)})</span>
-          </span>
-          <input type="number" min={0} max={have[u.id] ?? 0} value={army[u.id] ?? 0} onChange={(ev) => setChosen({ ...army, [u.id]: Math.max(0, Math.min(have[u.id] ?? 0, Math.floor(Number(ev.target.value) || 0))) })} />
-        </label>
-      ))}
-      <div className="qty">
-        <button className="btn" onClick={() => setChosen({ ...have })}>
-          Tout envoyer
-        </button>
-        <button className="btn btn-primary" disabled={busy || Object.keys(army).length === 0} onClick={() => void send(camp)}>
-          🏇 Envoyer
-        </button>
-        <button className="btn btn-ghost" onClick={() => setTarget(null)}>
-          Annuler
-        </button>
-      </div>
-    </div>
-  );
-  return (
-    <div className="row event-card">
-      <div className="row-icon" aria-hidden>
-        {EVENT_ICONS[e.kind]}
-      </div>
-      <div>
-        <div className="row-title">
-          {e.name}
-          <span className="badge badge-level-3">encore {duration(Math.max(0, e.endsAt - now))}</span>
-        </div>
-        <div className="row-desc">{e.description}</div>
-        {(e.kind === "convoi" || e.kind === "siege") && (
-          <div className="row-desc">
-            {e.resolved
-              ? e.outcome === "left"
-                ? e.kind === "convoi" ? "👑 Personne n'escortait le convoi." : "🏰 Personne ne défendait : l'armée est repartie sans rien détruire."
-                : e.outcome === "won"
-                ? e.kind === "convoi" ? "👑 Le convoi est passé." : "🏰 Le beffroi a tenu."
-                : e.kind === "convoi" ? "👑 Le convoi est tombé dans l'embuscade." : "🏰 Le beffroi est tombé : l'étape a perdu 10 % de sa pierre."
-              : `${e.kind === "convoi" ? "Embuscade" : "Assaut"} dans ${duration(Math.max(0, (e.battleAt ?? e.endsAt) - now))} · ennemis : ${armyIcons(e.army)} · ${e.posters ?? 0} joueur${(e.posters ?? 0) > 1 ? "s" : ""} posté${(e.posters ?? 0) > 1 ? "s" : ""}${(e.posters ?? 0) > 0 ? ` (${Math.round(e.chance * 100)} % de tenir)` : ""}`}
-          </div>
-        )}
-        {e.kind === "tresor" && <div className="row-desc">{e.holder ? `💰 La case est tenue par ${e.holder}.` : "💰 Personne ne tient encore la case."}</div>}
-        {e.kind === "bandits" && (
-          <ul className="marches">
-            {(e.camps ?? []).map((c) => (
-              <li key={c.id}>
-                <span>
-                  🏕️ {c.mine ? "Ton camp" : "Un camp"} · {c.winner ? `vidé par ${c.winner}` : armyIcons(c.army)}
-                </span>
-                {!c.winner && (
-                  <button className="btn" onClick={() => setTarget(target === c.id ? null : c.id)}>
-                    Attaquer
-                  </button>
-                )}
-              </li>
-            ))}
-            {(e.camps ?? []).length === 0 && <li>Aucun camp cette fois.</li>}
-          </ul>
-        )}
-        {e.kind === "bandits" && target && composer(target)}
-        {e.kind !== "bandits" && (target ? composer() : null)}
-      </div>
-      {e.kind !== "bandits" && !target && !e.resolved && !e.myPosted && (e.battleAt ?? e.endsAt) > now && (
-        <button className="btn btn-primary" onClick={() => setTarget("go")}>
-          {e.kind === "filon" ? "Poster une armée" : e.kind === "convoi" ? "Escorter le convoi" : e.kind === "siege" ? "Défendre le beffroi" : "Prendre la case"}
-        </button>
-      )}
-    </div>
-  );
-}
-
 /** Événements sans combat (foire, fête, étoiles, trêve, marchand) : un bandeau sous le compteur, et les achats du marchand. */
-function EventBanner({ e, now, stone, run }: { e: EventView | null; now: number; stone: number; run: ReturnType<typeof useGame>["run"] }) {
-  const [busy, setBusy] = useState(false);
-  if (!e) return null;
-  if (!e.active) {
-    if (e.startsAt - now > 15 * 60_000 || e.startsAt <= now) return null;
-    return (
-      <div className="event-banner">
-        {EVENT_ICONS[e.kind]} Dans {duration(e.startsAt - now)} : <strong>{e.name}</strong>
-      </div>
-    );
-  }
-  if (isCombatEvent(e) || isLocalEvent(e) || e.endsAt <= now) return null;
-  const buy = async (choice: MerchantChoice) => {
-    setBusy(true);
-    await run({ type: "merchant", choice });
-    setBusy(false);
-  };
+/** Annonce d'un événement qui commence dans le quart d'heure. */
+function EventBanner({ e, now }: { e: EventView | null; now: number }) {
+  if (!e || e.active || e.startsAt - now > 15 * 60_000 || e.startsAt <= now) return null;
   return (
-    <div className="event-banner active">
-      <div>
-        {EVENT_ICONS[e.kind]} <strong>{e.name}</strong> · encore {duration(e.endsAt - now)}
-      </div>
-      <div className="note">{e.description}</div>
-      {e.kind === "marchand" &&
-        (e.merchantBought ? (
-          <div className="note">Tu as déjà acheté à ce marchand.</div>
-        ) : (
-          <div className="merchant-offers">
-            {(Object.keys(MERCHANT_OFFERS) as MerchantChoice[]).map((c) => (
-              <button key={c} className="btn" disabled={busy || (e.merchantPrice ?? 0) > stone} onClick={() => void buy(c)}>
-                {MERCHANT_OFFERS[c].icon} {MERCHANT_OFFERS[c].label}
-                <span className="cost num">{formatNumber(e.merchantPrice ?? 0)} 🪨</span>
-              </button>
-            ))}
-          </div>
-        ))}
+    <div className="event-banner">
+      {EVENT_ICONS[e.kind]} Dans {duration(e.startsAt - now)} : <strong>{e.name}</strong>
     </div>
   );
 }
@@ -3440,7 +2608,6 @@ function EventCard({ e, now, busy, onAttack, history, me }: { e: EventView; now:
       </p>
     );
   }
-  const pct = Math.round(e.chance * 100);
   return (
     <div className="row event-card">
       <div className="row-icon" aria-hidden>
@@ -3454,23 +2621,17 @@ function EventCard({ e, now, busy, onAttack, history, me }: { e: EventView; now:
         <div className="row-desc">{e.description}</div>
         <div className="row-desc army-line num">{armyIcons(e.army)}</div>
         <div className="event-bar" aria-label="Défenseurs restants">
-          <span style={{ width: `${Math.round((e.kind === "caravane" ? Math.max(0, e.endsAt - now) / Math.max(1, e.endsAt - e.startsAt) : e.armyLeft) * 100)}%` }} />
+          <span style={{ width: `${Math.round(e.armyLeft * 100)}%` }} />
         </div>
         <div className="row-desc num">
-          {e.kind === "caravane"
-            ? `${e.attackers} pillard${e.attackers > 1 ? "s" : ""} · ${e.mine > 0 ? `tu as pris ${formatNumber(e.mine)} 🪨` : `une victoire te rapporte ${formatNumber(e.take)} 🪨`}`
-            : e.pool > 0
-              ? `Prime : ${formatNumber(e.pool)} 🪨 · ${e.attackers} combattant${e.attackers > 1 ? "s" : ""} · ta part : ${Math.round(e.mine * 100)} %`
-              : `${e.attackers} combattant${e.attackers > 1 ? "s" : ""} · un assaut rapporte environ ${formatNumber(e.take * 2)} 🪨 de prime`}
+          {e.attackers} combattant{e.attackers > 1 ? "s" : ""} · ta part des dégâts : {Math.round(e.mine * 100)} % · un assaut rapporte environ {formatNumber(Math.floor((e.take * 2) / VALUE.fer))} ⚔️ fer de prime
         </div>
         <div className="row-desc">
-          {e.blocker ?? (e.kind === "caravane" ? `${pct} % de chances de battre l'escorte.` : `Un assaut devrait faucher environ ${formatNumber(e.take)} 🪨 de son armée.`)}
+          {e.blocker ?? `Un assaut devrait faucher environ ${formatNumber(e.take)} points de son armée.`}
         </div>
       </div>
-      {!e.blocker && <EventTravel e={e} now={now} />}
       <button className="btn btn-primary" disabled={busy || e.blocker !== null} onClick={onAttack}>
-        {e.kind === "caravane" ? "Piller" : "Attaquer"}
-        {e.kind === "caravane" && <span className="cost num">{pct} %</span>}
+        Attaquer
       </button>
       {history.length > 0 && (
         <ul className="chronicle event-history">
@@ -3514,34 +2675,15 @@ function chronicleText(e: ChronicleEntry, me: string, rivals: RivalView[], allia
       .map(([id]) => nameOf(id))
       .slice(0, 4)
       .join(", ");
-    const you = e.actorId === me;
     if (d.phase === "attack") text = eventAttackText(e, me);
-    else if (d.phase === "camp")
-      text = d.success
-        ? `🏕️ ${who(e.actorId, e.actorName, true)} ${you ? "as vidé" : "a vidé"} un camp de bandits : ${formatNumber(d.stolen ?? 0)} pierres.`
-        : `🏕️ Les bandits ont repoussé ${you ? "ton armée" : `l'armée de ${e.actorName}`}.`;
-    else if (d.phase === "treasure")
-      text = d.success
-        ? `💰 ${who(e.actorId, e.actorName, true)} ${you ? "as chassé" : "a chassé"} ${e.targetId === me ? "ton armée" : `l'armée de ${e.targetName}`} du trésor.`
-        : `💰 ${e.targetId === me ? "Ton armée a" : `L'armée de ${e.targetName} a`} tenu le trésor face à ${you ? "toi" : e.actorName}.`;
-    else if (d.phase === "group")
-      text = d.event === "convoi"
-        ? d.success
-          ? `👑 L'escorte du convoi a repoussé l'embuscade (${(d.members ?? []).map(nameOf).slice(0, 4).join(", ")}).`
-          : `👑 L'embuscade a eu raison de l'escorte du convoi.`
-        : d.success
-          ? `🏰 Les défenseurs du beffroi ont tenu le siège (${(d.members ?? []).map(nameOf).slice(0, 4).join(", ")}).`
-          : "🏰 Les défenseurs du beffroi ont cédé au siège.";
-    else if (d.event === "caravane")
-      text = (d.stolen ?? 0) > 0 ? `🐪 La caravane marchande est repartie, allégée de ${formatNumber(d.stolen ?? 0)} pierres (${shares}).` : "🐪 La caravane marchande est repartie intacte.";
-    else text = d.success ? `🗿 Le Colosse est tombé ! ${formatNumber(d.bounty ?? 0)} pierres versées à ceux qui l'ont touché (${shares}).` : "🗿 Le Colosse s'en va invaincu.";
+    else text = d.success ? `🗿 Le Colosse est tombé ! Une prime en fer est versée à ceux qui l'ont touché (${shares}).` : "🗿 Le Colosse s'en va invaincu.";
   } else if (e.kind === "fortress") {
     text = e.details.success
       ? `🏰 ${who(e.actorId, e.actorName, true)} ${e.actorId === me ? "as pris" : "a pris"} la forteresse pour ${allianceName(e.details.alliance)} !`
       : `🏰 ${who(e.actorId, e.actorName, true)} ${e.actorId === me ? "t'es brisé" : "s'est brisé"} sur les murs de la forteresse.`;
   } else if (e.kind === "sabotage") {
     const d = e.details as { success?: boolean; aim?: string; named?: boolean; spotted?: boolean };
-    const part = d.aim === "grenier" ? "grenier" : d.aim === "guet" ? "guet" : "académie";
+    const part = d.aim === "guet" ? "guet" : "académie";
     const target = e.targetId === me ? `ton ${part === "académie" ? "académie" : part}` : `${part === "académie" ? "l'académie" : `le ${part}`} de ${e.targetName}`;
     const hidden = e.actorId !== me && d.named === false;
     text = d.success
@@ -3669,18 +2811,16 @@ function reportOf(e: ChronicleEntry, me: string, myAlliance: number | null, riva
     if (personal) lossChip(attacker ? d.attackerLost : d.defenderLost);
   } else if (e.kind === "event") {
     const share = d.shares?.[me] ?? 0;
-    if (d.phase === "attack" || d.phase === "camp" || d.phase === "treasure" || d.phase === "group") {
-      icon = d.phase === "camp" ? "🏕️" : d.phase === "treasure" ? "💰" : d.event === "convoi" ? "👑" : d.event === "siege" ? "🏰" : d.event === "colosse" ? "🗿" : "🐪";
+    if (d.phase === "attack") {
+      icon = "🗿";
       cat = personal ? "combats" : "royaume";
-      const what = d.phase === "camp" ? "camp de bandits" : d.phase === "treasure" ? "trésor" : d.event === "convoi" ? "convoi" : d.event === "siege" ? "beffroi assiégé" : d.event === "colosse" ? "Colosse" : "caravane";
-      title = `${d.success ? "Succès" : "Échec"} : ${what}`;
-      if ((d.stolen ?? 0) > 0) chips.push({ t: `+${short(d.stolen ?? 0)} 🪨`, tone: attacker ? "gain" : undefined });
+      title = `${d.success ? "Succès" : "Échec"} : Colosse`;
       if ((d.dealt ?? 0) > 0) chips.push({ t: `${short(d.dealt ?? 0)} dégâts` });
       if (personal) lossChip(attacker ? d.attackerLost : d.defenderLost);
     } else {
-      icon = d.event === "colosse" ? "🗿" : "🐪";
+      icon = "🗿";
       cat = share > 0 ? "chantier" : "royaume";
-      title = d.event === "colosse" ? (d.success ? "Le Colosse est tombé" : "Le Colosse repart") : "La caravane repart";
+      title = d.success ? "Le Colosse est tombé" : "Le Colosse repart";
       if (share > 0) chips.push({ t: `ta part ${short(share)}`, tone: "gain" });
       if ((d.bounty ?? 0) > 0) chips.push({ t: `prime ${short(d.bounty ?? 0)}` });
       if ((d.stolen ?? 0) > 0) chips.push({ t: `${short(d.stolen ?? 0)} pris` });
@@ -3691,7 +2831,7 @@ function reportOf(e: ChronicleEntry, me: string, myAlliance: number | null, riva
     cat = personal ? "espionnage" : "royaume";
     if (e.kind === "sabotage") {
       const aim = (d as { aim?: string }).aim;
-      const part = aim === "grenier" ? "grenier" : aim === "guet" ? "guet" : "académie";
+      const part = aim === "guet" ? "guet" : "académie";
       title = attacker ? `Sabotage : ${part} de ${e.targetName}` : e.targetId === me ? `Sabotage de ton ${part}` : `Sabotage chez ${e.targetName}`;
       chips.push({ t: d.success ? "réussi" : "pris", tone: (d.success ? attacker : !attacker) ? "gain" : "loss" });
     } else {
@@ -3778,7 +2918,7 @@ function buildReports(snap: GameSnapshot, live: PlayerState, now: number): Repor
   // H1, U2 : écus de clôture de la saison passée, un rapport « Chantier ».
   const rw = snap.seasonRewards;
   if (rw && rw.total > 0) {
-    const label = (id: string) => HALL.find((h) => h.id === id)?.title ?? id;
+    const label = (id: string) => HALL_ALL.find((h) => h.id === id)?.title ?? id;
     const lines = [
       rw.details.stageEcus > 0 ? `🏗️ ${rw.details.stages} étapes du beffroi avec un palier de don : ${rw.details.stageEcus} écus` : null,
       ...rw.details.podium.map((p) => `🏆 ${label(p.category)}, ${p.rank === 1 ? "1re" : `${p.rank}e`} place : ${p.ecus} écus`),
@@ -3932,250 +3072,6 @@ function agoText(t: number, now: number): string {
   if (m < 60) return `il y a ${m} min`;
   if (m < 1440) return `il y a ${Math.floor(m / 60)} h`;
   return `il y a ${Math.floor(m / 1440)} j`;
-}
-
-/** Couleur stable d'une alliance sur la carte. */
-const ALLIANCE_COLORS = ["#2f6db3", "#3f8f3a", "#b35a1f", "#7a3fa0", "#b3304a", "#1f8f8a", "#8a7a1f", "#555"];
-function allianceColor(id: number | null | undefined): string | undefined {
-  return id == null ? undefined : ALLIANCE_COLORS[Math.abs(id) % ALLIANCE_COLORS.length];
-}
-
-/** T1 : carte du royaume. Toucher un lieu ouvre sa fiche. */
-function readMapNames(): boolean {
-  try {
-    return localStorage.getItem("beffroi-map-names") === "1";
-  } catch {
-    return false;
-  }
-}
-
-function KingdomMap({ snap, live, now, run, focus }: { snap: GameSnapshot; live: PlayerState; now: number; run: ReturnType<typeof useGame>["run"]; focus?: Focus | null }) {
-  const [picked, setPicked] = useState<string | null>(() => (focus && now - focus.at < 5000 ? focus.id : null));
-  const showMove = useContext(SnapContext)?.showMove;
-  const [busy, setBusy] = useState<string | null>(null);
-  const [zoomed, setZoomed] = useState(false);
-  const [names, setNames] = useState(readMapNames);
-  const scroller = useRef<HTMLDivElement>(null);
-  const map = snap.map;
-  const mine = map?.places[snap.userId];
-  // En gros plan, on centre la vue sur mon domaine.
-  useEffect(() => {
-    const el = scroller.current;
-    if (!zoomed || !el || !map || !mine) return;
-    const fx = (mine[0] - 0.5) / map.size;
-    const fy = (map.size - mine[1] + 0.5) / map.size;
-    el.scrollLeft = fx * el.scrollWidth - el.clientWidth / 2;
-    el.scrollTop = fy * el.scrollHeight * 0.92 - el.clientHeight / 2;
-  }, [zoomed, map, mine]);
-  if (!map) return <p className="empty">On déplie la carte…</p>;
-  const toggleNames = () => {
-    setNames((v) => {
-      try {
-        localStorage.setItem("beffroi-map-names", v ? "0" : "1");
-      } catch {
-        /* préférence non retenue */
-      }
-      return !v;
-    });
-  };
-  const ev = snap.event;
-  // La caravane et le convoi avancent en direct le long de leur route.
-  const evPos: [number, number] | undefined = ev?.active && ev.path
-    ? (() => {
-        const f = Math.min(1, Math.max(0, (now - ev.startsAt) / Math.max(1, ev.endsAt - ev.startsAt)));
-        return [ev.path.from[0] + (ev.path.to[0] - ev.path.from[0]) * f, ev.path.from[1] + (ev.path.to[1] - ev.path.from[1]) * f];
-      })()
-    : ev?.pos;
-  const myAlliance = snap.alliance?.id ?? null;
-  const allianceIdOf = (name: string | null) => snap.alliances.find((a) => a.name === name)?.id ?? null;
-  const rival = snap.rivals.find((r) => r.id === picked);
-  const act = async (target: string, action: Parameters<typeof run>[0]) => {
-    setBusy(target);
-    await run(action);
-    setBusy(null);
-  };
-  const spyPrice = spyCost(live, worldFrom(snap.worksite), now);
-  const placeDistance = (p?: readonly [number, number]) => (mine && p ? mapDistance(mine, p) : null);
-  // Taille des domaines : hameau, village ou manoir selon la production parmi les joueurs.
-  const myRate = rateAt(live, worldFrom(snap.worksite), now);
-  const rates = [myRate, ...snap.rivals.filter((r) => !r.isLord).map((r) => r.rate)].sort((a, b) => a - b);
-  const tierOf = (rate: number): 1 | 2 | 3 => {
-    const rank = rates.findIndex((x) => x >= rate) / Math.max(1, rates.length - 1);
-    return rank >= 0.7 ? 3 : rank >= 0.3 ? 2 : 1;
-  };
-  const places: BoardPlace[] = [];
-  for (const [id, p] of Object.entries(map.places)) {
-    const pos: [number, number] = [p[0], p[1]];
-    if (id === snap.userId) {
-      places.push({ id, pos, kind: "me", name: snap.username, color: allianceColor(myAlliance), tier: tierOf(myRate) });
-      continue;
-    }
-    const r = snap.rivals.find((x) => x.id === id);
-    if (!r) continue;
-    places.push({
-      id,
-      pos,
-      kind: r.isLord ? "lord" : "player",
-      name: r.name,
-      color: r.isLord ? undefined : allianceColor(allianceIdOf(r.allianceName)),
-      tier: r.isLord ? 1 : tierOf(r.rate),
-      difficulty: r.difficulty,
-      aggressive: r.isLord && !r.retaliateOnly && (r.difficulty ?? 1) > 1,
-      blazon: r.blazon,
-      shielded: r.shieldUntil > now,
-      curfew: r.curfew,
-      allied: r.allied,
-      atWar: r.atWar,
-    });
-  }
-  const marches: BoardMarch[] = !mine
-    ? []
-    : (snap.state.marches ?? []).flatMap((m) => {
-        const camp = m.target.startsWith("camp:") ? ev?.camps?.find((c) => `camp:${ev?.id}:${c.id}` === m.target) : undefined;
-        const target =
-          m.target === "fortress"
-            ? map.fortress
-            : m.target.startsWith("convoy:") || m.target.startsWith("siege:")
-              ? ev?.pos
-              : m.target.startsWith("event:") || m.target.startsWith("mine:") || m.target.startsWith("treasure:")
-                ? evPos
-                : camp
-                  ? camp.pos
-                  : m.target.startsWith("hall:")
-                    ? map.halls?.find((h) => `hall:${h.id}` === m.target)?.pos
-                    : map.places[m.target];
-        if (!target) return [];
-        const f =
-          m.status === "camp"
-            ? 1
-            : m.status === "out"
-              ? Math.min(1, Math.max(0, (now - m.departAt) / Math.max(1, m.arriveAt - m.departAt)))
-              : Math.min(1, Math.max(0, (m.returnAt - now) / Math.max(1, m.arriveAt - m.departAt)));
-        return [{ id: m.id, from: [mine[0], mine[1]], to: [target[0], target[1]], f, status: m.status }];
-      });
-  // E7 : mes espions en route, comme de petites armées.
-  const spyMarches: BoardMarch[] = !mine
-    ? []
-    : (live.spies ?? []).flatMap((sp) => {
-        const to = sp.target === "fortress" ? map.fortress : sp.target.startsWith("hall:") ? map.halls?.find((h) => `hall:${h.id}` === sp.target)?.pos : map.places[sp.target];
-        if (!to || sp.arriveAt <= now) return [];
-        const f = Math.min(1, Math.max(0, (now - sp.departAt) / Math.max(1, sp.arriveAt - sp.departAt)));
-        return [{ id: `spy-${sp.id}`, from: [mine[0], mine[1]] as [number, number], to: [to[0], to[1]] as [number, number], f, status: "out" as const }];
-      });
-  marches.push(...spyMarches);
-  const incoming = (snap.incoming ?? []).map((i) => {
-    const from = i.from ? snap.rivals.find((r) => r.name === i.from) : undefined;
-    const at = from ? map.places[from.id] : undefined;
-    return { id: i.id, from: at ? ([at[0], at[1]] as [number, number]) : null };
-  });
-  const pickedPos = picked ? map.places[picked] : undefined;
-  const pickedDistance = placeDistance(pickedPos);
-  const army = cleanArmy({ ...live.troops } as Army);
-  const travel =
-    pickedPos && pickedDistance !== null
-      ? { to: [pickedPos[0], pickedPos[1]] as [number, number], label: `≈ ${Math.round(travelMs(armySize(army) > 0 ? army : ({ piquier: 1 } as Army), pickedDistance, armySpeedBonus(live)) / 60_000)} min` }
-      : null;
-  return (
-    <>
-      <div className="map-tools">
-        <button className="btn" aria-pressed={names} onClick={toggleNames}>
-          🏷️ Noms
-        </button>
-        <button className="btn" aria-pressed={zoomed} onClick={() => setZoomed((z) => !z)}>
-          {zoomed ? "🗺️ Ensemble" : "🔍 Zoom"}
-        </button>
-      </div>
-      <div className={`kingdom-map${zoomed ? " zoomed" : ""}`}>
-        <div className="map-scroll" ref={scroller}>
-          <MapBoard
-            size={map.size}
-            belfry={[map.belfry[0], map.belfry[1]]}
-            fortress={[map.fortress[0], map.fortress[1]]}
-            fortressName={snap.fortress.name}
-            fortressColor={allianceColor(snap.fortress.holderId)}
-            stagesDone={stagesDoneAt(worldFrom(snap.worksite), now)}
-            stagesTotal={STAGES.length}
-            places={places}
-            event={ev}
-            now={now}
-            marches={marches}
-            incoming={incoming}
-            onMarch={(id) => showMove?.(id)}
-            picked={picked}
-            onPick={setPicked}
-            showNames={names || zoomed}
-            travel={travel}
-            meColor={allianceColor(myAlliance)}
-            halls={(map.halls ?? []).map((h) => ({
-              id: h.id,
-              pos: [h.pos[0], h.pos[1]] as [number, number],
-              name: h.name,
-              color: h.allianceId !== null ? allianceColor(h.allianceId) : undefined,
-              stage: h.stage,
-              maxStages: h.lodge ? 4 : 10,
-              lodge: h.lodge,
-              mine: h.allianceId !== null ? h.allianceId === myAlliance : snap.guild?.lodge === true && !!snap.guild.hall && snap.guild.hall.pos[0] === h.pos[0] && snap.guild.hall.pos[1] === h.pos[1],
-            }))}
-          />
-        </div>
-        <ul className="map-legend" aria-label="Légende">
-          <li>
-            <svg viewBox="-20 -24 40 40" aria-hidden>
-              <use href="#mg-house1" style={{ ["--roof" as string]: allianceColor(myAlliance) ?? "var(--map-roof)" }} />
-            </svg>
-            Joueurs (toit aux couleurs de l&apos;alliance)
-          </li>
-          <li>
-            <svg viewBox="-20 -24 40 40" aria-hidden>
-              <use href="#mg-lord2" />
-            </svg>
-            Seigneurs (plus grands, plus redoutables)
-          </li>
-          <li>
-            <svg viewBox="-20 -22 40 40" aria-hidden>
-              <use href="#mg-flag" />
-            </svg>
-            Ton armée en route
-          </li>
-          <li>
-            <svg viewBox="-20 -14 40 30" aria-hidden>
-              <path d="M-17 10 A17 17 0 0 1 17 10" className="map-shield" />
-            </svg>
-            Sous bouclier
-          </li>
-        </ul>
-      </div>
-      {rival ? (
-        <>
-          <p className="raid-state num">
-            📍 {rival.name} · {(pickedDistance ?? 0).toLocaleString("fr-FR", { maximumFractionDigits: 1 })} cases{travel ? ` · ${travel.label}` : ""}
-          </p>
-          {rival.allied ? (
-            <p className="note">🤝 Allié : renforts depuis l&apos;onglet Alliance.</p>
-          ) : (
-            <div className="list">
-              <RivalRow
-                r={rival}
-                now={now}
-                busy={busy}
-                onRaid={(t, troops, allies) => act(t, { type: "raid", target: t, troops, allies })}
-                distance={pickedDistance ?? undefined}
-                onSpy={(t) => act(t, { type: "spy", target: t })}
-                spyPrice={spyPrice}
-                stone={live.s2 ? live.s2.gold : live.stone}
-                onSabotage={(t, aim) => act(t, { type: "sabotage", target: t, aim })}
-                onMole={(t) => act(t, { type: "mole", target: t })}
-                stagesDone={stagesDoneAt(worldFrom(snap.worksite), now)}
-                me={live}
-              />
-            </div>
-          )}
-        </>
-      ) : (
-        <p className="empty">Touche un lieu pour ouvrir sa fiche.</p>
-      )}
-    </>
-  );
 }
 
 /** B11 : messages courts, canal général ou d'alliance, avec réactions. */
@@ -4740,143 +3636,6 @@ export function Companies({ live, now, run, renown = 0 }: { live: PlayerState; n
         </div>
       )}
       <CaptainsPanel live={live} run={run} renown={renown} />
-      {/* Saison 2 : personne n'attaque le château (seigneurs passifs, pas de raids entre joueurs) : pas de fortifications. */}
-      {!live.s2 && (
-        <>
-      <div className="block-head">
-        <h3 className="section-title">🧱 Fortifications</h3>
-      </div>
-      <div className="list">
-        {DEFENSES.map((d) => {
-          const level = live.fortLevels?.[d.id] ?? 0;
-          const building = works.fort?.id === d.id;
-          return (
-            <div key={d.id} className="row">
-              <div className="row-icon" aria-hidden>
-                {d.icon}
-              </div>
-              <div>
-                <div className="row-title row-title-one">
-                  <span className="row-name">{d.name}</span>
-                  <span className="badge">niv. {level}</span>
-                </div>
-                <div className="row-desc num one-line">
-                  {formatNumber(fortCount(d.id, level))} · ⚔️ {d.attack} · ❤️ {d.hp}
-                  {building ? ` · 🔨 niv. ${works.fort!.level} dans ${countdown(works.fort!.until - now)}` : ""}
-                </div>
-                {building && <WorkBar start={works.fort!.until - fortMs(works.fort!.level - 1)} until={works.fort!.until} now={now} />}
-              </div>
-              {level < FORT_MAX && !building && (
-                <Btn className="btn btn-primary btn-small" busy={busy} reason={fortBlocker(live, d.id)} onClick={() => void act({ type: "company", op: "fort", unit: d.id })}>
-                  🔨 Niv. {level + 1}
-                  <span className="cost num">
-                    {formatNumber(fortCost(level))} 🪨 · {countdown(fortMs(level))}
-                  </span>
-                </Btn>
-              )}
-            </div>
-          );
-        })}
-      </div>
-        </>
-      )}
     </>
-  );
-}
-
-/** Caserne et fortifications du joueur. */
-function Garrison({ live, run }: { live: PlayerState; run: ReturnType<typeof useGame>["run"] }) {
-  const [qty, setQty] = useState(1);
-  const [custom, setCustom] = useState("");
-  const presets = [1, 10, 50, 100, 500];
-  const pickCustom = (text: string) => {
-    setCustom(text);
-    const n = Math.floor(Number(text));
-    if (Number.isSafeInteger(n) && n >= 1) setQty(n);
-  };
-  const buy = (kind: "unit" | "defense", id: string) => void run({ type: "army", kind, id, qty });
-  const rows = (kind: "unit" | "defense", defs: readonly CombatantDef<string>[]) =>
-    defs.map((d) => {
-      const n = ((kind === "unit" ? live.troops : live.defenses) as Record<string, number>)[d.id] ?? 0;
-      return (
-        <div key={d.id} className="row">
-          <div className="row-icon" aria-hidden>
-            {d.icon}
-          </div>
-          <div>
-            <div className="row-title">
-              {d.name}
-              {n > 0 && (
-                <span className="row-count num" title={`${n.toLocaleString("fr-FR")} ${d.name.toLowerCase()}, d'une valeur de ${formatNumber(n * d.cost)} pierres`}>
-                  {formatNumber(n)} · {formatNumber(n * d.cost)} 🪨
-                </span>
-              )}
-              {kind === "unit" && (live.wounded as Record<string, number> | undefined)?.[d.id] ? (
-                <span className="badge" title="À l'infirmerie : ils reviennent bientôt">🩹 {(live.wounded as Record<string, number>)[d.id]}</span>
-              ) : null}
-              {levelOf(live, d.id as CombatantId) > 0 && <span className="badge">niv. {levelOf(live, d.id as CombatantId)}</span>}
-            </div>
-            <div className="row-desc num">
-              ⚔️ {d.attack} · ❤️ {d.hp} · {d.description}
-            </div>
-            {d.bonus && <div className="row-desc strong-vs">{strengths(d.bonus)}</div>}
-          </div>
-          <Btn className="btn btn-primary" reason={Math.ceil(armyPrice(live, kind, d.cost) * qty) > live.stone ? "Pas assez de pierre." : null} onClick={() => buy(kind, d.id)}>
-            +{qty}
-            <span className="cost num">{formatNumber(Math.ceil(armyPrice(live, kind, d.cost) * qty))} 🪨</span>
-          </Btn>
-        </div>
-      );
-    });
-  return (
-    <>
-      <div className="garrison-head">
-        <h3 className="section-title">Ta garnison</h3>
-        <span className="num">
-          valeur {formatNumber(armyWorth(live))} 🪨
-        </span>
-      </div>
-      {live.healAt > 0 && Object.keys(live.wounded ?? {}).length > 0 && (
-        <p className="note num">
-          🩹 {formatNumber(Object.values(live.wounded ?? {}).reduce((a, b) => a + (b ?? 0), 0))} blessés · retour {new Date(live.healAt).toLocaleTimeString("fr-FR", { hour: "2-digit", minute: "2-digit" })}
-        </p>
-      )}
-      <div className="qty" role="group" aria-label="Quantité">
-        {presets.map((q) => (
-          <button
-            key={q}
-            className="btn"
-            aria-pressed={qty === q && custom === ""}
-            onClick={() => {
-              setQty(q);
-              setCustom("");
-            }}
-          >
-            ×{q}
-          </button>
-        ))}
-        <input
-          className={`input input-qty${custom !== "" ? " input-active" : ""}`}
-          type="number"
-          inputMode="numeric"
-          min={1}
-          placeholder="×…"
-          value={custom}
-          onChange={(e) => pickCustom(e.target.value)}
-          aria-label="Quantité au choix"
-        />
-      </div>
-      <div className="list">{rows("unit", UNITS)}</div>
-      <div className="list" style={{ marginTop: 8 }}>
-        {rows("defense", DEFENSES)}
-      </div>
-    </>
-  );
-}
-
-function strengths(bonus: Partial<Record<Category, number>>): string {
-  return (
-    "Fort contre " +
-    (Object.entries(bonus) as [Category, number][]).map(([c, m]) => `${CATEGORY_LABELS[c]} (×${m})`).join(" et ")
   );
 }

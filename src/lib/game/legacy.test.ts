@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { seasonRewards } from "./legacy";
-import { defenseArmy, extraSecured, newPlayerState, productionPerSecond, rampartStrength, rateAt } from "./engine";
+import { defenseArmy, extraSecured, productionPerSecond, rampartStrength, rateAt } from "./engine";
+import { s2Player, useS2 } from "./s2/fixture";
 
 describe("H1 : écus de clôture", () => {
   it("étapes du beffroi pour les donateurs, podium partout, fidélité", () => {
@@ -26,14 +27,15 @@ describe("H1 : écus de clôture", () => {
 });
 
 describe("H2 : héritage", () => {
+  useS2();
   it("carrier, départ lancé, cave et rempart", () => {
-    const base = { ...newPlayerState(0), generators: { tailleur: 10 } } as ReturnType<typeof newPlayerState>;
+    const base = s2Player(0);
     const s = { ...base, legacy: { carrier: 4, depart: 1, cave: 2, rempart: 3 }, seasonStart: 1 };
     const world = { stageCompletedAt: [] };
     expect(productionPerSecond(s, world, 0) / productionPerSecond(base, world, 0)).toBeCloseTo(1.08);
     expect(rateAt(s, world, 1000) / productionPerSecond(s, world, 0)).toBeCloseTo(1.1);
     expect(rateAt(s, world, 25 * 3_600_000) / productionPerSecond(s, world, 0)).toBeCloseTo(1);
-    expect(extraSecured(s, 0) - extraSecured(base, 0)).toBe(1800);
+    expect(extraSecured(s) - extraSecured(base)).toBe(1800);
     expect(defenseArmy(s).garde).toBe(defenseArmy(base).garde);
     const walled = { ...s, defenses: { tour: 10 } } as typeof s;
     expect(rampartStrength(walled)).toBeCloseTo(1.09);

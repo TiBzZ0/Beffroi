@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { BURN_MS, GUARDS_PER_DOMAIN, INFIRMARY_MS, LORD_SHIELD_MS, RAID_COOLDOWN_MS, SECURED_SECONDS, SHIELD_MS } from "./config";
+import { BURN_MS, GUARDS_PER_DOMAIN, INFIRMARY_MS, LORD_SHIELD_MS, SECURED_SECONDS, SHIELD_MS } from "./config";
 import { armyFromBudget, battle, estimateChance, seededRng } from "./battle";
 import {
   settleWounded,
@@ -8,14 +8,9 @@ import {
   lordLootCapOf,
   fairness,
   advance,
-  applyClicks,
-  armyWorth,
-  buyArmy,
   defenseArmy,
   fuzzyArmy,
   fuzzyCount,
-  generatorCost,
-  spyCost,
   spyRisk,
   spyTravelMs,
   sabotageChance,
@@ -29,22 +24,18 @@ import {
   researchCost,
   startResearch,
   newPlayerState,
-  rebuildRuin,
   productionPerSecond,
   raidArmies,
   lootShares,
-  recallReinforcements,
-  sendReinforcements,
   splitTroopLosses,
   resolveRaid,
-  ruinCost,
   relativeSize,
   type PlayerState,
   type RaidContext,
 } from "./engine";
 
 const T0 = 1_700_000_000_000;
-const NOW = T0 + 10 * RAID_COOLDOWN_MS;
+const NOW = T0 + 50 * 60_000;
 const world = { stageCompletedAt: [] };
 
 function player(extra: Partial<PlayerState> = {}): PlayerState {
@@ -277,19 +268,6 @@ describe("alliances et renforts", () => {
     expect(r.ok).toBe(false);
   });
 
-  it("envoyer puis rappeler des renforts", () => {
-    const sent = sendReinforcements(player({ troops: { piquier: 10 } }), player({ troops: {} }), "a", "piquier", 4);
-    if (!sent.ok) throw new Error(sent.error);
-    expect(sent.value.sender.troops).toEqual({ piquier: 6 });
-    expect(sent.value.host.stationed).toEqual({ a: { piquier: 4 } });
-    expect(defenseArmy(sent.value.host)).toMatchObject({ piquier: 4 });
-    expect(sendReinforcements(player({ troops: { piquier: 1 } }), player(), "a", "piquier", 2).ok).toBe(false);
-    const back = recallReinforcements(sent.value.sender, sent.value.host, "a");
-    if (!back.ok) throw new Error(back.error);
-    expect(back.value.owner.troops).toEqual({ piquier: 10 });
-    expect(back.value.host.stationed).toEqual({});
-  });
-
   it("les renforts partent en raid avec l'allié et partagent les pertes au prorata", () => {
     const host = player({ troops: { milicien: 6 }, stationed: { ally: { milicien: 4 } } });
     const split = splitTroopLosses(host, { milicien: 5 });
@@ -364,54 +342,13 @@ describe("espions", () => {
     expect(startResearch(s, "espionnage", NOW + 2e10, 0, 1).ok).toBe(false);
   });
 
-  it("un espion coûte une minute de production, 200 pierres au moins", () => {
-    expect(spyCost(player(), world, NOW)).toBe(200);
-    expect(spyCost(player({ generators: { tailleur: 100 } }), world, NOW)).toBe(6_240); // 100 tailleurs : deux tranches de maîtrise, +4 %
-  });
 });
 
 describe("troupes et défenses", () => {
-  it("acheter des troupes ou des fortifications coûte de la pierre", () => {
-    const r = buyArmy(player({ troops: { milicien: 10 }, stone: 1000 }), "unit", "milicien", 3);
-    expect(r.ok && r.value.troops.milicien).toBe(13);
-    expect(r.ok && r.value.stone).toBe(400);
-    expect(buyArmy(player({ stone: 100 }), "defense", "palissade", 1).ok).toBe(false);
-    expect(buyArmy(player({ stone: 1e6 }), "defense", "donjon", 1).ok).toBe(false);
-  });
-
-  it("la valeur d'une armée additionne troupes et fortifications", () => {
-    expect(armyWorth(player({ troops: { milicien: 2 }, defenses: { palissade: 2 } }))).toBe(700);
-  });
-
   it("l'armée d'un seigneur se compose selon son budget et ses goûts", () => {
     expect(armyFromBudget(1_800, { chevalier: 0.5, arbaletrier: 0.3, milicien: 0.2 })).toEqual({ arbaletrier: 1, milicien: 6 });
     expect(armyFromBudget(30_000, { chevalier: 0.5, arbaletrier: 0.3, milicien: 0.2 })).toEqual({ chevalier: 7, arbaletrier: 18, milicien: 35 });
     expect(armyFromBudget(1_000, {})).toEqual({});
-  });
-});
-
-describe("incendie et ruines", () => {
-  it("l'incendie divise la production par deux, puis la production reprend", () => {
-    const s = player({ generators: { tailleur: 10 }, lastUpdate: T0, burnedUntil: T0 + 10_000 });
-    expect(advance(s, T0 + 20_000, world).stone).toBeCloseTo(50 + 100);
-  });
-
-  it("frapper la pierre écourte l'incendie", () => {
-    const s = player({ burnedUntil: NOW + 60_000, lastClickAt: NOW - 2000 });
-    const { state } = applyClicks(s, 20, NOW, world);
-    expect(state.burnedUntil).toBe(NOW + 60_000 - 20_000);
-  });
-
-  it("une ruine se rebâtit à moitié prix et les ruines comptent dans le prix du neuf", () => {
-    const s = player({ stone: 1e6, generators: { tailleur: 9 }, ruins: { tailleur: 1 } });
-    expect(generatorCost(s, "tailleur")).toBe(generatorCost(player({ generators: { tailleur: 10 } }), "tailleur"));
-    const cost = ruinCost(s, "tailleur");
-    const r = rebuildRuin(s, "tailleur");
-    if (!r.ok) throw new Error(r.error);
-    expect(r.value.generators.tailleur).toBe(10);
-    expect(r.value.ruins.tailleur).toBe(0);
-    expect(r.value.stone).toBe(1e6 - cost);
-    expect(rebuildRuin(r.value, "tailleur").ok).toBe(false);
   });
 });
 
@@ -449,14 +386,13 @@ describe("espionnage, deuxième livraison", () => {
     expect(r.value.stone).toBe(1e9 - 1800);
   });
 
-  it("le sabotage du grenier et du guet ne demande ni académie ni recherche", () => {
+  it("le sabotage du guet ne demande ni académie ni recherche, et met la cible à l'abri un moment", () => {
     const target = player();
     expect(sabotageBlocker(target, NOW, undefined, "academie")).not.toBeNull();
-    expect(sabotageBlocker(target, NOW, undefined, "grenier")).toBeNull();
-    const g = applySabotage(target, NOW, "grenier");
-    expect(g.granaryCutUntil).toBe(NOW + 2 * 3_600_000);
+    expect(sabotageBlocker(target, NOW, undefined, "guet")).toBeNull();
+    const g = applySabotage(target, NOW, "guet");
+    expect(g.blindUntil).toBe(NOW + 3_600_000);
     expect(sabotageBlocker(g, NOW + 1, undefined, "guet")).not.toBeNull();
-    expect(applySabotage(target, NOW, "guet").blindUntil).toBe(NOW + 3_600_000);
   });
 
   it("un grenier saboté ne met que la moitié à l'abri", () => {

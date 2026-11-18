@@ -1,61 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { EVENT_WEIGHTS, MERCHANT_PRICE_SECONDS, type EventKind } from "./config";
-import { drawNextEvent, pickNextEvent, tourneyPodium } from "./events";
-import { advance, buyFromMerchant, buyUpgrade, catchVein, eventActive, generatorCost, newPlayerState, rateAt, raidBlocker, scheduleVein, type PlayerState } from "./engine";
-import { UPGRADES } from "./config";
-
-const world = { stageCompletedAt: [] };
-const T = 1_800_000_000_000;
-const withEvent = (s: PlayerState, kind: EventKind): PlayerState => ({ ...s, eventMods: [{ kind, from: T - 1000, until: T + 3_600_000 }], lastUpdate: T });
-
-describe("tirage des événements", () => {
-  it("ne répète jamais le même et respecte à peu près les poids", () => {
-    const counts: Record<string, number> = {};
-    let last: EventKind = "caravane";
-    for (let i = 0; i < 4000; i++) {
-      const next = pickNextEvent(last, i * 7919 + 1);
-      expect(next).not.toBe(last);
-      counts[next] = (counts[next] ?? 0) + 1;
-      last = next;
-    }
-    for (const k of Object.keys(EVENT_WEIGHTS)) expect(counts[k] ?? 0).toBeGreaterThan(0);
-    expect(counts.caravane).toBeGreaterThan(counts.treve);
-  });
-});
-
-describe("événements sans combat", () => {
-  const base = { ...newPlayerState(T), stone: 1e12, generators: { manoeuvre: 10 } } as PlayerState;
-  it("V3 : la foire baisse le prix des ateliers et des savoirs", () => {
-    const fair = withEvent(base, "foire");
-    expect(generatorCost(fair, "manoeuvre", 1)).toBeLessThan(generatorCost({ ...base, lastUpdate: T }, "manoeuvre", 1));
-    const u = UPGRADES[0];
-    const before = buyUpgrade({ ...base, lastUpdate: T }, u.id);
-    const after = buyUpgrade(fair, u.id);
-    if (before.ok && after.ok) expect(after.value.stone - before.value.stone).toBeCloseTo(u.cost * 0.2, -1);
-  });
-  it("V6 : la trêve bloque les raids et donne +25 % de production", () => {
-    const truce = withEvent(base, "treve");
-    expect(eventActive(truce, "treve", T)).toBe(true);
-    expect(raidBlocker(truce, truce, { attackerId: "a", victimId: "b", now: T, victimRate: 1 } as never)).toMatch(/Trêve/);
-    expect(rateAt(truce, world, T) / rateAt({ ...base }, world, T)).toBeCloseTo(1.25, 5);
-  });
-  it("V5 : les veines arrivent trois fois plus vite pendant la pluie d'étoiles", () => {
-    const stars = scheduleVein({ ...withEvent(base, "etoiles"), veinAt: 0 }, T, () => 0.5);
-    const plain = scheduleVein({ ...base, veinAt: 0 }, T, () => 0.5);
-    expect(stars.veinAt - T).toBeLessThan((plain.veinAt - T) / 2.9);
-    void catchVein;
-  });
-  it("V15 : le marchand vend un bonus une seule fois, pour 30 minutes de production", () => {
-    const m = advance(withEvent(base, "marchand"), T, world);
-    const r = buyFromMerchant(m, "production", 42, T, world);
-    expect(r.ok).toBe(true);
-    if (!r.ok) return;
-    expect(m.stone - r.value.stone).toBeCloseTo(rateAt(m, world, T) * MERCHANT_PRICE_SECONDS, -2);
-    expect(r.value.boostProdUntil).toBeGreaterThan(T);
-    expect(buyFromMerchant(r.value, "safe", 42, T, world).ok).toBe(false);
-    expect(buyFromMerchant(m, "repair", 42, T, world).ok).toBe(false);
-  });
-});
+import { drawNextEvent, tourneyPodium } from "./events";
 
 describe("tourneyPodium", () => {
   it("classe le plus fort premier et ne donne pas de podium à un inscrit seul", () => {
@@ -75,25 +19,14 @@ describe("tourneyPodium", () => {
 });
 
 describe("drawNextEvent", () => {
-  it("ne tire ni siège, ni convoi, ni tournoi avec un seul joueur en ligne", () => {
-    for (let seed = 0; seed < 500; seed++) expect(["siege", "convoi", "tournoi"]).not.toContain(drawNextEvent("foire", seed, 1));
+  it("alterne colosse et tournoi", () => {
+    expect(drawNextEvent("colosse", 5)).toBe("tournoi");
+    expect(drawNextEvent("tournoi", 5)).toBe("colosse");
   });
-  it("ne tire pas de siège à 2 joueurs, mais le permet à 3", () => {
-    const seeds = Array.from({ length: 2000 }, (_, i) => i);
-    expect(seeds.some((s) => drawNextEvent("foire", s, 2) === "siege")).toBe(false);
-    expect(seeds.some((s) => drawNextEvent("foire", s, 3) === "siege")).toBe(true);
+  it("garde le colosse quand il n'y a pas assez de monde pour un tournoi", () => {
+    expect(drawNextEvent("colosse", 1)).toBe("colosse");
   });
-});
-
-describe("G4 : la nuit", () => {
-  it("de 23 h à 7 h (Paris), seuls les événements qui se jouent seul sont tirés", async () => {
-    const { drawNextEvent, NIGHT_EVENTS, isNight } = await import("./events");
-    const night = Date.UTC(2026, 10, 13, 2, 0); // 3 h à Paris
-    const day = Date.UTC(2026, 10, 13, 13, 0);
-    expect(isNight(night)).toBe(true);
-    expect(isNight(day)).toBe(false);
-    for (let seed = 0; seed < 300; seed++) expect(NIGHT_EVENTS).toContain(drawNextEvent("foire", seed, 10, night));
-    const daily = new Set(Array.from({ length: 300 }, (_, seed) => drawNextEvent("foire", seed, 10, day)));
-    expect([...daily].some((k) => !NIGHT_EVENTS.includes(k))).toBe(true);
+  it("après un événement d'une ancienne saison, commence par le colosse", () => {
+    expect(drawNextEvent("caravane", 10)).toBe("colosse");
   });
 });

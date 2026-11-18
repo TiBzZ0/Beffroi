@@ -18,6 +18,8 @@ export const BASE_PROD: Record<Resource, number> = { pierre: 1_000, fer: 500, or
 export const MARKET_RATE = 1 / 3;
 /** Or en plus à chaque convoi arrivé : 3 % de sa charge, en valeur de référence. */
 export const CONVOY_GOLD = 0.03;
+/** Région désert : +10 % sur l'or des convois. */
+export const DESERT_GOLD_BONUS = 0.1;
 
 /** REF(j) : production d'une concession typique d'un joueur actif au jour j, en valeur pierre par heure. */
 const REF_POINTS: [number, number][] = [[0, 1_000], [3, 4_500], [7, 6_500], [14, 9_000]];
@@ -389,7 +391,8 @@ export function settleS2(s: S2State, ctx: S2Context, now: number): { s: S2State;
       if (v.dest === "beffroi") arrived.beffroi += v.load * VALUE[v.res];
       else arrived[v.res] += v.load;
       produced += v.load * VALUE[v.res];
-      arrived.or += (v.load * VALUE[v.res] * CONVOY_GOLD) / VALUE.or;
+      // Désert : les caravaniers connaissent les pistes, +10 % d'or par convoi arrivé.
+      arrived.or += (v.load * VALUE[v.res] * CONVOY_GOLD * (st.region === "desert" ? 1 + DESERT_GOLD_BONUS : 1)) / VALUE.or;
     } else still.push(v);
   }
   st = { ...st, convoys: still, at: now, produced: st.produced + produced };

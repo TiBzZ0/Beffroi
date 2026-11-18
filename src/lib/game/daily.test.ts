@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import { DAILY_FAMILIES, DAILY_QUESTS, DAILY_REWARD_SECONDS } from "./config";
 import { chestBonus, claimDaily, dailyDay, dailyStart, openChest, rollDaily, swapDaily, type DailyContext, type DailyHolder } from "./daily";
 
-const ctx: DailyContext = { shareSize: 400, troops: 10, allies: 2, upgradesLeft: 5, levels: 3 };
+const ctx: DailyContext = { shareSize: 400, troops: 10, allies: 2, levels: 3 };
 const T = dailyStart(20_000) + 3_600_000;
 const familyOf = (id: string) => DAILY_QUESTS.find((q) => q.id === id)?.family;
 const holder = (daily: DailyHolder["daily"]): DailyHolder => ({ stone: 0, totalProduced: 0, daily });
@@ -22,10 +22,10 @@ describe("quêtes du jour", () => {
   });
 
   it("ne tire jamais une quête impossible", () => {
-    const poor: DailyContext = { shareSize: null, troops: 0, allies: 0, upgradesLeft: 0, levels: 0 };
+    const poor: DailyContext = { shareSize: null, troops: 0, allies: 0, levels: 0 };
     for (let s = 0; s < 300; s++) {
       const ids = rollDaily(null, T, s, poor).quests.map((q) => q.id);
-      for (const bad of ["don", "savoir", "seigneur", "renforts"]) expect(ids).not.toContain(bad);
+      for (const bad of ["don", "seigneur", "renforts"]) expect(ids).not.toContain(bad);
     }
   });
 

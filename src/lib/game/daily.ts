@@ -22,19 +22,16 @@ export interface DailyState {
 }
 
 /** Compteurs du jour, relevés par le serveur. */
-export type DailyCounts = Partial<Record<"don" | "ateliers" | "savoir" | "seigneur" | "repousser" | "renforts" | "veines" | "evenement" | "message" | "espion", number>>;
+export type DailyCounts = Partial<Record<"don" | "ameliorer" | "marche" | "seigneur" | "renforts" | "convoi" | "evenement" | "message" | "espion", number>>;
 
 /** Ce qui rend une quête possible pour ce joueur. */
 export interface DailyContext {
   shareSize: number | null;
   troops: number;
   allies: number;
-  upgradesLeft: number;
   levels: number;
   /** E4 : niveau d'espionnage (la quête « reconnaissance » le demande). */
   spyLevel?: number;
-  /** S10 : en saison 2, plus d'ateliers à acheter. */
-  s2?: boolean;
 }
 
 const DAY_MS = 86_400_000;
@@ -66,12 +63,8 @@ export function seedOf(userId: string, day: number): number {
 }
 
 function feasible(id: DailyQuestId, ctx: DailyContext): boolean {
-  if (id === "ateliers") return !ctx.s2;
   if (id === "don") return ctx.shareSize !== null && ctx.shareSize > 0;
-  if (id === "savoir") return !ctx.s2 && ctx.upgradesLeft > 0;
   if (id === "seigneur") return ctx.troops > 0;
-  // Saison 2 : plus de marteau (donc plus de veines), et les seigneurs n'attaquent pas.
-  if (id === "veines" || id === "repousser") return !ctx.s2;
   if (id === "renforts") return ctx.allies > 0;
   if (id === "espion") return (ctx.spyLevel ?? 0) >= 1;
   return true;

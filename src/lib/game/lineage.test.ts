@@ -1,8 +1,8 @@
 import { describe, expect, it } from "vitest";
 import { battle, seededRng } from "./battle";
-import { armyPrice, buyArmy, donorThresholds, elanMaxMs, extraSecured, generatorCost, newPlayerState, productionPerSecond, ruinCost, sabotageCost, spyTravelMs, type PlayerState } from "./engine";
+import { donorThresholds, extraSecured, newPlayerState, productionPerSecond, sabotageCost, spyTravelMs, type PlayerState } from "./engine";
+import { s2Player, useS2 } from "./s2/fixture";
 import { buyNode, lineageMark, nodeBlocker, parisDay, renownAvailable, respec, respecBlocker, type LineageState } from "./lineage";
-import { ELAN_MAX_MS } from "./config";
 
 const world = { stageCompletedAt: [] };
 const withNodes = (nodes: string[], extra: Partial<PlayerState> = {}): PlayerState => ({ ...newPlayerState(0), lineage: { nodes, fees: 0, respecAt: 0 }, ...extra });
@@ -49,30 +49,18 @@ describe("Lignée : achats", () => {
 });
 
 describe("Lignée : effets", () => {
-  const base = { ...newPlayerState(0), generators: { manoeuvre: 50, tailleur: 20 }, ruins: { tailleur: 4 } } as PlayerState;
+  useS2();
   it("Bâtisseur", () => {
+    const base = s2Player(0);
     const has = (ids: string[]) => ({ ...base, lineage: { nodes: ids, fees: 0, respecAt: 0 } });
     expect(productionPerSecond(has(["carriere"]), world, 0)).toBeGreaterThan(productionPerSecond(base, world, 0));
-    expect(generatorCost(has(["main_oeuvre"]), "manoeuvre")).toBeLessThan(generatorCost(base, "manoeuvre"));
-    expect(extraSecured(has(["cave"]), 0) - extraSecured(base, 0)).toBe(1800);
+    expect(extraSecured(has(["cave"])) - extraSecured(base)).toBe(1800);
     expect(donorThresholds(has(["dime"]), 0)[0]).toBeCloseTo(donorThresholds(base, 0)[0] * 0.8);
-    expect(ruinCost(has(["charpentiers"]), "tailleur")).toBeLessThan(ruinCost(base, "tailleur"));
-    expect(elanMaxMs(has(["marteau"]))).toBe(2 * ELAN_MAX_MS);
-    // Architecte royal : 4 ruines de tailleur produisent comme 2 tailleurs.
-    const plain = productionPerSecond(base, world, 0);
-    const arch = productionPerSecond(has(["architecte"]), world, 0);
-    const two = productionPerSecond({ ...base, generators: { manoeuvre: 50, tailleur: 22 } }, world, 0);
-    expect(arch).toBeGreaterThan(plain);
-    expect(arch).toBeCloseTo(two);
   });
 
-  it("Seigneur de guerre et Maître espion", () => {
-    expect(armyPrice(withNodes(["recrues"]), "unit", 400)).toBe(380);
-    expect(armyPrice(withNodes(["recrues"]), "defense", 400)).toBe(400);
-    const r = buyArmy(withNodes(["recrues"], { stone: 380 }), "unit", "piquier", 1);
-    expect(r.ok).toBe(true);
+  it("Maître espion", () => {
     expect(spyTravelMs(10, true)).toBeLessThan(spyTravelMs(10));
-    const rich = { ...base, generators: { manoeuvre: 5000 } } as PlayerState;
+    const rich = s2Player(0);
     expect(sabotageCost({ ...rich, lineage: { nodes: ["poudre"], fees: 0, respecAt: 0 } }, rich, world, 0)).toBeLessThan(sabotageCost(rich, rich, world, 0));
   });
 

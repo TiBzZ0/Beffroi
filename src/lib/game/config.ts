@@ -6,22 +6,6 @@ export const SEASON_DAYS = 14;
 /** Gains hors ligne plafonnés à 8 h. */
 export const OFFLINE_CAP_MS = 8 * 60 * 60 * 1000;
 
-/** Clics acceptés au plus par seconde. L'excédent est ignoré. */
-export const MAX_CLICKS_PER_SECOND = 20;
-/** Fenêtre maximale de clics prise en compte par lot (évite d'accumuler un crédit de clics). */
-export const CLICK_WINDOW_MAX_MS = 10_000;
-/**
- * Anti-triche : au-delà de 18 coups/s soutenus sur 5 envois de suite, le marteau est confisqué 2 min.
- * La cadence est mesurée sur le temps réel écoulé depuis le lot précédent, et sur au moins 15 s.
- */
-export const SUSPICIOUS_CLICK_RATE = 18;
-export const CLICK_STRIKES_FOR_PAUSE = 5;
-export const CLICK_RATE_MIN_WINDOW_MS = 15_000;
-export const CLICK_PAUSE_MS = 2 * 60 * 1000;
-
-/** Croissance du prix de chaque bâtiment supplémentaire. */
-export const COST_GROWTH = 1.15;
-
 export type GeneratorId =
   | "manoeuvre"
   | "tailleur"
@@ -78,106 +62,6 @@ export const GENERATORS: readonly GeneratorDef[] = [
 ];
 
 export const GENERATOR_IDS = GENERATORS.map((g) => g.id);
-
-/** Corps de métier : chaque tranche complète de 50 bâtiments d'un type donne +2 % de production totale (ruines exclues). */
-export const MASTERY_TRANCHE = 50;
-export const MASTERY_BONUS = 0.02;
-/** Compagnonnage : chaque tranche de 10 petits bâtiments donne +1 % à la production d'un grand. */
-export const COMPANION_TRANCHE = 10;
-export const COMPANION_BONUS = 0.01;
-export const COMPANIONS: Partial<Record<GeneratorId, GeneratorId>> = {
-  manoeuvre: "merveille",
-  tailleur: "atelier_royal",
-  charrette: "architectes",
-  carriere: "cite",
-  four: "marbre",
-  grue: "port",
-  guilde: "cathedrale",
-  port: "citadelle",
-  marbre: "observatoire",
-  cite: "cite_celeste",
-  architectes: "pilier",
-  atelier_royal: "atelier_etoiles",
-};
-
-export type UpgradeEffect =
-  | { kind: "generator"; generator: GeneratorId; multiplier: number }
-  | { kind: "click"; multiplier: number }
-  /** Élan : tant que la réserve d'élan n'est pas vide, la production est augmentée de `bonus`. */
-  | { kind: "elan"; bonus: number }
-  | { kind: "production"; multiplier: number };
-
-export interface UpgradeDef {
-  id: string;
-  name: string;
-  description: string;
-  cost: number;
-  effect: UpgradeEffect;
-  /** Condition d'apparition : posséder au moins N bâtiments d'un type. */
-  requires?: { generator: GeneratorId; count: number };
-}
-
-const GENERATOR_UPGRADE_NAMES: Record<GeneratorId, [string, string]> = {
-  manoeuvre: ["Paniers d'osier", "Brouettes ferrées"],
-  tailleur: ["Ciseaux d'acier", "Gabarits de maître"],
-  charrette: ["Roues cerclées de fer", "Attelages doubles"],
-  carriere: ["Coins de chêne mouillés", "Treuils à cliquet"],
-  four: ["Soufflets de forge", "Chaux vive de qualité"],
-  grue: ["Poulies mouflées", "Roues d'écureuil géantes"],
-  guilde: ["Chartes royales", "Secrets de compagnons"],
-  port: ["Écluses de bois", "Flottille de barges"],
-  marbre: ["Scies à eau", "Veines secrètes"],
-  cite: ["Halles couvertes", "Remparts de la cité"],
-  architectes: ["Compas d'or", "Traités d'architecture"],
-  atelier_royal: ["Sceau du roi", "Trésor de la couronne"],
-  merveille: ["Pèlerins émerveillés", "Légende éternelle"],
-  cathedrale: ["Vitraux du chœur", "Reliques des saints"],
-  citadelle: ["Forges de la citadelle", "Serment des bâtisseurs"],
-  observatoire: ["Lunettes de cristal", "Cartes du ciel"],
-  cite_celeste: ["Escaliers de nuées", "Vents porteurs"],
-  pilier: ["Racines de granit", "Voûte du monde"],
-  atelier_etoiles: ["Ciseaux d'étoile", "Poussière d'astre"],
-};
-
-/** Paliers avancés (50, 100, 150, 200 bâtiments), communs à tous les types. */
-const ADVANCED_TIER_NAMES = ["Savoir-faire", "Maîtrise", "Excellence", "Légende"];
-
-function generatorUpgrades(): UpgradeDef[] {
-  const tiers = [
-    { count: 10, costFactor: 50 },
-    { count: 25, costFactor: 1_000 },
-    { count: 50, costFactor: 50_000 },
-    { count: 100, costFactor: 5_000_000 },
-    { count: 150, costFactor: 500_000_000 },
-    { count: 200, costFactor: 50_000_000_000 },
-  ];
-  return GENERATORS.flatMap((g) =>
-    tiers.map((tier, i) => ({
-      id: `${g.id}_${i + 1}`,
-      name: i < 2 ? GENERATOR_UPGRADE_NAMES[g.id][i] : `${ADVANCED_TIER_NAMES[i - 2]} : ${g.plural.toLowerCase()}`,
-      description: `Production des ${g.plural.toLowerCase()} ×2.`,
-      cost: g.baseCost * tier.costFactor,
-      effect: { kind: "generator" as const, generator: g.id, multiplier: 2 },
-      requires: { generator: g.id, count: tier.count },
-    })),
-  );
-}
-
-export const UPGRADES: readonly UpgradeDef[] = [
-  { id: "gants_cuir", name: "Gants de cuir", description: "Chaque coup de marteau rapporte ×2.", cost: 200, effect: { kind: "click", multiplier: 2 } },
-  { id: "masse_bronze", name: "Masse de bronze", description: "Chaque coup de marteau rapporte ×3.", cost: 15_000, effect: { kind: "click", multiplier: 3 }, requires: { generator: "tailleur", count: 5 } },
-  { id: "marteau_maitre", name: "Marteau de maître", description: "Frapper donne de l'élan (3 s par coup, 10 min au plus) : tant qu'il dure, +20 % de production.", cost: 60_000, effect: { kind: "elan", bonus: 0.2 }, requires: { generator: "charrette", count: 5 } },
-  { id: "benediction", name: "Bénédiction de l'évêque", description: "Toute la production +10 %.", cost: 2_000_000, effect: { kind: "production", multiplier: 1.1 }, requires: { generator: "four", count: 5 } },
-  { id: "corvee_royale", name: "Corvée royale", description: "Toute la production +25 %.", cost: 80_000_000, effect: { kind: "production", multiplier: 1.25 }, requires: { generator: "grue", count: 10 } },
-  { id: "foire", name: "Foire de la Saint-Jean", description: "Toute la production +25 %.", cost: 2_000_000_000, effect: { kind: "production", multiplier: 1.25 }, requires: { generator: "guilde", count: 10 } },
-  { id: "marteau_runique", name: "Marteau runique", description: "L'élan monte à +50 % de production (au lieu de +20 %).", cost: 5_000_000_000, effect: { kind: "elan", bonus: 0.3 }, requires: { generator: "port", count: 5 } },
-  { id: "routes_pavees", name: "Routes pavées", description: "Toute la production +50 %.", cost: 100_000_000_000, effect: { kind: "production", multiplier: 1.5 }, requires: { generator: "marbre", count: 10 } },
-  { id: "privilege_royal", name: "Privilège royal", description: "Toute la production +50 %.", cost: 5_000_000_000_000, effect: { kind: "production", multiplier: 1.5 }, requires: { generator: "cite", count: 10 } },
-  { id: "age_or", name: "Âge d'or", description: "Toute la production ×2.", cost: 300_000_000_000_000, effect: { kind: "production", multiplier: 2 }, requires: { generator: "atelier_royal", count: 10 } },
-  ...generatorUpgrades(),
-];
-
-export const UPGRADE_BY_ID: ReadonlyMap<string, UpgradeDef> = new Map(UPGRADES.map((u) => [u.id, u]));
 
 export interface StageDef {
   name: string;
@@ -303,58 +187,17 @@ export const DONOR_TIER_ECUS = [5, 10, 15] as const;
 export const DONOR_TIER_BONUS = 0.02;
 /** C2 : couvre-feu de 8 h par jour ; un changement de plage prend effet 24 h plus tard. */
 export const CURFEW_MINUTES = 8 * 60;
-export const CURFEW_DELAY_MS = 24 * 3_600_000;
-/**
- * C1 : veines d'or. Une pierre dorée toutes les 5 à 10 minutes (si le joueur est là), visible 12 secondes.
- * Frénésie (×2 pendant 30 s, 60 %) ou pluie de pierre (3 min de production, 40 %).
- * En moyenne 90 s de production pour 450 s d'attente : +20 % au plus pour un joueur très attentif.
- */
-export const VEIN_MIN_MS = 5 * 60_000;
-export const VEIN_MAX_MS = 10 * 60_000;
-export const VEIN_VISIBLE_MS = 12_000;
-/** Marge accordée à la latence du réseau pour valider une prise. */
-export const VEIN_GRACE_MS = 2_000;
-export const VEIN_FRENZY_CHANCE = 0.6;
-export const VEIN_FRENZY_MS = 30_000;
-export const VEIN_FRENZY_FACTOR = 2;
-export const VEIN_RAIN_SECONDS = 180;
-/** B4 : accueil guidé, dix quêtes affichées une à une pour les nouveaux comptes. */
-export const QUESTS = [
-  { id: "clicks", label: "Frappe 20 coups de marteau", goal: 20 },
-  { id: "workshop", label: "Achète un atelier", goal: 1 },
-  { id: "upgrade", label: "Achète un savoir", goal: 1 },
-  { id: "workshops", label: "Possède 10 ateliers", goal: 10 },
-  { id: "tithe", label: "Règle ta dîme dans l'onglet du chantier", goal: 1 },
-  { id: "troops", label: "Recrute 10 troupes", goal: 10 },
-  { id: "defense", label: "Bâtis une défense", goal: 1 },
-  { id: "lord", label: "Pille un seigneur facile", goal: 1 },
-  { id: "alliance", label: "Rejoins ou crée une alliance", goal: 1 },
-  { id: "push", label: "Active les notifications", goal: 1 },
-] as const;
-export type QuestId = (typeof QUESTS)[number]["id"];
-/** S10 : en saison 2, les quêtes d'ateliers et de clics deviennent des quêtes de carte, de concessions et de seigneurs. */
-const QUESTS_S2: Partial<Record<QuestId, { label: string; goal: number }>> = {
-  clicks: { label: "Pose ton château sur la carte", goal: 1 },
-  workshop: { label: "Prends une deuxième concession", goal: 1 },
-  workshops: { label: "Bâtis un bâtiment d'appui", goal: 1 },
-  lord: { label: "Bats la garnison d'un hobereau", goal: 1 },
-};
-export function questDef(i: number): { id: QuestId; label: string; goal: number } {
-  const q = QUESTS[i];
-  return { id: q.id, ...(s2Geometry && QUESTS_S2[q.id] ? QUESTS_S2[q.id]! : { label: q.label, goal: q.goal }) };
-}
 /** Quêtes du jour : trois par jour (une par famille), tirées à 4 h UTC. Aucune ne demande d'attaquer un joueur. */
 export type DailyFamily = "batir" | "combattre" | "participer";
 export const DAILY_QUESTS = [
   { id: "don", family: "batir", icon: "🧱", label: "Verse un quart de ta part de chantier" },
-  { id: "ateliers", family: "batir", icon: "🏭", label: "Achète 20 ateliers", goal: 20 },
-  { id: "savoir", family: "batir", icon: "📜", label: "Achète un savoir", goal: 1 },
-  { id: "seigneur", family: "combattre", icon: "🏰", label: "Gagne un raid contre un seigneur", goal: 1 },
-  { id: "repousser", family: "combattre", icon: "🛡️", label: "Repousse un raid", goal: 1 },
+  { id: "ameliorer", family: "batir", icon: "⛏️", label: "Lance deux travaux (concession ou bâtiment)", goal: 2 },
+  { id: "marche", family: "batir", icon: "⚖️", label: "Fais un échange au marché", goal: 1 },
+  { id: "seigneur", family: "combattre", icon: "🏰", label: "Bats la garnison d'un seigneur", goal: 1 },
   { id: "renforts", family: "combattre", icon: "🤝", label: "Envoie des renforts à un allié", goal: 1 },
   { id: "recherche", family: "combattre", icon: "⚗️", label: "Termine une recherche", goal: 1 },
   { id: "espion", family: "combattre", icon: "🕵️", label: "Envoie une reconnaissance", goal: 1 },
-  { id: "veines", family: "participer", icon: "✨", label: "Prends 5 veines d'or", goal: 5 },
+  { id: "convoi", family: "participer", icon: "🛒", label: "Expédie un convoi toi-même (départ ou ravitaillement)", goal: 1 },
   { id: "evenement", family: "participer", icon: "🎪", label: "Prends part à un événement", goal: 1 },
   { id: "message", family: "participer", icon: "💬", label: "Écris un message dans le chat", goal: 1 },
 ] as const;
@@ -368,10 +211,6 @@ export const DAILY_CHEST_MS = 4 * 60 * 60 * 1000;
 export const DAILY_CHEST_BASE = 0.1;
 export const DAILY_CHEST_STEP = 0.025;
 export const DAILY_STREAK_MAX = 5;
-/** Récompense d'une quête : 5 minutes de production, 100 pierres au moins ; la dernière donne aussi 5 écus. */
-export const QUEST_REWARD_SECONDS = 300;
-export const QUEST_MIN_REWARD = 100;
-export const QUEST_FINAL_ECUS = 5;
 /** D1 à D4 : lots du chantier. Prime de lot : +10 % de production jusqu'à la fin de l'étape suivante et 10 écus. */
 export const LOT_BONUS = 0.1;
 export const LOT_ECUS = 10;
@@ -395,8 +234,6 @@ export const ACTIVE_WINDOW_DAYS = 7;
 // Raids (version 1)
 // ---------------------------------------------------------------------------
 
-/** Délai minimal entre deux raids lancés par un même joueur. */
-export const RAID_COOLDOWN_MS = 5 * 60 * 1000;
 /** Part du stock non sécurisé volée (doublée en cas de revanche). */
 export const RAID_LOOT_RATE = 0.25;
 export const REVENGE_LOOT_RATE = 0.4;
@@ -406,15 +243,10 @@ export const SECURED_SECONDS = 2 * 60 * 60;
 export const MIN_EXPOSED_SHARE = 0.5;
 /** Ateliers incendiés : production réduite de moitié pendant 30 min. */
 export const BURN_MS = 30 * 60 * 1000;
-export const BURN_PRODUCTION_FACTOR = 0.5;
-/** Chaque coup de marteau accepté écourte l'incendie d'une seconde. */
-export const BURN_CLICK_REDUCTION_MS = 1000;
 /** Part des bâtiments détruits (arrondi à l'inférieur, au plus un par type). */
 export const RAID_DESTROY_RATE = 0.05;
 /** Les N premiers bâtiments de chaque type ne peuvent pas être détruits. */
 export const PROTECTED_PER_TYPE = 5;
-/** Une ruine se rebâtit à ce facteur du prix d'un bâtiment neuf. */
-export const RUIN_REBUILD_FACTOR = 0.5;
 /** Bouclier de la victime après un raid. */
 export const SHIELD_MS = 4 * 60 * 60 * 1000;
 /** Bouclier d'un seigneur après un pillage réussi : bien plus court que celui d'un joueur. */
@@ -429,8 +261,6 @@ export const REVENGE_MS = 24 * 60 * 60 * 1000;
 export type LordKey = string;
 
 export type Difficulty = 1 | 2 | 3 | 4;
-export const DIFFICULTY_LABELS: Record<Difficulty, string> = { 1: "Facile", 2: "Moyen", 3: "Difficile", 4: "Redoutable" };
-
 export interface LordDef {
   key: LordKey;
   /** Identifiant fixe de la ligne `profiles` du seigneur. */
@@ -488,14 +318,6 @@ export type DefenseId = "palissade" | "tour" | "baliste" | "muraille";
 export type GuardId = "garde";
 export type CombatantId = UnitId | DefenseId | GuardId;
 export type Category = "infanterie" | "tir" | "cavalerie" | "siege" | "fortification";
-
-export const CATEGORY_LABELS: Record<Category, string> = {
-  infanterie: "l'infanterie",
-  tir: "les tireurs",
-  cavalerie: "la cavalerie",
-  siege: "les engins de siège",
-  fortification: "les fortifications",
-};
 
 export interface CombatantDef<Id extends string = CombatantId> {
   id: Id;
@@ -635,15 +457,6 @@ export const STRONG_LORD_TOP_SHARE = 0.25;
 // Événements : une caravane marchande ou un colosse apparaît régulièrement pour tout le monde.
 /** Pause entre deux événements. */
 export const EVENT_GAP_MS = 60 * 60 * 1000;
-/** Caravane : 1 h pour la piller, une fois par joueur. A14 : chacun affronte sa propre escorte. */
-export const CARAVAN_MS = 60 * 60 * 1000;
-/** Une victoire rapporte 45 min de sa propre production. */
-export const CARAVAN_PRIZE_SECONDS = 45 * 60;
-/** Escorte : 60 % de la valeur de sa propre armée (à la création : troupes médianes × ce facteur). */
-export const CARAVAN_ESCORT_POWER = 0.6;
-export const CARAVAN_ESCORT: Partial<Record<CombatantId, number>> = { milicien: 0.3, piquier: 0.3, arbaletrier: 0.4 };
-/** Colosse : 6 h pour l'abattre à plusieurs ; ses pertes ne se reforment pas. */
-export const COLOSSUS_MS = 6 * 60 * 60 * 1000;
 /** Son armée : toutes les troupes des joueurs réunies × ce facteur (au moins 3 fois la médiane). */
 export const COLOSSUS_POWER = 0.6;
 export const COLOSSUS_ARMY: Partial<Record<CombatantId, number>> = { chevalier: 0.35, piquier: 0.3, arbaletrier: 0.35 };
@@ -657,15 +470,24 @@ export const ONLINE_MS = 2.5 * 60 * 1000;
 
 // Panthéon : catégories figées à la fin de chaque saison (podium de 3), titres pour les premiers.
 export type HallUnit = "stone" | "time" | "count" | "percent" | "ratio";
-export const HALL: readonly { id: "generous" | "plunderer" | "progress" | "colossus" | "defender" | "fortress" | "war"; icon: string; label: string; title: string; unit: HallUnit; alliance: boolean; ecus?: readonly number[] }[] = [
+export type HallId = "generous" | "lords" | "progress" | "colossus" | "domain" | "fortress" | "war" | "plunderer" | "defender";
+export type HallDef = { id: HallId; icon: string; label: string; title: string; unit: HallUnit; alliance: boolean; ecus?: readonly number[] };
+/** Catégories de la saison en cours. */
+export const HALL: readonly HallDef[] = [
   { id: "generous", icon: "🏗️", label: "Les plus généreux (part de sa production versée)", title: "Grand bâtisseur", unit: "percent", alliance: false, ecus: [30, 20, 10] },
-  { id: "plunderer", icon: "⚔️", label: "Pillards", title: "Fléau du royaume", unit: "stone", alliance: false, ecus: [30, 20, 10] },
+  { id: "lords", icon: "⚔️", label: "Seigneurs vaincus (assauts réussis)", title: "Fléau des seigneurs", unit: "count", alliance: false, ecus: [30, 20, 10] },
   { id: "progress", icon: "📈", label: "Meilleure progression (production multipliée sur 7 jours)", title: "Étoile montante", unit: "ratio", alliance: false, ecus: [30, 20, 10] },
   { id: "colossus", icon: "🗿", label: "Chasseurs de colosses (dégâts)", title: "Tueur de colosses", unit: "stone", alliance: false, ecus: [30, 20, 10] },
-  { id: "defender", icon: "🛡️", label: "Meilleurs défenseurs (raids repoussés)", title: "Rempart du royaume", unit: "count", alliance: false, ecus: [30, 20, 10] },
+  { id: "domain", icon: "🏞️", label: "Plus grand domaine (production livrée)", title: "Grand propriétaire", unit: "stone", alliance: false, ecus: [30, 20, 10] },
   { id: "fortress", icon: "🏰", label: "Gardiens de Pierre-Haute (temps tenu)", title: "Gardiens de Pierre-Haute", unit: "time", alliance: true, ecus: [30, 20, 10] },
   { id: "war", icon: "🏆", label: "Guerres gagnées", title: "Seigneurs de guerre", unit: "count", alliance: true, ecus: [30, 20, 10] },
 ];
+/** Catégories retirées (saison 1), gardées pour afficher les anciens podiums du Panthéon. */
+export const HALL_ARCHIVE: readonly HallDef[] = [
+  { id: "plunderer", icon: "⚔️", label: "Pillards", title: "Fléau du royaume", unit: "stone", alliance: false },
+  { id: "defender", icon: "🛡️", label: "Meilleurs défenseurs (raids repoussés)", title: "Rempart du royaume", unit: "count", alliance: false },
+];
+export const HALL_ALL: readonly HallDef[] = [...HALL, ...HALL_ARCHIVE];
 /** Joueurs qui n'ont presque rien produit : exclus des classements relatifs (B12). */
 export const HALL_MIN_PRODUCED = 1_000_000;
 export const HALL_PODIUM = 3;
@@ -723,8 +545,6 @@ export const FAIRNESS_SLOPE = 2;
 export const BATTLE_SWING = 0.15;
 /** Q2 : fortune de la bataille, ±20 % sur les dégâts de l'attaquant, tirée une fois (pas pour les seigneurs ni le tournoi). */
 export const BATTLE_FORTUNE = 0.2;
-/** A10 : un seigneur attaquant vise une chance de victoire d'un tiers. */
-export const LORD_RAID_CHANCE = 1 / 3;
 export const INFIRMARY_MS = 30 * 60_000;
 export const WOUNDED_WINNER = 0.6;
 export const WOUNDED_ATTACKER_BEATEN = 0.3;
@@ -740,10 +560,6 @@ export const LORD_COFFER_SECONDS = 12 * 60 * 60;
 /** A4 : valeur de la défense = part du coffre selon le niveau (plancher : la même part de 2 h de production). */
 export const LORD_DEFENSE_SHARE: Record<1 | 2 | 3 | 4, number> = { 1: 0.1, 2: 0.2, 3: 0.3, 4: 0.4 };
 export const LORD_DEFENSE_FLOOR_SECONDS = 2 * 60 * 60;
-
-/** A2, G3 : chaque coup accepté ajoute 3 s d'élan, réserve de 10 minutes au plus. */
-export const ELAN_PER_CLICK_MS = 3000;
-export const ELAN_MAX_MS = 600_000;
 
 // T1 : carte du royaume. Grille de 15 × 15 cases, numérotées de 1 à 15.
 // Saison 2 (S2, S5) : grille de 41 cases (0 à 40), beffroi en (20, 20), une forteresse au nord en (20, 13).
@@ -813,76 +629,19 @@ export function mapDistance(a: MapPos, b: MapPos): number {
 }
 
 // Événements sans carte (V3 à V6, V15). Un événement toutes les 2 heures, tiré au sort selon ces poids, jamais deux fois de suite le même.
-export type EventKind = "caravane" | "colosse" | "foire" | "fete" | "etoiles" | "treve" | "marchand" | "lune" | "brouillard" | "filon" | "bandits" | "tresor" | "convoi" | "siege" | "tournoi";
-export const EVENT_WEIGHTS: Record<EventKind, number> = { caravane: 3, colosse: 2, foire: 2, fete: 2, etoiles: 2, treve: 1, marchand: 2, lune: 1, brouillard: 1, filon: 4, bandits: 6, tresor: 2, convoi: 2, siege: 1, tournoi: 1 };
+/** Événements de la saison 2 : le colosse et le tournoi, en alternance. */
+export type EventKind = "colosse" | "tournoi";
 export const EVENT_DURATIONS_MS: Record<EventKind, number> = {
-  caravane: 60 * 60 * 1000,
   colosse: 6 * 60 * 60 * 1000,
-  foire: 2 * 60 * 60 * 1000,
-  fete: 2 * 60 * 60 * 1000,
-  etoiles: 60 * 60 * 1000,
-  treve: 2 * 60 * 60 * 1000,
-  marchand: 60 * 60 * 1000,
-  lune: 2 * 60 * 60 * 1000,
-  brouillard: 2 * 60 * 60 * 1000,
-  filon: 2 * 60 * 60 * 1000,
-  bandits: 3 * 60 * 60 * 1000,
-  tresor: 90 * 60 * 1000,
-  convoi: 90 * 60 * 1000,
-  siege: 3 * 60 * 60 * 1000,
   tournoi: 60 * 60 * 1000,
 };
-/** V10 : le convoi est attaqué à mi-chemin par 50 % des armées réunies des joueurs actifs ; 45 minutes de production pour chaque escorte s'il passe. */
-export const CONVOY_ATTACK_SHARE = 0.5;
-export const CONVOY_PRIZE_SECONDS = 45 * 60;
-/** Toutes les troupes perdues à l'escorte du convoi passent par l'infirmerie à 60 %. */
-export const CONVOY_WOUNDED = 0.6;
-/** V11 : 80 % des armées réunies marchent sur le beffroi ; victoire 1 h de production par défenseur, défaite −10 % de l'étape. */
-export const SIEGE_ATTACK_SHARE = 0.8;
-export const SIEGE_PRIZE_SECONDS = 60 * 60;
-export const SIEGE_STAGE_LOSS = 0.1;
 /** V12 : tournoi, même budget pour tous (armée médiane), sans pertes ; podium 2 h, 1 h, 30 min de production. */
 /** Joueurs en ligne (vus dans les 15 dernières minutes) qu'il faut au moment de l'annonce pour tirer ces événements. */
-export const EVENT_MIN_ONLINE: Partial<Record<EventKind, number>> = { siege: 3, convoi: 2, tournoi: 2 };
+export const EVENT_MIN_ONLINE: Partial<Record<EventKind, number>> = { tournoi: 2 };
 export const ONLINE_WINDOW_MS = 15 * 60 * 1000;
 export const TOURNEY_PRIZES_SECONDS = [2 * 60 * 60, 60 * 60, 30 * 60] as const;
-/** V9 : filon géant, 3 minutes de production par tranche de 10 minutes sur place, 30 minutes au plus. */
-export const MINE_SECONDS_PER_SLICE = 3 * 60;
-export const MINE_SLICE_MS = 10 * 60 * 1000;
-export const MINE_MAX_SECONDS = 30 * 60;
-/** V7 : un camp de bandits par joueur actif, à 2 ou 3 cases, défendu par 30 % de son armée ; 40 minutes de production pour le vainqueur. */
-export const BANDIT_ARMY_SHARE = 0.3;
-export const BANDIT_PRIZE_SECONDS = 40 * 60;
-/** V8 : le trésor vaut 4 heures de la production médiane. */
-export const TREASURE_PRIZE_SECONDS = 4 * 60 * 60;
-/** V13 : un raid de seigneur repoussé pendant la lune rouge rapporte 30 % de la valeur de son armée. */
-export const RED_MOON_RANSOM = 0.3;
-/** V14 : l'espion coûte moitié prix dans le brouillard. */
-export const FOG_SPY_FACTOR = 0.5;
 /** L'événement suivant est annoncé 15 minutes avant. */
 export const EVENT_NOTICE_MS = 15 * 60 * 1000;
-/** V3 : savoirs à −20 %, ateliers à −10 %. */
-export const FAIR_UPGRADE_FACTOR = 0.8;
-export const FAIR_GENERATOR_FACTOR = 0.9;
-/** V4 : les dons comptent double pour les paliers et les lots. */
-export const FEAST_GIFT_FACTOR = 2;
-/** V5 : les veines d'or apparaissent 3 fois plus souvent. */
-export const STARS_VEIN_FACTOR = 3;
-/** V6 : aucun départ d'armée, production +25 %. */
-export const TRUCE_PRODUCTION = 0.25;
-/** V15 : le marchand vend un bonus au choix pour 30 minutes de production, une fois par passage. */
-export const MERCHANT_PRICE_SECONDS = 30 * 60;
-export type MerchantChoice = "production" | "repair" | "safe";
-export const MERCHANT_OFFERS: Record<MerchantChoice, { icon: string; label: string }> = {
-  production: { icon: "⚒️", label: "+25 % de production pendant 4 heures" },
-  repair: { icon: "🧱", label: "Toutes tes ruines rebâties" },
-  safe: { icon: "🔒", label: "2 heures de stock à l'abri en plus pendant 24 heures" },
-};
-export const MERCHANT_PRODUCTION = 0.25;
-export const MERCHANT_PRODUCTION_MS = 4 * 60 * 60 * 1000;
-export const MERCHANT_SAFE_SECONDS = 2 * 60 * 60;
-export const MERCHANT_SAFE_MS = 24 * 60 * 60 * 1000;
-
 // T2 à T5 : trajets des armées.
 /** Vitesse en cases par minute « de base » : l'armée avance au pas de son unité la plus lente. */
 export const UNIT_SPEED: Record<string, number> = { milicien: 1, piquier: 1, arbaletrier: 1, chevalier: 1.5, belier: 0.6 };
@@ -893,10 +652,6 @@ export const TRAVEL_MIN_MIN = 3;
 export const TRAVEL_MAX_MIN = 20;
 /** Trois armées en route au plus par joueur. */
 export const MAX_MARCHES = 3;
-/** T5 : chaque tour d'archers donne 5 % de chance de voir le nom de l'attaquant, 90 % au plus. */
-/** T6 : un seigneur vise de préférence un joueur à moins de 8 cases. */
-export const LORD_TARGET_RADIUS = 8;
-
 // ---------------------------------------------------------------------------
 // Halle de guilde (H1 à H6)
 // ---------------------------------------------------------------------------
@@ -983,8 +738,6 @@ export const COUNTER_GAP = 2;
 export const RUMOR_SECONDS = 3 * 60;
 export const RUMOR_MS = 2 * 3_600_000;
 export const RUMOR_FACTOR = 2;
-/** Sabotage du grenier (stock à l'abri ÷ 2 pendant 2 h) et du guet (aucune alerte d'approche pendant 1 h). */
-export const GRANARY_CUT_MS = 2 * 3_600_000;
 export const BLIND_MS = 3_600_000;
 
 /** H2 : héritage, bonus permanents achetés en écus et gardés d'une saison à l'autre. Le niveau n coûte base × n écus. */

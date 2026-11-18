@@ -1,5 +1,5 @@
 import type { PlayerState } from "./engine";
-import { setStagesNow, type EventKind, type MerchantChoice, type UnitId } from "./config";
+import { setStagesNow, type EventKind, type UnitId } from "./config";
 import type { Rank, Resource, S2Map } from "./s2/map";
 
 export interface WorksiteView {
@@ -84,8 +84,8 @@ export interface RivalView {
   academy?: number;
   researching?: boolean;
   sabotageBlocker?: string | null;
-  /** E4 : sabotage par cible (académie, grenier, guet). */
-  sabotageBlockers?: { academie: string | null; grenier: string | null; guet: string | null };
+  /** E4 : sabotage par cible (académie, guet). */
+  sabotageBlockers?: { academie: string | null; guet: string | null };
   /** E4 : fin de ma taupe chez lui (0 sans taupe). */
   moleUntil?: number;
   molePrice?: number;
@@ -353,7 +353,7 @@ export interface LeaderboardRow {
   total: number;
 }
 
-export type HallCategory = "generous" | "plunderer" | "progress" | "colossus" | "defender" | "fortress" | "war";
+export type HallCategory = import("./config").HallId;
 
 /** Un classement : joueurs ou alliances, du premier au dernier. */
 export interface Standing {
@@ -369,7 +369,6 @@ export interface SeasonHall {
 }
 
 export interface Leaderboards {
-  plunderers: LeaderboardRow[];
   /** F1 : faille de la semaine, par étage atteint. */
   rift?: LeaderboardRow[];
   /** Saison en cours, toutes catégories. */
@@ -387,13 +386,8 @@ export type GameAction =
   | { type: "captain"; op: "draw" | "pick" | "assign" | "relic" | "drop"; id?: string; company?: string | null; trait?: string; target?: string }
   | { type: "company"; op: "create" | "dissolve" | "retype" | "recruit" | "train" | "barracks" | "fort"; id?: string; unit?: string; qty?: number }
   | { type: "s2"; op: "place" | "take" | "drop" | "upgrade" | "build" | "buy" | "exchange" | "set" | "supply" | "ship" | "cbuild"; x?: number; y?: number; site?: number; id?: string; building?: string; from?: string; to?: string; amount?: number; pace?: string; dest?: string; manual?: boolean }
-  | { type: "click"; count: number }
-  | { type: "buy"; generator: string; qty: number }
-  | { type: "upgrade"; upgrade: string }
   | { type: "contribute"; amount: number }
   | { type: "raid"; target: string; troops?: Record<string, number>; allies?: boolean }
-  | { type: "rebuild"; generator: string }
-  | { type: "army"; kind: "unit" | "defense"; id: string; qty: number }
   | { type: "spy"; target: string }
   | { type: "alliance_create"; name: string }
   | { type: "alliance_invite"; target: string }
@@ -406,22 +400,19 @@ export type GameAction =
   | { type: "fortress_attack" }
   | { type: "fortress_station"; unit: string; qty: number }
   | { type: "fortress_recall" }
-  | { type: "event_attack"; troops?: Record<string, number>; camp?: string }
+  | { type: "event_attack"; troops?: Record<string, number> }
   | { type: "research"; id: string }
   | { type: "research_cancel"; endsAt: number }
   | { type: "legacy_buy"; kind: string }
   | { type: "inbox_read"; category: string }
-  | { type: "merchant"; choice: MerchantChoice }
   | { type: "march_recall"; id: string }
   | { type: "tournament_join"; troops: Record<string, number> }
   | { type: "daily"; op: "claim" | "swap" | "chest"; index: number }
   | { type: "hall"; op: "found" | "give" | "tithe" | "place" | "station" | "recall" | "siege"; amount?: number; percent?: number; wing?: string; unit?: string; qty?: number; hall?: number; troops?: Record<string, number> }
   | { type: "academy" }
   | { type: "tithe"; percent: number }
-  | { type: "curfew"; start: number | null }
-  | { type: "vein" }
   | { type: "master_choice"; choice: "production" | "defense" | "loot" }
-  | { type: "sabotage"; target: string; aim?: "academie" | "grenier" | "guet" }
+  | { type: "sabotage"; target: string; aim?: "academie" | "guet" }
   | { type: "mole"; target: string }
   | { type: "counter" }
   | { type: "rumor"; mode: "fort" | "faible" };
@@ -431,23 +422,11 @@ export interface EventView {
   kind: EventKind;
   name: string;
   description: string;
-  /** V15 : prix d'un achat au marchand, et si j'ai déjà acheté à ce passage. */
-  merchantPrice?: number;
-  merchantBought?: boolean;
-  /** T6 : position sur la carte (colosse fixe, caravane qui avance de `path.from` à `path.to`). */
+  /** T6 : position du colosse sur la carte. */
   pos?: [number, number];
-  path?: { from: [number, number]; to: [number, number] };
-  /** V7 : camps de bandits (le mien d'abord), V8 : qui tient le trésor. */
-  camps?: { id: string; pos: [number, number]; army: Record<string, number>; winner: string | null; mine: boolean }[];
-  holder?: string | null;
-  /** V10 à V12 : heure du combat commun, s'il est réglé et son issue. */
+  /** V12 : heure du tableau du tournoi, et s'il est joué. */
   battleAt?: number;
   resolved?: boolean;
-  outcome?: "won" | "lost" | "left" | null;
-  /** V10, V11 : nombre de joueurs postés, si j'y suis, et l'armée commune des défenseurs. */
-  posters?: number;
-  myPosted?: boolean;
-  defense?: Record<string, number>;
   /** V12 : budget commun, inscrits, mon armée, podium. */
   budget?: number;
   entries?: number;
@@ -460,14 +439,14 @@ export interface EventView {
   army: Record<string, number>;
   /** Part des défenseurs encore debout (0 à 1). */
   armyLeft: number;
-  /** Caravane : pierre restante. Colosse : prime à partager. */
+  /** Colosse lancé avant la prime immédiate : prime à partager. */
   pool: number;
   prize: number;
-  /** Caravane : pierre que j'ai prise. Colosse : ma part des dégâts (0 à 1). */
+  /** Ma part des dégâts infligés au colosse (0 à 1). */
   mine: number;
   attackers: number;
   chance: number;
-  /** Caravane : ce qu'un assaut réussi rapporte. */
+  /** Dégâts qu'un assaut devrait infliger (valeur de l'armée fauchée). */
   take: number;
   blocker: string | null;
 }

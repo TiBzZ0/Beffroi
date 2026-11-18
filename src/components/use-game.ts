@@ -2,18 +2,12 @@
 import type { ChatChannel, ChatView } from "@/lib/game/chat-config";
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import { MAX_CLICKS_PER_SECOND } from "@/lib/game/config";
-import { advance, researchBase, type WorldState, buyAcademy, buyArmy, buyGenerator, buyUpgrade, clickValue, stagesDoneAt, setTithe, startResearch, type PlayerState } from "@/lib/game/engine";
-import type { GeneratorId } from "@/lib/game/config";
+import { advance, researchBase, type WorldState, buyAcademy, stagesDoneAt, setTithe, startResearch, type PlayerState } from "@/lib/game/engine";
 import { applyS2Action } from "@/lib/game/s2/apply";
 import { applyCompanyOp } from "@/lib/game/company-ops";
 import { worksiteFromRow, worldFrom, type ActionResponse, type AwaySummary, type GameAction, type GameSnapshot, type Leaderboards } from "@/lib/game/types";
 import { getBrowserClient } from "@/lib/supabase/client";
 
-/** Les clics partent par lots : moins d'appels au serveur (la pierre s'affiche déjà en local). */
-const CLICK_FLUSH_MS = 8_000;
-/** Actions qui passent par le chemin commun du serveur : elles emportent les clics en attente. */
-const JOINS_CLICKS = new Set<string>(["buy", "rebuild", "army", "s2", "company", "research", "research_cancel", "curfew", "march_recall", "merchant", "tithe", "academy", "upgrade", "inbox_read", "contribute", "vein"]);
 const SYNC_MS = 60_000;
 /** Délai minimal entre deux synchronisations déclenchées par l'activité des rivaux. */
 const LIVE_SYNC_MS = 5_000;
@@ -34,10 +28,7 @@ export function useGame() {
   const [away, setAway] = useState<AwaySummary | null>(null);
   const snapRef = useRef<GameSnapshot | null>(null);
   const offset = useRef(0);
-  const pending = useRef(0);
-  const inflight = useRef(0);
   const queue = useRef<Promise<unknown>>(Promise.resolve());
-  const clickTimes = useRef<number[]>([]);
   const toastTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const watching = useRef(false);
   const [liveRivals, setLiveRivals] = useState(false);
@@ -86,53 +77,11 @@ export function useGame() {
     }
   }, []);
 
-  const sendClicks = useCallback(async () => {
-    const n = pending.current;
-    if (n === 0) return;
-    pending.current = 0;
-    inflight.current = n;
-    try {
-      const before = snapRef.current?.state.clickPausedUntil ?? 0;
-      const r = await post({ type: "click", count: n });
-      if (!r.snapshot) {
-        pending.current += n; // réseau coupé : on réessaiera
-        return;
-      }
-      receive(r.snapshot);
-      // Un lot accepté n'est jamais renvoyé (sinon il grossit à chaque envoi et finit en confiscation).
-      if (r.snapshot.state.clickPausedUntil > before && r.snapshot.state.clickPausedUntil > r.snapshot.serverNow) {
-        showToast("🔨 Trop rapide pour un humain ! Ton marteau est confisqué 2 minutes.");
-      }
-    } finally {
-      inflight.current = 0;
-    }
-  }, [post, receive, showToast]);
-
-  /** Met une action en file : une seule requête à la fois, clics en attente envoyés d'abord. */
+  /** Met une action en file : une seule requête à la fois. */
   const run = useCallback(
-    (action: GameAction | "flush-clicks"): Promise<boolean> => {
+    (action: GameAction): Promise<boolean> => {
       const task = async () => {
-        if (action === "flush-clicks") {
-          await sendClicks();
-          return true;
-        }
-        // Actions simples : les clics en attente partent avec elles (un aller-retour de moins).
-        const joined = pending.current > 0 && JOINS_CLICKS.has(action.type) ? pending.current : 0;
-        if (pending.current > 0 && joined === 0) await sendClicks();
-        if (joined > 0) {
-          pending.current = 0;
-          inflight.current = joined;
-        }
-        let r: ActionResponse;
-        try {
-          const before = snapRef.current?.state.clickPausedUntil ?? 0;
-          r = await post(joined > 0 ? ({ ...action, clicks: joined } as unknown as GameAction) : action);
-          if (joined > 0 && !r.snapshot) pending.current += joined;
-          const paused = r.snapshot?.state.clickPausedUntil ?? 0;
-          if (joined > 0 && r.snapshot && paused > before && paused > r.snapshot.serverNow) showToast("🔨 Trop rapide pour un humain ! Ton marteau est confisqué 2 minutes.");
-        } finally {
-          if (joined > 0) inflight.current = 0;
-        }
+        const r = await post(action);
         const i = optimisticOps.current.indexOf(action);
         if (i >= 0) optimisticOps.current.splice(i, 1);
         if (r.snapshot) receive(r.snapshot);
@@ -140,67 +89,38 @@ export function useGame() {
         if (r.ok && r.message) showToast(r.message);
         return r.ok;
       };
-      if (action !== "flush-clicks") {
-        const s = snapRef.current;
-        const now = Date.now() + offset.current;
-        const w = s ? worldFrom(s.worksite) : undefined;
-        const local = s && w ? applyLocal(advance(s.state, now, w), action, w) : null;
-        if (s && local) {
-          optimisticOps.current.push(action);
-          const next = { ...s, state: local };
-          snapRef.current = next;
-          setSnap(next);
-        }
+      // Aperçu immédiat quand l'issue est sûre ; le serveur fait foi et remplace l'aperçu.
+      const s = snapRef.current;
+      const now = Date.now() + offset.current;
+      const w = s ? worldFrom(s.worksite) : undefined;
+      const local = s && w ? applyLocal(advance(s.state, now, w), action, w) : null;
+      if (s && local) {
+        optimisticOps.current.push(action);
+        const next = { ...s, state: local };
+        snapRef.current = next;
+        setSnap(next);
       }
       const p = queue.current.then(task, task);
       queue.current = p.catch(() => undefined);
       return p;
     },
-    [post, receive, sendClicks, showToast],
+    [post, receive, showToast],
   );
 
   const serverNow = useCallback(() => Date.now() + offset.current, []);
 
-  /** Pierre prévue maintenant (production + clics pas encore confirmés). */
-  const predictedStone = useCallback(() => {
-    const s = snapRef.current;
-    if (!s) return 0;
-    const now = serverNow();
-    const world = worldFrom(s.worksite);
-    const base = advance(s.state, now, world).stone;
-    return base + (pending.current + inflight.current) * clickValue(s.state, world, stagesDoneAt(world, now));
-  }, [serverNow]);
-
-  /** Un coup de marteau. Renvoie le gain affiché, ou 0 si la cadence max est dépassée. */
-  const click = useCallback((): number => {
-    const s = snapRef.current;
-    if (!s || s.state.clickPausedUntil > serverNow()) return 0;
-    const t = performance.now();
-    clickTimes.current = clickTimes.current.filter((x) => t - x < 1000);
-    if (clickTimes.current.length >= MAX_CLICKS_PER_SECOND) return 0;
-    clickTimes.current.push(t);
-    pending.current += 1;
-    const world = worldFrom(s.worksite);
-    return clickValue(s.state, world, stagesDoneAt(world, serverNow()));
-  }, [serverNow]);
-
-  // Chargement initial, envoi régulier des clics, synchronisation périodique.
+  // Chargement initial et synchronisation périodique.
   useEffect(() => {
     void run({ type: "sync" });
-    const flush = setInterval(() => {
-      if (pending.current > 0) void run("flush-clicks");
-    }, CLICK_FLUSH_MS);
     // Onglet caché : pas de synchronisation de fond, on rattrape au retour.
     const sync = setInterval(() => {
       if (document.visibilityState === "visible") void run({ type: "sync" });
     }, SYNC_MS);
     const onVisible = () => {
       if (document.visibilityState === "visible") void run({ type: "sync" });
-      else if (pending.current > 0) void run("flush-clicks");
     };
     document.addEventListener("visibilitychange", onVisible);
     return () => {
-      clearInterval(flush);
       clearInterval(sync);
       document.removeEventListener("visibilitychange", onVisible);
     };
@@ -344,7 +264,7 @@ export function useGame() {
     };
   }, [seasonId, run, showToast, scheduleLiveSync]);
 
-  return { snap, toast, away, dismissAway: () => setAway(null), run, click, predictedStone, serverNow, watchRivals, pendingClicks: () => pending.current + inflight.current };
+  return { snap, toast, away, dismissAway: () => setAway(null), run, serverNow, watchRivals };
 }
 
 /** Classement des contributeurs, rafraîchi quand le chantier avance. */
@@ -377,23 +297,17 @@ export function useTick(ms: number) {
 /** Effet local d'un achat, s'il est sûr de réussir ; null sinon (le serveur tranchera). */
 function applyLocal(state: PlayerState, action: GameAction, world?: WorldState): PlayerState | null {
   const r =
-    action.type === "buy"
-      ? buyGenerator(state, action.generator as GeneratorId, Number(action.qty))
-      : action.type === "army"
-        ? buyArmy(state, action.kind, action.id, Number(action.qty))
-        : action.type === "upgrade"
-          ? buyUpgrade(state, action.upgrade)
-          : action.type === "academy"
-            ? buyAcademy(state, state.lastUpdate, world ? researchBase(state, world, state.lastUpdate) : 0)
-            : action.type === "research"
-              ? startResearch(state, action.id, state.lastUpdate, world ? stagesDoneAt(world, state.lastUpdate) : 0, world ? researchBase(state, world, state.lastUpdate) : 0)
-              : action.type === "tithe"
-                ? setTithe(state, Number(action.percent))
-                : action.type === "company"
-                  ? applyCompanyOp(state, action, state.lastUpdate)
-                  : action.type === "s2" && action.op !== "place" && action.op !== "take" && world
-                  ? s2Local(state, action, world)
-                  : null;
+    action.type === "academy"
+      ? buyAcademy(state, state.lastUpdate, world ? researchBase(state, world, state.lastUpdate) : 0)
+      : action.type === "research"
+        ? startResearch(state, action.id, state.lastUpdate, world ? stagesDoneAt(world, state.lastUpdate) : 0, world ? researchBase(state, world, state.lastUpdate) : 0)
+        : action.type === "tithe"
+          ? setTithe(state, Number(action.percent))
+          : action.type === "company"
+            ? applyCompanyOp(state, action, state.lastUpdate)
+            : action.type === "s2" && action.op !== "place" && action.op !== "take" && world
+              ? s2Local(state, action, world)
+              : null;
   return r && r.ok ? r.value : null;
 }
 

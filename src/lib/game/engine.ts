@@ -5,28 +5,14 @@ import type { DailyState } from "./daily";
 import { wingLevel, type Wings } from "./hall";
 import type { WingId } from "./config";
 import {
-  BURN_CLICK_REDUCTION_MS,
   BURN_MS,
-  BURN_PRODUCTION_FACTOR,
-  CLICK_PAUSE_MS,
-  CLICK_RATE_MIN_WINDOW_MS,
-  CLICK_STRIKES_FOR_PAUSE,
-  CLICK_WINDOW_MAX_MS,
-  SUSPICIOUS_CLICK_RATE,
-  COST_GROWTH,
-  COMPANIONS,
   WING_ARMY_SPEED,
   WING_HEAL_MS,
   WING_PRODUCTION,
   WING_REINFORCE_SPEED,
   WING_REINFORCE_STRENGTH,
   WING_SAFE_SECONDS,
-  COMPANION_BONUS,
-  COMPANION_TRANCHE,
-  MASTERY_BONUS,
-  MASTERY_TRANCHE,
   GENERATORS,
-  MAX_CLICKS_PER_SECOND,
   OFFLINE_CAP_MS,
   PROTECTED_PER_TYPE,
   DEFENSE_IDS,
@@ -41,8 +27,6 @@ import {
   ACADEMY_COST_GROWTH,
   SABOTAGE_COST_SECONDS,
   SABOTAGE_MIN_COST,
-  ELAN_PER_CLICK_MS,
-  ELAN_MAX_MS,
   MIN_TARGET_SIZE,
   PVP_LOOT_CAP_SECONDS,
   LORD_LOOT_CAP_SECONDS,
@@ -79,21 +63,18 @@ import {
   RUMOR_SECONDS,
   RUMOR_MS,
   MOLE_SECONDS,
-  GRANARY_CUT_MS,
   BLIND_MS,
   SABOTAGE_MIN_SUCCESS,
   SABOTAGE_DELAY,
   SABOTAGE_IMMUNITY_MS,
   UNIT_IDS,
   DEFENSE_REPAIR_RATE,
-  DEFENSES,
   GUARDS_PER_DOMAIN,
   RAID_DESTROY_RATE,
   RAID_LOOT_RATE,
   REVENGE_ATTACK_BONUS,
   REVENGE_LOOT_RATE,
   REVENGE_MS,
-  RUIN_REBUILD_FACTOR,
   SECURED_SECONDS,
   SPY_COST_SECONDS,
   SPY_MIN_COST,
@@ -115,13 +96,10 @@ import {
   type LegacyId,
   TOTAL_STAGES,
   EMBELLISH_PRODUCTION,
-  UNITS,
-  UPGRADE_BY_ID,
   type CombatantId,
   type DefenseId,
   type GeneratorId,
   type UnitId,
-  type UpgradeDef,
   STAGE_MIN_SIZE,
   STAGE_SIZE_HOURS,
   STAGE_END_HOURS,
@@ -130,30 +108,10 @@ import {
   stageHours,
   MAX_TITHE,
   CURFEW_MINUTES,
-  CURFEW_DELAY_MS,
-  QUESTS,
-  questDef,
-  QUEST_REWARD_SECONDS,
-  QUEST_MIN_REWARD,
-  QUEST_FINAL_ECUS,
-  type QuestId,
-  VEIN_MIN_MS,
-  VEIN_MAX_MS,
-  VEIN_VISIBLE_MS,
-  VEIN_GRACE_MS,
-  VEIN_FRENZY_CHANCE,
-  VEIN_FRENZY_MS,
-  VEIN_FRENZY_FACTOR,
-  VEIN_RAIN_SECONDS,
   SHARE_HOURS,
   donorTiersFor,
   DONOR_TIER_ECUS,
   DONOR_TIER_BONUS,
-  FAIR_GENERATOR_FACTOR,
-  MINE_MAX_SECONDS,
-  MINE_SECONDS_PER_SLICE,
-  MINE_SLICE_MS,
-  FOG_SPY_FACTOR,
   MAX_MARCHES,
   BATTLE_FORTUNE,
   TRAVEL_BASE_MIN,
@@ -161,25 +119,15 @@ import {
   TRAVEL_MIN_MIN,
   TRAVEL_PER_CELL_MIN,
   UNIT_SPEED,
-  FAIR_UPGRADE_FACTOR,
-  MERCHANT_OFFERS,
-  MERCHANT_PRICE_SECONDS,
-  MERCHANT_PRODUCTION_MS,
-  MERCHANT_SAFE_MS,
-  MERCHANT_SAFE_SECONDS,
-  MERCHANT_PRODUCTION,
-  STARS_VEIN_FACTOR,
-  TRUCE_PRODUCTION,
-  type EventKind,
 } from "./config";
-import { armySize, armyValue, battle, cleanArmy, type Army, type BattleOptions, type Levels, type RoundLog } from "./battle";
+import { armySize, armyValue, battle, cleanArmy, type Army, type BattleOptions, type Boost, type Levels, type RoundLog } from "./battle";
 import { settleRift, type RiftState } from "./rift";
 import { armyBoost, hasTrait, type Captain, type Relic, type TraitId } from "./captains";
 import { BANDIT_GRACE_MS, productionValue, settleS2, VALUE as S2_VALUE, type S2State } from "./s2/economy";
 import type { LordS2State } from "./s2/lords";
 import { s2Map } from "./s2/rules";
 import { combatLevels, lockedMen, refRate, settleArmy, type ArmyWorks, type Company, type RecruitOrder } from "./companies";
-import { lin, LIN_ATTACK, LIN_ATTACK_LOSSES, LIN_CAVE_SECONDS, LIN_DONOR_TIERS, LIN_ELAN, LIN_FORT_DAMAGE, LIN_FORTUNE, LIN_GENERATOR_DISCOUNT, LIN_PRODUCTION, LIN_PROTECTED, LIN_PVP_CAP, LIN_REBUILD, LIN_RESEARCH_SPEED, LIN_REVENGE_MS, LIN_RUIN_OUTPUT, LIN_SABOTAGE, LIN_SPEED, LIN_SPY_SPEED, LIN_TROOP_DISCOUNT, LIN_WOUNDED, type LineageState } from "./lineage";
+import { lin, LIN_ATTACK, LIN_ATTACK_LOSSES, LIN_CAVE_SECONDS, LIN_DONOR_TIERS, LIN_FORT_DAMAGE, LIN_FORTUNE, LIN_PRODUCTION, LIN_PROTECTED, LIN_PVP_CAP, LIN_RESEARCH_SPEED, LIN_REVENGE_MS, LIN_SABOTAGE, LIN_SPEED, LIN_SPY_SPEED, LIN_WOUNDED, type LineageState } from "./lineage";
 
 export interface PlayerState {
   stone: number;
@@ -274,8 +222,6 @@ export interface PlayerState {
   masterBonuses?: { kind: MasterBonusKind; from: number; until: number }[];
   /** Coup de pouce aux joueurs distancés (0.3 = +30 % de production et de défense). Fixé par le serveur, jamais enregistré. */
   catchUp?: number;
-  /** Derniers événements du royaume (en cours et récents), pour leurs effets. Fixé par le serveur, jamais enregistré. */
-  eventMods?: { kind: EventKind; from: number; until: number }[];
   /** T3 : armées en route (aller ou retour). Les troupes en route ne défendent plus le domaine. */
   marches?: March[];
   /** V15 : bonus achetés au marchand, et passage du marchand où l'on a déjà acheté. */
@@ -391,31 +337,9 @@ export function spyRisk(gap: number, distance: number): number {
   return Math.min(SPY_RISK_MAX, Math.max(SPY_RISK_MIN, SPY_RISK_BASE - SPY_RISK_PER_GAP * gap + SPY_RISK_PER_CELL * distance));
 }
 
-/** V15 : secondes de stock à l'abri achetées au marchand. */
-export function extraSecured(state: PlayerState, t: number): number {
-  return (t < (state.boostSafeUntil ?? 0) ? MERCHANT_SAFE_SECONDS : 0) + WING_SAFE_SECONDS[wingLevel(state.hall, "grenier")] + LEGACY_CAVE_SECONDS * legacyLevel(state, "cave") + (lin(state, "cave") ? LIN_CAVE_SECONDS : 0);
-}
-
-/** V15 : prix du marchand, 30 minutes de sa production. */
-export function merchantPrice(state: PlayerState, world: WorldState, now: number): number {
-  return Math.ceil(baseRate(state, world, now) * MERCHANT_PRICE_SECONDS);
-}
-
-/** V15 : achète un bonus au marchand ; l'état doit être avancé jusqu'à `now`. */
-export function buyFromMerchant(state: PlayerState, choice: string, eventId: number, now: number, world: WorldState): Result<PlayerState> {
-  if (!eventActive(state, "marchand", now)) return { ok: false, error: "Le marchand n'est pas là." };
-  if (!(choice in MERCHANT_OFFERS)) return { ok: false, error: "Le marchand ne vend pas ça." };
-  if (state.merchantEvent === eventId) return { ok: false, error: "Tu as déjà acheté à ce marchand." };
-  const price = merchantPrice(state, world, now);
-  if (price > state.stone) return { ok: false, error: "Pas assez de pierre." };
-  const paid: PlayerState = { ...state, stone: state.stone - price, merchantEvent: eventId };
-  if (choice === "production") return { ok: true, value: { ...paid, boostProdUntil: now + MERCHANT_PRODUCTION_MS } };
-  if (choice === "safe") return { ok: true, value: { ...paid, boostSafeUntil: now + MERCHANT_SAFE_MS } };
-  const ruins = state.ruins ?? {};
-  if (!Object.values(ruins).some((n) => (n ?? 0) > 0)) return { ok: false, error: "Tu n'as aucune ruine à rebâtir." };
-  const generators = { ...state.generators };
-  for (const [id, n] of Object.entries(ruins) as [GeneratorId, number][]) generators[id] = owned(state, id) + n;
-  return { ok: true, value: { ...paid, generators, ruins: {} } };
+/** Secondes de stock à l'abri en plus (grenier de la halle, héritage, Lignée). */
+export function extraSecured(state: PlayerState): number {
+  return WING_SAFE_SECONDS[wingLevel(state.hall, "grenier")] + LEGACY_CAVE_SECONDS * legacyLevel(state, "cave") + (lin(state, "cave") ? LIN_CAVE_SECONDS : 0);
 }
 
 export interface March {
@@ -482,22 +406,14 @@ export function sendTroops(state: PlayerState, wanted: Army): Result<{ state: Pl
 }
 
 /** T4 : rappel d'une armée à l'aller ; elle rentre en autant de temps qu'elle a marché. */
-export function recallMarch(state: PlayerState, id: string, now: number, rate = 0): Result<PlayerState> {
+export function recallMarch(state: PlayerState, id: string, now: number): Result<PlayerState> {
   const m = (state.marches ?? []).find((x) => x.id === id);
   if (!m) return { ok: false, error: "Armée introuvable." };
   if (m.status === "camp") {
-    // V9 : quitter le filon avant la fin, avec ce qui a été extrait.
-    const loot = m.target.startsWith("mine:") ? mineReward(m, now, rate) : 0;
-    return { ok: true, value: { ...state, marches: (state.marches ?? []).map((x) => (x.id === id ? { ...x, status: "back", loot: x.loot + loot, returnAt: now + (x.arriveAt - x.departAt), outcome: "recalled" } : x)) } };
+    return { ok: true, value: { ...state, marches: (state.marches ?? []).map((x) => (x.id === id ? { ...x, status: "back", returnAt: now + (x.arriveAt - x.departAt), outcome: "recalled" } : x)) } };
   }
   if (m.status !== "out" || now >= m.arriveAt) return { ok: false, error: "Elle est déjà arrivée." };
   return { ok: true, value: { ...state, marches: (state.marches ?? []).map((x) => (x.id === id ? { ...x, status: "back", returnAt: now + (now - x.departAt), outcome: "recalled" } : x)) } };
-}
-
-/** V9 : ce que rapporte le filon pour le temps passé sur place, jusqu'à `until`. */
-export function mineReward(m: March, until: number, rate: number): number {
-  const slices = Math.floor(Math.max(0, Math.min(until, m.returnAt || until) - m.arriveAt) / MINE_SLICE_MS);
-  return Math.floor(rate * Math.min(MINE_MAX_SECONDS, slices * MINE_SECONDS_PER_SLICE));
 }
 
 /** T4 : armée rentrée, survivants et butin rendus au domaine. */
@@ -526,10 +442,6 @@ export function landMarch(state: PlayerState, id: string): PlayerState {
   };
 }
 
-/** L'événement `kind` est-il en cours à `t` ? */
-export function eventActive(state: PlayerState, kind: EventKind, t: number): boolean {
-  return (state.eventMods ?? []).some((e) => e.kind === kind && t >= e.from && t < e.until);
-}
 
 export interface Curfew {
   /** Minute UTC (0 à 1439) où commence la plage en vigueur, ou null sans couvre-feu. */
@@ -628,47 +540,6 @@ export function stagePerk(stagesDone: number, key: "defenseHp" | "elan" | "secur
   return sum;
 }
 
-function ownedUpgrades(state: PlayerState): UpgradeDef[] {
-  return state.upgrades.map((id) => UPGRADE_BY_ID.get(id)).filter((u): u is UpgradeDef => !!u);
-}
-
-export function generatorRate(state: PlayerState, id: GeneratorId): number {
-  const def = GENERATORS.find((g) => g.id === id)!;
-  let rate = def.baseRate;
-  for (const u of ownedUpgrades(state)) {
-    if (u.effect.kind === "generator" && u.effect.generator === id) rate *= u.effect.multiplier;
-  }
-  return rate * (1 + companionBonus(state, id));
-}
-
-/** Corps de métier : +2 % de production totale par tranche complète de 50 bâtiments d'un même type. */
-export function masteryBonus(state: PlayerState): number {
-  let tranches = 0;
-  for (const g of GENERATORS) tranches += Math.floor(owned(state, g.id) / MASTERY_TRANCHE);
-  return tranches * MASTERY_BONUS;
-}
-
-/** Compagnonnage : bonus d'un grand bâtiment grâce aux tranches de 10 de son petit compagnon. */
-export function companionBonus(state: PlayerState, id: GeneratorId): number {
-  const small = companionOf(id);
-  return small ? Math.floor(owned(state, small) / COMPANION_TRANCHE) * COMPANION_BONUS : 0;
-}
-
-/** Le petit bâtiment dont les tranches profitent à `id`. */
-export function companionOf(id: GeneratorId): GeneratorId | undefined {
-  return (Object.entries(COMPANIONS) as [GeneratorId, GeneratorId][]).find(([, big]) => big === id)?.[0];
-}
-
-/** Prochain palier d'un bâtiment : combien en acheter, et ce que ça rapporte (en part de production). */
-export function nextTiers(state: PlayerState, id: GeneratorId): { mastery: { missing: number; bonus: number }; companion: { missing: number; bonus: number; target: GeneratorId } | null } {
-  const n = owned(state, id);
-  const big = COMPANIONS[id];
-  return {
-    mastery: { missing: MASTERY_TRANCHE - (n % MASTERY_TRANCHE), bonus: MASTERY_BONUS },
-    companion: big ? { missing: COMPANION_TRANCHE - (n % COMPANION_TRANCHE), bonus: COMPANION_BONUS, target: big } : null,
-  };
-}
-
 /**
  * Coup de pouce d'un joueur selon son retard sur le premier (pierre produite depuis le début de la saison).
  * Renvoie 0 tant que l'écart reste sous CATCH_UP_MIN_GAP.
@@ -681,11 +552,8 @@ export function catchUpBonus(produced: number, leaderProduced: number): number {
 
 /** Multiplicateur global de production (améliorations, chantier, héritage, coup de pouce). */
 export function productionMultiplier(state: PlayerState, world: WorldState, stagesDone: number): number {
-  let m = (1 + (world.legacyBonus ?? 0)) * (state.fortress ? FORTRESS_PRODUCTION_BONUS : 1) * (1 + (state.catchUp ?? 0)) * (1 + DONOR_TIER_BONUS * (state.donorTiers ?? 0)) * (stagesDone < (state.lotBonusUntilStage ?? 0) ? 1 + LOT_BONUS : 1);
-  for (const u of ownedUpgrades(state)) {
-    if (u.effect.kind === "production") m *= u.effect.multiplier;
-  }
-  return m * (1 + masteryBonus(state)) * (1 + WING_PRODUCTION[wingLevel(state.hall, "loge")]) * stageMultiplier(stagesDone, "production") * (1 + LEGACY_CARRIER * legacyLevel(state, "carrier") + (lin(state, "carriere") ? LIN_PRODUCTION : 0));
+  const m = (1 + (world.legacyBonus ?? 0)) * (state.fortress ? FORTRESS_PRODUCTION_BONUS : 1) * (1 + (state.catchUp ?? 0)) * (1 + DONOR_TIER_BONUS * (state.donorTiers ?? 0)) * (stagesDone < (state.lotBonusUntilStage ?? 0) ? 1 + LOT_BONUS : 1);
+  return m * (1 + WING_PRODUCTION[wingLevel(state.hall, "loge")]) * stageMultiplier(stagesDone, "production") * (1 + LEGACY_CARRIER * legacyLevel(state, "carrier") + (lin(state, "carriere") ? LIN_PRODUCTION : 0));
 }
 
 /** H2 : niveau d'héritage, borné. */
@@ -699,31 +567,13 @@ export function legacyStartUntil(state: PlayerState): number {
   return legacyLevel(state, "depart") > 0 && state.seasonStart ? state.seasonStart + LEGACY_START_MS : 0;
 }
 
-/** Production de pierre par seconde pour un nombre d'étapes terminées donné. */
+/** Production par seconde, en valeur pierre : celle des concessions (le château ne produit rien). */
 export function productionPerSecond(state: PlayerState, world: WorldState, stagesDone: number): number {
-  // Saison 2 : la production est celle des concessions, en valeur pierre (le château ne produit plus rien).
   const map = state.s2 ? s2Map() : null;
-  if (state.s2 && map) return (productionValue(state.s2, map) / 3600) * productionMultiplier(state, world, stagesDone);
-  let base = 0;
-  for (const g of GENERATORS) {
-    // L2 : l'Architecte royal fait encore produire les ruines à 50 %.
-    const n = owned(state, g.id) + (lin(state, "architecte") ? LIN_RUIN_OUTPUT * ruinsOf(state, g.id) : 0);
-    if (n > 0) base += n * generatorRate(state, g.id);
-  }
-  return base * productionMultiplier(state, world, stagesDone);
+  if (!state.s2 || !map) return 0;
+  return (productionValue(state.s2, map) / 3600) * productionMultiplier(state, world, stagesDone);
 }
 
-/** Pierre rapportée par un coup de marteau. */
-export function clickValue(state: PlayerState, world: WorldState, stagesDone: number): number {
-  void world;
-  // Saison 2 : le marteau ne produit plus, il donne seulement de l'élan.
-  if (state.s2) return 0;
-  let value = 1;
-  for (const u of ownedUpgrades(state)) if (u.effect.kind === "click") value *= u.effect.multiplier;
-  return value * stageMultiplier(stagesDone, "click");
-}
-
-/** Bonus de production de l'élan (0 sans marteau) : +20 % avec le Marteau de maître, +50 % avec le runique en plus. */
 /** R6 : enchaîne les bonus d'un même genre (chacun ajoute 24 h à la fin du précédent s'il tombe pendant). */
 export function chainMasterBonuses(list: { kind: MasterBonusKind; from: number; until: number }[]): { kind: MasterBonusKind; from: number; until: number }[] {
   const out: { kind: MasterBonusKind; from: number; until: number }[] = [];
@@ -740,17 +590,6 @@ export function masterActive(state: PlayerState, kind: MasterBonusKind, t: numbe
   return (state.masterBonuses ?? []).some((m) => m.kind === kind && t >= m.from && t < m.until);
 }
 
-/** Réserve d'élan maximale (L2 : doublée par le Marteau infatigable). */
-export function elanMaxMs(state: PlayerState): number {
-  return ELAN_MAX_MS * (lin(state, "marteau") ? LIN_ELAN : 1);
-}
-
-export function elanBonus(state: PlayerState): number {
-  // Saison 2 : plus de marteau, donc plus d'élan.
-  if (state.s2) return 0;
-  return ownedUpgrades(state).reduce((sum, u) => sum + (u.effect.kind === "elan" ? u.effect.bonus : 0), 0);
-}
-
 export interface AdvanceOptions {
   /** Production de base fixe (seigneurs voisins), à la place des bâtiments. */
   flatRate?: number;
@@ -765,18 +604,14 @@ export function baseRate(state: PlayerState, world: WorldState, t: number): numb
   return productionPerSecond(state, world, stagesDoneAt(world, t));
 }
 
-/** Production réelle à l'instant t (incendie compris). */
+/** Production réelle à l'instant t, avec les bonus passagers (maître d'œuvre, coffre, départ lancé). */
 export function rateAt(state: PlayerState, world: WorldState, t: number, opts: AdvanceOptions = {}): number {
   const base = opts.flatRate ?? productionPerSecond(state, world, stagesDoneAt(world, t));
-  const elan = !opts.flatRate && t < (state.elanUntil ?? 0) && elanBonus(state) > 0 ? 1 + elanBonus(state) + stagePerk(stagesDoneAt(world, t), "elan") : 1;
-  const frenzy = !opts.flatRate && t < (state.frenzyUntil ?? 0) ? VEIN_FRENZY_FACTOR : 1;
-  const master = !opts.flatRate && masterActive(state, "production", t) ? 1 + MASTER_BONUSES.production.value : 1;
-  // V6 : la trêve des cloches profite à tous, seigneurs compris ; V15 : le bonus du marchand.
-  const truce = eventActive(state, "treve", t) ? 1 + TRUCE_PRODUCTION : 1;
-  const boost = !opts.flatRate && t < (state.boostProdUntil ?? 0) ? 1 + MERCHANT_PRODUCTION : 1;
-  const chest = !opts.flatRate && t < (state.dailyBoostUntil ?? 0) ? 1 + (state.dailyBoost ?? 0) : 1;
-  const start = !opts.flatRate && t < legacyStartUntil(state) ? 1 + LEGACY_START * legacyLevel(state, "depart") : 1;
-  return (t < state.burnedUntil ? base * BURN_PRODUCTION_FACTOR : base) * elan * frenzy * master * truce * boost * chest * start;
+  if (opts.flatRate) return base;
+  const master = masterActive(state, "production", t) ? 1 + MASTER_BONUSES.production.value : 1;
+  const chest = t < (state.dailyBoostUntil ?? 0) ? 1 + (state.dailyBoost ?? 0) : 1;
+  const start = t < legacyStartUntil(state) ? 1 + LEGACY_START * legacyLevel(state, "depart") : 1;
+  return base * master * chest * start;
 }
 
 /**
@@ -788,14 +623,14 @@ export function advance(state: PlayerState, now: number, world: WorldState, opts
   state = settleRift(settleArmy(settleWounded(settleCurfew(settleResearch(state, now), now), now), now), now, addWounded);
   if (now <= state.lastUpdate) return state;
   const start = Math.max(state.lastUpdate, now - OFFLINE_CAP_MS);
-  const events = [...world.stageCompletedAt, state.burnedUntil, state.elanUntil ?? 0, state.frenzyUntil ?? 0, ...(state.masterBonuses ?? []).flatMap((m) => [m.from, m.until]), state.boostProdUntil ?? 0, state.dailyBoostUntil ?? 0, legacyStartUntil(state), ...(state.eventMods ?? []).flatMap((e) => [e.from, e.until])];
+  const events = [...world.stageCompletedAt, ...(state.masterBonuses ?? []).flatMap((m) => [m.from, m.until]), state.dailyBoostUntil ?? 0, legacyStartUntil(state)];
   const breakpoints = events.filter((t) => t > start && t < now).sort((a, b) => a - b);
   let gain = 0;
   let tithed = 0;
   const tithe = Math.min(MAX_TITHE, Math.max(0, state.tithe ?? 0));
   const map = state.s2 ? s2Map() : null;
   if (state.s2 && map) {
-    // Saison 2 : les concessions produisent, les convois rapportent ; un multiplicateur commun (élan, bonus…) par segment.
+    // Les concessions produisent, les convois rapportent ; un multiplicateur commun (bonus passagers) par segment.
     const base = productionValue(state.s2, map) / 3600;
     const multiplier = (t: number) => (base > 0 ? rateAt(state, world, t, opts) / base : 1);
     // S10 : Cave profonde (+30 min de stock local), Charpentiers (convois 10 % plus rapides), Grands chariots (charge +25 %).
@@ -812,6 +647,7 @@ export function advance(state: PlayerState, now: number, world: WorldState, opts
       lastUpdate: now,
     };
   }
+  // Sans domaine (seigneurs) : production fixe, découpée aux fins d'étape pour la dîme.
   let cursor = start;
   for (const t of [...breakpoints, now]) {
     const part = (rateAt(state, world, cursor, opts) * (t - cursor)) / 1000;
@@ -826,111 +662,6 @@ export function advance(state: PlayerState, now: number, world: WorldState, opts
     totalProduced: state.totalProduced + gain,
     titheOwed: (state.titheOwed ?? 0) + tithed,
     lastUpdate: now,
-  };
-}
-
-/** Prix de `qty` bâtiments supplémentaires (série géométrique). */
-export function generatorCost(state: PlayerState, id: GeneratorId, qty = 1): number {
-  const def = GENERATORS.find((g) => g.id === id)!;
-  // Les ruines comptent : se faire détruire un bâtiment ne rend pas le suivant moins cher.
-  const n = owned(state, id) + ruinsOf(state, id);
-  return Math.ceil((def.baseCost * Math.pow(COST_GROWTH, n) * (Math.pow(COST_GROWTH, qty) - 1) * fairFactor(state, FAIR_GENERATOR_FACTOR) * generatorDiscount(state)) / (COST_GROWTH - 1));
-}
-
-/** L2 : Main-d'œuvre, ateliers 5 % moins chers. */
-function generatorDiscount(state: PlayerState): number {
-  return lin(state, "main_oeuvre") ? 1 - LIN_GENERATOR_DISCOUNT : 1;
-}
-
-/** V3 : remise de la foire, à l'heure de l'état (il est toujours avancé avant un achat). */
-function fairFactor(state: PlayerState, factor: number): number {
-  return eventActive(state, "foire", state.lastUpdate) ? factor : 1;
-}
-
-/** Prix d'une amélioration (savoir), foire comprise. */
-export function upgradeCost(state: PlayerState, u: UpgradeDef): number {
-  return Math.ceil(u.cost * fairFactor(state, FAIR_UPGRADE_FACTOR));
-}
-
-/** Nombre maximal de bâtiments achetables avec la pierre disponible. */
-export function maxAffordable(state: PlayerState, id: GeneratorId): number {
-  const def = GENERATORS.find((g) => g.id === id)!;
-  const n = owned(state, id) + ruinsOf(state, id);
-  const first = def.baseCost * Math.pow(COST_GROWTH, n) * fairFactor(state, FAIR_GENERATOR_FACTOR) * generatorDiscount(state);
-  if (state.stone < first) return 0;
-  let qty = Math.floor(Math.log((state.stone * (COST_GROWTH - 1)) / first + 1) / Math.log(COST_GROWTH));
-  while (qty > 0 && generatorCost(state, id, qty) > state.stone) qty--;
-  return qty;
-}
-
-export function buyGenerator(state: PlayerState, id: GeneratorId, qty: number): Result<PlayerState> {
-  if (!GENERATORS.some((g) => g.id === id)) return { ok: false, error: "Bâtiment inconnu." };
-  if (!Number.isInteger(qty) || qty < 1 || qty > 1000) return { ok: false, error: "Quantité invalide." };
-  const cost = generatorCost(state, id, qty);
-  if (cost > state.stone) return { ok: false, error: "Pas assez de pierre." };
-  return {
-    ok: true,
-    value: { ...state, stone: state.stone - cost, generators: { ...state.generators, [id]: owned(state, id) + qty } },
-  };
-}
-
-export function upgradeUnlocked(state: PlayerState, u: UpgradeDef): boolean {
-  return !u.requires || owned(state, u.requires.generator) >= u.requires.count;
-}
-
-export function buyUpgrade(state: PlayerState, id: string): Result<PlayerState> {
-  const u = UPGRADE_BY_ID.get(id);
-  if (!u) return { ok: false, error: "Amélioration inconnue." };
-  if (state.upgrades.includes(id)) return { ok: false, error: "Déjà achetée." };
-  if (!upgradeUnlocked(state, u)) return { ok: false, error: "Pas encore débloquée." };
-  const cost = upgradeCost(state, u);
-  if (cost > state.stone) return { ok: false, error: "Pas assez de pierre." };
-  return { ok: true, value: { ...state, stone: state.stone - cost, upgrades: [...state.upgrades, id] } };
-}
-
-/**
- * Applique un lot de clics. Le serveur accepte au plus MAX_CLICKS_PER_SECOND clics
- * par seconde écoulée depuis le dernier lot (fenêtre plafonnée) et ignore l'excédent.
- */
-export function applyClicks(
-  state: PlayerState,
-  count: number,
-  now: number,
-  world: WorldState,
-): { state: PlayerState; accepted: number; paused: boolean } {
-  const requested = Number.isFinite(count) ? Math.max(0, Math.floor(count)) : 0;
-  if (now < state.clickPausedUntil) return { state: { ...state, lastClickAt: now }, accepted: 0, paused: true };
-  const elapsed = Math.max(0, now - state.lastClickAt);
-  const windowMs = Math.min(elapsed, CLICK_WINDOW_MAX_MS);
-
-  // Cadence surhumaine soutenue : avertissements, puis marteau confisqué. La cadence se mesure sur le temps
-  // réel écoulé (non plafonné) : un lot honnête retardé par le réseau ne compte pas comme une rafale.
-  let strikes = state.clickStrikes;
-  if (requested > 0 && elapsed >= 1000) {
-    strikes = requested / (Math.max(elapsed, CLICK_RATE_MIN_WINDOW_MS) / 1000) > SUSPICIOUS_CLICK_RATE ? strikes + 1 : Math.max(0, strikes - 1);
-  }
-  if (strikes >= CLICK_STRIKES_FOR_PAUSE) {
-    return { state: { ...state, clickStrikes: 0, clickPausedUntil: now + CLICK_PAUSE_MS, lastClickAt: now }, accepted: 0, paused: true };
-  }
-
-  const allowed = Math.floor((MAX_CLICKS_PER_SECOND * windowMs) / 1000);
-  const accepted = Math.min(requested, allowed);
-  if (accepted === 0) return { state: { ...state, clickStrikes: strikes }, accepted, paused: false };
-  const gain = accepted * clickValue(state, world, stagesDoneAt(world, now));
-  return {
-    paused: false,
-    state: {
-      ...state,
-      clickStrikes: strikes,
-      stone: state.stone + gain,
-      totalProduced: state.totalProduced + gain,
-      totalClicks: state.totalClicks + accepted,
-      lastClickAt: now,
-      elanUntil: Math.min(now + elanMaxMs(state), Math.max(state.elanUntil ?? 0, now) + accepted * ELAN_PER_CLICK_MS),
-      // Frapper la pierre aide à éteindre l'incendie des ateliers.
-      burnedUntil: state.burnedUntil > now ? Math.max(now, state.burnedUntil - accepted * BURN_CLICK_REDUCTION_MS) : state.burnedUntil,
-    },
-    accepted,
   };
 }
 
@@ -968,97 +699,10 @@ export function settleCurfew(state: PlayerState, now: number): PlayerState {
   return { ...state, curfew: { start: next.start } };
 }
 
-/** Choisit une plage (minute UTC de début, ou null pour aucune) : elle prend effet 24 h plus tard. */
-export function setCurfew(state: PlayerState, start: number | null, now: number): Result<PlayerState> {
-  if (start !== null && (!Number.isInteger(start) || start < 0 || start >= 1440)) return { ok: false, error: "Plage invalide." };
-  const current = settleCurfew(state, now).curfew ?? { start: null };
-  if (current.start === start) return { ok: true, value: { ...state, curfew: { start } } };
-  return { ok: true, value: { ...state, curfew: { start: current.start, next: { start, from: now + CURFEW_DELAY_MS } } } };
-}
-
-/** Programme la prochaine veine d'or si la précédente est passée (le joueur doit être là pour la voir). */
-export function scheduleVein(state: PlayerState, now: number, rng: () => number = Math.random): PlayerState {
-  if (state.veinAt > 0 && now <= state.veinAt + VEIN_VISIBLE_MS + VEIN_GRACE_MS) return state;
-  return { ...state, veinAt: now + veinDelay(state, now, rng) };
-}
-
-/** Attente avant la prochaine veine ; V5 : trois fois plus courte pendant la pluie d'étoiles. */
-function veinDelay(state: PlayerState, now: number, rng: () => number): number {
-  const delay = VEIN_MIN_MS + Math.floor(rng() * (VEIN_MAX_MS - VEIN_MIN_MS));
-  return eventActive(state, "etoiles", now) ? Math.floor(delay / STARS_VEIN_FACTOR) : delay;
-}
-
-export type VeinOutcome = { kind: "frenzy"; until: number } | { kind: "rain"; stone: number };
-
-/** Prise d'une veine d'or ; l'état doit déjà être avancé jusqu'à `now`. */
-export function catchVein(state: PlayerState, now: number, world: WorldState, rng: () => number = Math.random): Result<{ state: PlayerState; outcome: VeinOutcome }> {
-  if (!(state.veinAt > 0) || now < state.veinAt - VEIN_GRACE_MS || now > state.veinAt + VEIN_VISIBLE_MS + VEIN_GRACE_MS) {
-    return { ok: false, error: "La veine s'est refermée." };
-  }
-  const next = { ...state, veinAt: now + veinDelay(state, now, rng) };
-  if (rng() < VEIN_FRENZY_CHANCE) {
-    const until = now + VEIN_FRENZY_MS;
-    return { ok: true, value: { state: { ...next, frenzyUntil: until }, outcome: { kind: "frenzy", until } } };
-  }
-  const stone = productionPerSecond(state, world, stagesDoneAt(world, now)) * VEIN_RAIN_SECONDS;
-  return {
-    ok: true,
-    value: { state: { ...next, stone: next.stone + stone, totalProduced: next.totalProduced + stone }, outcome: { kind: "rain", stone } },
-  };
-}
-
-/** Progression de la quête `id` d'après l'état (les quêtes notées à part valent 0 ou 1). */
-export function questProgress(state: PlayerState, id: QuestId, extra: { alliance?: boolean } = {}): number {
-  const sum = (o: Partial<Record<string, number>>) => Object.values(o).reduce<number>((a, b) => a + (b ?? 0), 0);
-  if (state.s2) {
-    if (id === "clicks") return state.s2.castle ? 1 : 0;
-    if (id === "workshop") return Math.max(0, state.s2.conc.length - 1);
-    if (id === "workshops") return Object.values(state.s2.bld).some((n) => n > 0) || state.s2.works.length > 0 ? 1 : 0;
-  }
-  switch (id) {
-    case "clicks":
-      return state.totalClicks;
-    case "workshop":
-    case "workshops":
-      return sum(state.generators);
-    case "upgrade":
-      return state.upgrades.length;
-    case "troops":
-      return sum(state.troops) + Object.values(state.stationed ?? {}).reduce((a, t) => a + sum(t), 0);
-    case "defense":
-      return sum(state.defenses);
-    case "alliance":
-      return extra.alliance ? 1 : 0;
-    default:
-      return (state.questFlags ?? []).includes(id) ? 1 : 0;
-  }
-}
-
-/** Valide la quête en cours si elle est remplie : récompense et passage à la suivante. */
-export function claimQuest(state: PlayerState, world: WorldState, now: number, extra: { alliance?: boolean } = {}): { state: PlayerState; done: number | null; ecus: number } {
-  const i = state.quest;
-  // Saison 2 : l'accueil en quêtes est remplacé par le guide pas à pas (côté navigateur).
-  if (state.s2 || i === null || i === undefined || i >= QUESTS.length) return { state, done: null, ecus: 0 };
-  const q = questDef(i);
-  if (questProgress(state, q.id, extra) < q.goal) return { state, done: null, ecus: 0 };
-  const reward = Math.max(QUEST_MIN_REWARD, productionPerSecond(state, world, stagesDoneAt(world, now)) * QUEST_REWARD_SECONDS);
-  return {
-    state: { ...state, quest: i + 1, stone: state.stone + reward, totalProduced: state.totalProduced + reward },
-    done: i,
-    ecus: i === QUESTS.length - 1 ? QUEST_FINAL_ECUS : 0,
-  };
-}
-
-/** Note une quête qui ne se lit pas dans l'état. */
-export function flagQuest(state: PlayerState, id: QuestId): PlayerState {
-  if (state.quest === null || (state.questFlags ?? []).includes(id)) return state;
-  return { ...state, questFlags: [...(state.questFlags ?? []), id] };
-}
-
 /** Règle la dîme, en pour cent entiers de 0 à 20. */
 export function setTithe(state: PlayerState, percent: number): Result<PlayerState> {
   if (!Number.isInteger(percent) || percent < 0 || percent > MAX_TITHE * 100) return { ok: false, error: "Dîme invalide." };
-  return { ok: true, value: flagQuest({ ...state, tithe: percent / 100, titheSet: true }, "tithe") };
+  return { ok: true, value: { ...state, tithe: percent / 100, titheSet: true } };
 }
 
 /** Verse au chantier la dîme prélevée (pierres entières) ; le reste attend le prochain versement. */
@@ -1150,28 +794,6 @@ export function stageTarget(stage: number, activeRates: number[], ageHours: numb
 // ---------------------------------------------------------------------------
 // Ruines et raids
 // ---------------------------------------------------------------------------
-
-/** Prix de reconstruction d'une ruine : moitié du prix d'un bâtiment au niveau actuel. */
-export function ruinCost(state: PlayerState, id: GeneratorId): number {
-  const def = GENERATORS.find((g) => g.id === id)!;
-  return Math.ceil(def.baseCost * Math.pow(COST_GROWTH, owned(state, id)) * RUIN_REBUILD_FACTOR * (lin(state, "charpentiers") ? LIN_REBUILD : 1));
-}
-
-export function rebuildRuin(state: PlayerState, id: GeneratorId): Result<PlayerState> {
-  if (!GENERATORS.some((g) => g.id === id)) return { ok: false, error: "Bâtiment inconnu." };
-  if (ruinsOf(state, id) < 1) return { ok: false, error: "Aucune ruine à rebâtir." };
-  const cost = ruinCost(state, id);
-  if (cost > state.stone) return { ok: false, error: "Pas assez de pierre." };
-  return {
-    ok: true,
-    value: {
-      ...state,
-      stone: state.stone - cost,
-      generators: { ...state.generators, [id]: owned(state, id) + 1 },
-      ruins: { ...state.ruins, [id]: ruinsOf(state, id) - 1 },
-    },
-  };
-}
 
 // ---------------------------------------------------------------------------
 // Troupes et défenses
@@ -1279,21 +901,6 @@ export function lootShares(attacker: PlayerState, stolen: number): Record<string
   return shares;
 }
 
-/** Envoie des troupes chez un allié. */
-export function sendReinforcements(sender: PlayerState, host: PlayerState, senderId: string, unit: string, qty: number): Result<{ sender: PlayerState; host: PlayerState }> {
-  if (!(UNIT_IDS as string[]).includes(unit)) return { ok: false, error: "Troupe inconnue." };
-  const id = unit as UnitId;
-  if (!Number.isInteger(qty) || qty < 1) return { ok: false, error: "Quantité invalide." };
-  const have = sender.troops[id] ?? 0;
-  if (qty > have) return { ok: false, error: "Tu n'as pas assez de ces troupes chez toi." };
-  const troops = { ...sender.troops };
-  if (have - qty > 0) troops[id] = have - qty;
-  else delete troops[id];
-  const group = { ...(host.stationed?.[senderId] ?? {}) };
-  group[id] = (group[id] ?? 0) + qty;
-  return { ok: true, value: { sender: { ...sender, troops }, host: { ...host, stationed: { ...host.stationed, [senderId]: group } } } };
-}
-
 /** Rappelle toutes ses troupes postées chez un allié. */
 export function recallReinforcements(owner: PlayerState, host: PlayerState, ownerId: string): Result<{ owner: PlayerState; host: PlayerState }> {
   const group = host.stationed?.[ownerId];
@@ -1303,28 +910,6 @@ export function recallReinforcements(owner: PlayerState, host: PlayerState, owne
   const stationed = { ...host.stationed };
   delete stationed[ownerId];
   return { ok: true, value: { owner: { ...owner, troops }, host: { ...host, stationed } } };
-}
-
-/** Valeur en pierre des troupes et fortifications d'un joueur. */
-export function armyWorth(state: PlayerState): number {
-  return armyValue(cleanArmy({ ...state.troops, ...state.defenses }));
-}
-
-/** Prix d'une troupe ou d'une fortification (L2 : Recrues, troupes 5 % moins chères). */
-export function armyPrice(state: PlayerState, kind: "unit" | "defense", cost: number): number {
-  return kind === "unit" && lin(state, "recrues") ? cost * (1 - LIN_TROOP_DISCOUNT) : cost;
-}
-
-export function buyArmy(state: PlayerState, kind: "unit" | "defense", id: string, qty: number): Result<PlayerState> {
-  if (state.companyModel) return { ok: false, error: kind === "unit" ? "Les troupes se recrutent dans tes compagnies." : "Les fortifications se bâtissent par niveaux." };
-  const def = kind === "unit" ? UNITS.find((u) => u.id === id) : DEFENSES.find((d) => d.id === id);
-  if (!def) return { ok: false, error: kind === "unit" ? "Troupe inconnue." : "Fortification inconnue." };
-  if (!Number.isSafeInteger(qty) || qty < 1) return { ok: false, error: "Quantité invalide." };
-  const cost = Math.ceil(armyPrice(state, kind, def.cost) * qty);
-  if (cost > state.stone) return { ok: false, error: "Pas assez de pierre." };
-  const key = kind === "unit" ? "troops" : "defenses";
-  const current = (state[key] as Record<string, number>)[id] ?? 0;
-  return { ok: true, value: { ...state, stone: state.stone - cost, [key]: { ...state[key], [id]: current + qty } } };
 }
 
 // ---------------------------------------------------------------------------
@@ -1512,8 +1097,18 @@ export function warOpts(state: PlayerState): Pick<BattleOptions, "fortBonus" | "
 
 /** L2 : options complètes d'une attaque de joueur hors raid (forteresse, halles, événements, simulateur). */
 export function playerAttackOpts(state: PlayerState, opts: BattleOptions = {}): BattleOptions {
-  return { ...opts, ...warOpts(state), attackBonus: (opts.attackBonus ?? 1) + warAttack(state), attackerLevels: opts.attackerLevels ?? combatLevels(state), attackerBoost: opts.attackerBoost ?? armyBoost(state, "attack"), fortune: warFortune(state) };
+  return { ...opts, ...warOpts(state), attackBonus: (opts.attackBonus ?? 1) + warAttack(state), attackerLevels: opts.attackerLevels ?? combatLevels(state), attackerBoost: regionBoost(state, opts.attackerBoost ?? armyBoost(state, "attack")), fortune: warFortune(state) };
 }
+
+/** Saison 2 : un château dans le froid endurcit ses troupes (+10 % de points de vie au combat). */
+export function regionBoost(state: PlayerState, boost: Boost | undefined): Boost | undefined {
+  if (state.s2?.region !== "froid") return boost;
+  const hp: Partial<Record<string, number>> = { ...(boost?.hp ?? {}) };
+  for (const id of UNIT_IDS) hp[id] = (hp[id] ?? 1) * (1 + COLD_HP_BONUS);
+  return { ...(boost ?? {}), hp };
+}
+
+const COLD_HP_BONUS = 0.1;
 
 /** Halle : la salle d'armes rend les renforts postés plus durs, au prorata de leur part dans la défense. */
 export function reinforcementStrength(victim: PlayerState): number {
@@ -1544,7 +1139,6 @@ export function raidBlocker(attacker: PlayerState, victim: PlayerState, ctx: Omi
   const revenge = hasRevenge(attacker, ctx.victimId, ctx.now);
   if (ctx.attackerId === ctx.victimId) return "On ne se pille pas soi-même.";
   if (ctx.allied) return "On ne pille pas un allié.";
-  if (eventActive(attacker, "treve", ctx.now) || eventActive(victim, "treve", ctx.now)) return "Trêve des cloches : aucune armée ne part.";
   if (inCurfew(attacker, ctx.now)) return "Tu es en couvre-feu : pas d'attaque pendant ta plage.";
   if (inCurfew(victim, ctx.now)) return "Ce domaine est en couvre-feu.";
   // En guerre, seuls les boucliers tombent ; la règle « pas deux fois la même cible » restent.
@@ -1651,7 +1245,7 @@ export function resolveRaid(
   const pillard = (attacker.captains ?? []).some((k) => k.trait === "pillard" && k.company && ((fight.attackerStart as Record<string, number>)[attacker.companies?.find((c) => c.id === k.company)?.unit ?? ""] ?? 0) > 0);
   const lootBonus = (masterActive(attacker, "loot", now) ? 1 + MASTER_BONUSES.loot.value : 1) * (pillard ? 1.15 : 1);
   const stolen = ctx.defenderArmy && ctx.lordLootFixed !== undefined ? Math.floor(Math.max(0, ctx.lordLootFixed)) : lootOf(victim.stone, ctx.victimRate, revenge, {
-    extraSecured: extraSecured(victim, now),
+    extraSecured: extraSecured(victim),
     securedFactor: (victim.granaryCutUntil ?? 0) > now ? 0.5 : 1,
     lord: !!ctx.defenderArmy,
     // Un seigneur prend au plus 30 minutes de la production de base de sa victime, revanche comprise.
@@ -1734,8 +1328,7 @@ export function fromGold(orig: PlayerState, s: PlayerState): PlayerState {
 }
 
 export function spyCost(state: PlayerState, world: WorldState, now: number): number {
-  const fog = eventActive(state, "brouillard", now) ? FOG_SPY_FACTOR : 1;
-  return Math.max(state.s2 ? 1 : SPY_MIN_COST, Math.ceil(spyBase(state, world, now) * SPY_COST_SECONDS * fog));
+  return Math.max(state.s2 ? 1 : SPY_MIN_COST, Math.ceil(spyBase(state, world, now) * SPY_COST_SECONDS));
 }
 
 
@@ -1804,6 +1397,8 @@ export const RESEARCHABLE: readonly CombatantId[] = [...UNIT_IDS, ...DEFENSE_IDS
 export function startResearch(state: PlayerState, id: string, now: number, stagesDone = 0, base = 0): Result<PlayerState> {
   const spy = id === "espionnage";
   if (!spy && !RESEARCHABLE.includes(id as CombatantId)) return { ok: false, error: "Amélioration inconnue." };
+  // Saison 2 : pas de fortifications (personne n'attaque le château), donc rien à y améliorer.
+  if (state.s2 && (DEFENSE_IDS as readonly string[]).includes(id)) return { ok: false, error: "Pas de fortifications cette saison." };
   const s = settleResearch(state, now);
   const queue = s.research ?? [];
   if (queue.length >= RESEARCH_QUEUE_MAX) return { ok: false, error: `La file de recherche est pleine (${RESEARCH_QUEUE_MAX} au plus).` };
@@ -1863,7 +1458,7 @@ export function sabotageCost(saboteur: PlayerState, target: PlayerState, world: 
   return Math.max(saboteur.s2 ? 1 : SABOTAGE_MIN_COST, Math.ceil(spyBase(saboteur, world, now) * SABOTAGE_COST_SECONDS * (lin(saboteur, "poudre") ? LIN_SABOTAGE : 1)));
 }
 
-export type SabotageAim = "academie" | "grenier" | "guet";
+export type SabotageAim = "academie" | "guet";
 
 /** E4 : réussite d'un sabotage selon l'écart de niveau d'espionnage (les tours ne comptent plus). */
 export function sabotageChance(gap: number): number {
@@ -1881,7 +1476,6 @@ export function sabotageBlocker(target: PlayerState, now: number, saboteur?: Pla
 
 /** Effet d'un sabotage réussi sur la cible. */
 export function applySabotage(target: PlayerState, now: number, aim: SabotageAim = "academie"): PlayerState {
-  if (aim === "grenier") return { ...target, granaryCutUntil: now + GRANARY_CUT_MS, sabotageImmuneUntil: now + SABOTAGE_IMMUNITY_MS };
   if (aim === "guet") return { ...target, blindUntil: now + BLIND_MS, sabotageImmuneUntil: now + SABOTAGE_IMMUNITY_MS };
   // La recherche en cours prend du retard, et toute la file avec elle.
   const queue = target.research ?? [];

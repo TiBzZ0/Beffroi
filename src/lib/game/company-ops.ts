@@ -26,6 +26,7 @@ export function applyCompanyOp(state: PlayerState, action: Extract<GameAction, {
     : op === "recruit" ? ironPaid(state, (s) => recruit(s, id, Number(action.qty), now, captainOf(s, id)?.trait === "recruteur" ? 2 : 1))
     : op === "train" ? ironPaid(state, (s) => startTraining(s, id, now))
     : op === "barracks" ? buildBarracks(state, now)
-    : op === "fort" ? buildFort(state, String(action.unit), now)
+    // Saison 2 : personne n'attaque le château (pas de raids entre joueurs), les fortifications ne servent à rien.
+    : op === "fort" ? (state.s2 ? { ok: false, error: "Pas de fortifications cette saison." } : buildFort(state, String(action.unit), now))
     : { ok: false, error: "Action inconnue." };
 }
