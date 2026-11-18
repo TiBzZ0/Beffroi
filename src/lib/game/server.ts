@@ -229,7 +229,7 @@ import { s2Map, setS2Map, s2Enabled } from "./s2/rules";
 import { applyS2Action, type S2Others } from "./s2/apply";
 import { applyCompanyOp } from "./company-ops";
 import { REF, VALUE, cleanS2, type S2State } from "./s2/economy";
-import { contractFoe, contractsFor, takeContract, afterLordAttack, cleanEscorts, concRes, HOSTILITY, pillageBlocker, pillaged, pillageLoot, routeFight, setLordNames, setVassals, VASSAL_MS, withHostility, type Vassal } from "./s2/convoys";
+import { contractBlocker, CONTRACT_MIN_CHANCE, contractFoe, contractsFor, fightChance, takeContract, afterLordAttack, cleanEscorts, concRes, HOSTILITY, pillageBlocker, pillaged, pillageLoot, routeFight, setLordNames, setVassals, VASSAL_MS, withHostility, type Vassal } from "./s2/convoys";
 import { afterDefeat, cleanLordS2, companiesHome, fiefLoot, garrison, lordTrain, patrolUnit, REFORM_MS, settleFief } from "./s2/lords";
 import { buyNode, cleanLineage, lin, lineageMark, LIN_MOLE, LIN_SPY_CATCH, NODE_BY_ID, nodeEffect, parisDay, RENOWN, RENOWN_GIFT_SEASON, renownAvailable, respec, type RenownSource } from "./lineage";
 import { notify, notifyEach, type PushMessage } from "@/lib/push";
@@ -2712,13 +2712,16 @@ export async function runAction(admin: SupabaseClient, userId: string, action: G
       // Vague B : contrat d'un seigneur, rempli par une armée envoyée du château.
       const map = s2Map();
       const day = dailyDay(now);
-      const c = map && current.s2 ? contractsFor(current.s2, map, me.id, day, currentSeasonStart, now).find((x) => x.id === String(action.id)) : undefined;
+      const list = map && current.s2 ? contractsFor(current.s2, map, me.id, day, currentSeasonStart, now) : [];
+      const c = list.find((x) => x.id === String(action.id));
       if (!map || !current.s2?.castle) error = "Pose d'abord ton château.";
-      else if (!c) error = "Contrat inconnu, ou déjà pris aujourd'hui.";
+      else if (!c) error = contractBlocker(current.s2, String(action.id), day, list) ?? "Contrat introuvable.";
       else {
         const wanted = (action.troops && typeof action.troops === "object" ? action.troops : current.troops) as Army;
         const sending = sendTroops(current, wanted);
+        const chance = sending.ok ? fightChance({ army: sending.value.sent, levels: combatLevels(current), boost: regionBoost(current, armyBoost(current, "attack")) }, contractFoe(c, map, currentSeasonStart, now)) : 1;
         if (!sending.ok) error = sending.error;
+        else if (chance < CONTRACT_MIN_CHANCE) error = `Ton armée n'a presque aucune chance (${Math.round(chance * 100)} %) : envoie plus d'hommes.`;
         else {
           const outMs = travelMs(sending.value.sent, mapDistance(current.s2.castle, c.pos), armySpeedBonus(current));
           const march: March = { id: marchId(), kind: "contract", target: c.id, contract: { lord: c.lord, kind: c.kind, ...(c.rival ? { rival: c.rival } : {}), gold: c.gold }, troops: sending.value.sent, departAt: now, arriveAt: now + outMs, status: "out", returnAt: 0, revealed: true, warned: true, loot: 0, ransom: 0 };

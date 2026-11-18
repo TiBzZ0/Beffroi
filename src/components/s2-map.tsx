@@ -7,7 +7,7 @@ import { guideDone, openTutorial } from "@/components/s2-tutorial";
 import { armySize, estimateChance } from "@/lib/game/battle";
 import { attackArmy, playerAttackOpts } from "@/lib/game/engine";
 import { garrisonOfView } from "@/lib/game/s2/lords";
-import { CONTRACT_TEXT, contractFoe, contractsFor, fightChance, HOSTILITY_LEVELS, hostilityAt, hostilityLevel, safeBlocker, safePrice } from "@/lib/game/s2/convoys";
+import { CONTRACT_MIN_CHANCE, CONTRACT_TEXT, contractFoe, contractsFor, fightChance, HOSTILITY_LEVELS, hostilityAt, hostilityLevel, safeBlocker, safePrice } from "@/lib/game/s2/convoys";
 import { dailyDay } from "@/lib/game/daily";
 import { drawBelfry, drawCastle, drawFort, drawLord, drawMap, drawRift, drawSite, toCell, type Layers, type View } from "@/components/s2-canvas";
 import { UNITS } from "@/lib/game/config";
@@ -442,7 +442,7 @@ function Contracts({ snap, live, now, busy, act }: { snap: GameSnapshot; live: P
                   {armySize(mine) > 0 ? ` Chance avec toutes tes troupes au château : ${Math.round(chance * 100)} %.` : ""}
                 </div>
                 {chance < 0.6 && sure !== c.id ? (
-                  <button className="btn btn-small" disabled={busy || armySize(mine) === 0} title={armySize(mine) === 0 ? "Aucune troupe au château." : undefined} onClick={() => setSure(c.id)}>
+                  <button className="btn btn-small" disabled={busy || armySize(mine) === 0 || chance < CONTRACT_MIN_CHANCE} title={armySize(mine) === 0 ? "Aucune troupe au château." : chance < CONTRACT_MIN_CHANCE ? "Ton armée n'a presque aucune chance : recrute d'abord." : undefined} onClick={() => setSure(c.id)}>
                     Accepter…
                   </button>
                 ) : (

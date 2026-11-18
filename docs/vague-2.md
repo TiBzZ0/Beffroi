@@ -48,6 +48,10 @@ Tout est dans `src/lib/game/s2/convoys.ts` (règles pures, testées dans `convoy
 | Contrats du jour (escorte, interception, camp de bandits) | `contractsFor`, action `contract`, `settleContract` (server.ts) |
 | Renom : pillage (1, 4 par jour), vassal (3), contrat (3) | `RENOWN` (lineage.ts) |
 
+Réglages après les essais en jeu : sur la route, le perdant se replie à la moitié de ses hommes (`ROUTE_LOSS_MAX`) ; une rancune attend la fin de la vassalité ; la récompense d'un contrat dépend du rang et du type (`CONTRACT_RANK_PAY`, `CONTRACT_KIND_PAY`), et le serveur refuse un départ sous 5 % de chance (`CONTRACT_MIN_CHANCE`).
+
+Comptes de test gardés (saison d'essais) : `essai_claude_a` et `essai_claude_b`, identifiants sur le serveur dans `~/essais-claude/comptes.json`.
+
 Les rapports de route vont dans `S2State.log` (catégorie « combats »), regroupés par heure pour les patrouilles (`pushLog` avec une clé).
 
 ## Ce qui reste à faire

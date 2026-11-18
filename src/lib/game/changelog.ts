@@ -663,4 +663,14 @@ export const CHANGELOG: ChangeEntry[] = [
       "📜 Contrats : chaque jour, trois seigneurs neutres envers toi proposent un contrat (escorte, interception, camp de bandits) contre de l'or et 3 renom. Ils sont sous la carte.",
     ],
   },
+  {
+    id: 75,
+    date: "18 novembre",
+    minSeason: 2,
+    items: [
+      "🛡️ Sur la route, le camp qui perd se replie après avoir perdu la moitié de ses hommes, au lieu de se battre jusqu'au dernier.",
+      "👑 Un vassal ne lance plus d'expédition de rancune contre son suzerain : elle attend la fin des 24 h de vassalité.",
+      "📜 Contrats : la récompense dépend du seigneur (un duc paie deux fois plus qu'un baron) et du contrat (un camp de bandits paie plus qu'une escorte, et une interception plus encore). Une armée sans aucune chance ne peut plus partir.",
+    ],
+  },
 ];

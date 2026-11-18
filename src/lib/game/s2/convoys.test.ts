@@ -175,3 +175,28 @@ describe("S2 vague B : pillage et escortes", () => {
     expect(contractsFor(after, MAP, "moi", 101, T0, T0).length).toBeGreaterThan(0);
   });
 });
+
+describe("S2 vague B : réglages après les essais", () => {
+  useS2();
+  it("sur la route, le perdant se replie à la moitié de ses hommes", () => {
+    const us = { army: { milicien: 1000 } };
+    const f = routeFight(us, { army: { piquier: 3000 } }, "retraite");
+    expect(f.won).toBe(false);
+    expect(Object.values(f.lost).reduce((a, b) => a + (b ?? 0), 0)).toBeLessThanOrEqual(500);
+  });
+
+  it("un vassal ne lance pas sa rancune contre son suzerain", () => {
+    const { from, to } = through();
+    const st: S2State = { ...state(), grudge: [{ lord: duke().id, due: T0 }], vassals: { [duke().id]: T0 + 24 * H }, safe: { ...othersSafe(), [duke().id]: T0 + 48 * H } };
+    convoyRisk(st, convoy(from, to, T0 + H), rc());
+    expect(st.grudge).toHaveLength(1);
+  });
+
+  it("la récompense d'un contrat dépend du rang et du type", () => {
+    const p = s2Player(T0);
+    const list = contractsFor(p.s2!, MAP, "moi", 100, T0, T0);
+    const golds = new Set(contractsFor(p.s2!, MAP, "moi", 100, T0, T0).concat(contractsFor(p.s2!, MAP, "toi", 101, T0, T0)).map((c) => c.gold));
+    expect(list.every((c) => c.gold > 0)).toBe(true);
+    expect(golds.size).toBeGreaterThan(1);
+  });
+});

@@ -56,7 +56,17 @@ export function routeFight(us: Side | null, them: Side, key: string): FightResul
   const chance = fightChance(us, them);
   const won = rollAt(key, 0) < chance;
   const r = battle(us.army, them.army, seededRng(hash(key)), { attackerLevels: us.levels, defenderLevels: them.levels, attackerBoost: us.boost, defenderBoost: them.boost });
-  return { won, chance, lost: won ? half(r.attackerLost) : r.attackerLost, foeLost: won ? r.defenderLost : half(r.defenderLost) };
+  return { won, chance, lost: won ? half(r.attackerLost) : retreat(r.attackerLost, us.army), foeLost: won ? retreat(r.defenderLost, them.army) : half(r.defenderLost) };
+}
+
+/** Sur la route, on ne se bat pas jusqu'au dernier : le perdant se replie après avoir perdu la moitié de ses hommes. */
+export const ROUTE_LOSS_MAX = 0.5;
+function retreat(lost: Army, army: Army): Army {
+  const total = armySize(cleanArmy(army));
+  const dead = armySize(lost);
+  if (dead <= total * ROUTE_LOSS_MAX || dead === 0) return lost;
+  const k = (total * ROUTE_LOSS_MAX) / dead;
+  return cleanArmy(Object.fromEntries((Object.entries(lost) as [string, number][]).map(([u, n]) => [u, Math.floor(n * k)])) as Army);
 }
 
 const company = (unit: UnitId, n = 1): Army => ({ [unit]: COMPANY_CAP[unit] * n }) as Army;
@@ -329,7 +339,8 @@ export function convoyRisk(st: S2State, v: Convoy, rc: RouteContext): number {
     if (lost >= cap - 1e-9) return lost;
   }
   // Rancune échue, ou expédition régulière d'un seigneur hostile.
-  const due = (st.grudge ?? []).filter((g) => g.due <= v.arrive).sort((a, b) => a.due - b.due)[0];
+  // Un vassal ne se venge pas de son suzerain : la rancune attend la fin de la vassalité.
+  const due = (st.grudge ?? []).filter((g) => g.due <= v.arrive && !((st.vassals?.[g.lord] ?? 0) > v.arrive)).sort((a, b) => a.due - b.due)[0];
   let foe: MapLord | undefined;
   if (due) {
     foe = rc.map.lords.find((l) => l.id === due.lord);
@@ -522,8 +533,19 @@ export interface Contract {
   gold: number;
 }
 export const CONTRACTS_MAX = 3;
-/** Récompense : 2 h de REF(j) en or. */
+/** Récompense : 2 h de REF(j) en or, selon le rang du seigneur et la difficulté du contrat. */
 export const CONTRACT_HOURS = 2;
+export const CONTRACT_RANK_PAY: Record<Rank, number> = { hobereau: 0.75, baron: 1, comte: 1.5, duc: 2 };
+export const CONTRACT_KIND_PAY: Record<ContractKind, number> = { escorte: 1, camp: 1.25, interception: 1.5 };
+/** En dessous, le serveur refuse le départ : l'armée n'a aucune chance. */
+export const CONTRACT_MIN_CHANCE = 0.05;
+
+/** Pourquoi un contrat ne peut pas être pris, ou `null`. */
+export function contractBlocker(s: S2State, id: string, day: number, list: Contract[]): string | null {
+  if (list.some((c) => c.id === id)) return null;
+  if (s.contracts?.day === day && s.contracts.taken.includes(id)) return "Contrat déjà pris aujourd'hui.";
+  return "Ce seigneur ne te propose pas de contrat aujourd'hui.";
+}
 export const CONTRACT_TEXT: Record<ContractKind, { icon: string; title: (lord: string, rival?: string) => string; text: string }> = {
   escorte: { icon: "🛡️", title: (l) => `Escorter un convoi de ${l}`, text: "Ton armée accompagne son convoi jusqu'au beffroi ; des brigands l'attendent en route." },
   interception: { icon: "⚔️", title: (l, r) => `Intercepter un convoi de ${r ?? "son rival"} pour ${l}`, text: "Ton armée attaque l'escorte d'un convoi rival. Le rival t'en voudra (+10 d'hostilité)." },
@@ -536,13 +558,14 @@ export function contractsFor(s: S2State, map: S2Map, playerId: string, day: numb
   const done = new Set(s.contracts?.day === day ? s.contracts.taken : []);
   const neutral = map.lords.filter((l) => hostilityLevel(hostilityAt(s, l.id, now)) === 0);
   const ranked = neutral.map((l) => ({ l, k: hash(`${playerId}:${day}:${l.id}`) })).sort((a, b) => a.k - b.k).slice(0, CONTRACTS_MAX);
-  const gold = Math.round((CONTRACT_HOURS * REF((now - seasonStart) / DAY)) / VALUE.or);
+  const gold = (CONTRACT_HOURS * REF((now - seasonStart) / DAY)) / VALUE.or;
   return ranked
     .map(({ l, k }): Contract => {
       const kind = (["escorte", "interception", "camp"] as const)[k % 3];
+      const pay = Math.round(gold * CONTRACT_RANK_PAY[l.rank] * CONTRACT_KIND_PAY[kind]);
       const rival = kind === "interception" ? [...map.lords].filter((x) => x.id !== l.id).sort((a, b) => cheb(a.pos, l.pos) - cheb(b.pos, l.pos))[0] : undefined;
       const pos: Pos = kind === "interception" && rival ? rival.pos : kind === "camp" ? [Math.min(40, Math.max(0, l.pos[0] + ((k >> 3) % 5) - 2)), Math.min(40, Math.max(0, l.pos[1] + ((k >> 6) % 5) - 2))] : l.pos;
-      return { id: `${day}:${l.id}`, lord: l.id, kind, ...(rival ? { rival: rival.id } : {}), pos, gold };
+      return { id: `${day}:${l.id}`, lord: l.id, kind, ...(rival ? { rival: rival.id } : {}), pos, gold: pay };
     })
     .filter((c) => !done.has(c.id));
 }
