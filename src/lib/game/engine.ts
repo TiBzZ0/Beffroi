@@ -85,6 +85,7 @@ import {
   FORT_CONVOY_SPEED,
   FORT_ESCORT_DAMAGE,
   FORT_PATROL_CUT,
+  fortressPos,
   FORT_PRODUCTION_S2,
   CATCH_UP_MAX,
   CATCH_UP_MIN_GAP,
@@ -660,7 +661,7 @@ export function advance(state: PlayerState, now: number, world: WorldState, opts
     const base = productionValue(state.s2, map) / 3600;
     const multiplier = (t: number) => (base > 0 ? rateAt(state, world, t, opts) / base : 1);
     // S10 : Cave profonde (+30 min de stock local), Charpentiers (convois 10 % plus rapides), Grands chariots (charge +25 %).
-    const perked = { ...state.s2, stockBonusHours: lin(state, "cave") ? 0.5 : 0, convoySpeed: (lin(state, "charpentiers") ? 0.1 : 0) + (state.fortsHeld?.includes(1) ? FORT_CONVOY_SPEED : 0), patrolCut: 1 - (1 - (state.fortsHeld?.includes(3) ? FORT_PATROL_CUT : 0)) * (1 - (lin(state, "guides") ? LIN_PATROL_CUT : 0)), loadBonus: lin(state, "fondations") ? 0.25 : 0, tradeBonus: (lin(state, "marchandage") ? LIN_TRADE_GOLD : 0) + (lin(state, "grand_marchand") ? LIN_TRADE_GOLD_TOP : 0), tradeSafe: lin(state, "grand_marchand"), archShield: lin(state, "architecte") };
+    const perked = { ...state.s2, stockBonusHours: lin(state, "cave") ? 0.5 : 0, convoySpeed: (lin(state, "charpentiers") ? 0.1 : 0) + (state.fortsHeld?.includes(1) ? FORT_CONVOY_SPEED : 0), patrolCut: 1 - (1 - (state.fortsHeld?.includes(3) ? FORT_PATROL_CUT : 0)) * (1 - (lin(state, "guides") ? LIN_PATROL_CUT : 0)), loadBonus: lin(state, "fondations") ? 0.25 : 0, tradeBonus: (lin(state, "marchandage") ? LIN_TRADE_GOLD : 0) + (lin(state, "grand_marchand") ? LIN_TRADE_GOLD_TOP : 0), tradeSafe: lin(state, "grand_marchand"), archShield: lin(state, "architecte"), safeZones: (state.fortsHeld ?? []).map((i) => [fortressPos(i)[0], fortressPos(i)[1]] as Pos) };
     // Vague B : escortes, patrouilles, brigands et expéditions, réglés à l'arrivée des convois.
     const route = routeOf(state, map, stagesDoneAt(world, now));
     const { s: s2, arrived } = settleS2(perked, { map, stageConcessions: stagesDoneAt(world, now) >= 1 ? 1 : 0, multiplier, breakpoints: events.filter((t) => t > state.s2!.at && t < now), belfryDone: stagesDoneAt(world, now) >= TOTAL_STAGES, banditsFrom: (state.seasonStart || 0) + BANDIT_GRACE_MS, risk: (st, v) => convoyRisk(st, v, route.rc), guard: (st, c, at) => banditGuard(st, c, at, route.rc), extra: (st, from, to) => {
@@ -1252,8 +1253,6 @@ export function raidBlocker(attacker: PlayerState, victim: PlayerState, ctx: Omi
   const revenge = hasRevenge(attacker, ctx.victimId, ctx.now);
   if (ctx.attackerId === ctx.victimId) return "On ne se pille pas soi-même.";
   if (ctx.allied) return "On ne pille pas un allié.";
-  if (inCurfew(attacker, ctx.now)) return "Tu es en couvre-feu : pas d'attaque pendant ta plage.";
-  if (inCurfew(victim, ctx.now)) return "Ce domaine est en couvre-feu.";
   // En guerre, seuls les boucliers tombent ; la règle « pas deux fois la même cible » restent.
   const free = revenge;
   if (!ctx.atWar && victim.shieldUntil > ctx.now) return "Cette cible est sous bouclier.";
@@ -1580,8 +1579,6 @@ export function sabotageChance(gap: number): number {
 
 /** Pourquoi on ne peut pas saboter cette cible, ou null. */
 export function sabotageBlocker(target: PlayerState, now: number, saboteur?: PlayerState, aim: SabotageAim = "academie"): string | null {
-  if (saboteur && inCurfew(saboteur, now)) return "Tu es en couvre-feu : pas de sabotage pendant ta plage.";
-  if (inCurfew(target, now)) return "Ce domaine est en couvre-feu.";
   if (target.sabotageImmuneUntil > now) return "Sa garde est sur le qui-vive après un sabotage récent.";
   if (aim === "academie" && (target.academy ?? 0) === 0 && (target.research ?? []).length === 0) return "Rien à saboter : pas d'académie ni de recherche en cours.";
   return null;

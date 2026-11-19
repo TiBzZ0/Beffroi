@@ -1,5 +1,5 @@
 // Vague C : mercenaires. Un seigneur neutre ou vassal loue une de ses compagnies pour 12 h. Elle escorte les convois
-// d'une concession avec son propre entraînement et ne compte pas dans la limite de compagnies.
+// d'une concession, ou se joint à ton armée sur les routes, avec son propre entraînement ; elle ne compte pas dans la limite de compagnies.
 
 import { COMPANY_CAP } from "../companies";
 import type { UnitId } from "../config";
@@ -10,6 +10,8 @@ import type { MapLord, Rank } from "./map";
 
 const H = 3_600_000;
 export const MERC_MS = 12 * H;
+/** Mercenaires loués « à l'armée » : ils se joignent à chacun de tes combats sur les routes (pillage, interception, camp, contrat, délogement). */
+export const MERC_ARMY = "army";
 /** Prix : 2 h × REF(j) en or pour un hobereau, ×2 par rang. */
 export const MERC_HOURS = 2;
 export const MERC_RANK: Record<Rank, number> = { hobereau: 1, baron: 2, comte: 4, duc: 8 };
@@ -31,12 +33,12 @@ export function mercsNow(s: S2State, now: number): NonNullable<S2State["mercs"]>
 export function mercBlocker(s: S2State, lord: MapLord | undefined, concId: string, price: number, now: number): string | null {
   if (!s.castle) return "Pose d'abord ton château.";
   if (!lord) return "Seigneur inconnu.";
-  if (!s.conc.some((c) => c.id === concId)) return "Choisis la concession à escorter.";
+  if (concId !== MERC_ARMY && !s.conc.some((c) => c.id === concId)) return "Choisis la concession à escorter.";
   const vassal = (s.vassals?.[lord.id] ?? 0) > now || freePass({ ...s, safe: {} }, lord.id, now);
   if (!vassal && hostilityLevel(hostilityAt(s, lord.id, now)) > 0) return "Seul un seigneur neutre envers toi, ou ton vassal, loue ses compagnies.";
   const live = mercsNow(s, now);
   if (live.some((m) => m.lord === lord.id)) return "Ce seigneur t'a déjà loué une compagnie.";
-  if (live.some((m) => m.conc === concId)) return "Cette concession a déjà ses mercenaires.";
+  if (live.some((m) => m.conc === concId)) return concId === MERC_ARMY ? "Ton armée a déjà ses mercenaires." : "Cette concession a déjà ses mercenaires.";
   if (s.gold < price) return `Il faut ${price.toLocaleString("fr-FR")} 🪙.`;
   return null;
 }

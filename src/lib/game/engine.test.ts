@@ -128,20 +128,20 @@ describe("paliers de don", () => {
   });
 });
 
-describe("couvre-feu", () => {
+describe("couvre-feu (saison 1, retiré)", () => {
   const DAY = 86_400_000;
   const midnight = Math.floor(T0 / DAY) * DAY + 10 * DAY;
 
-  it("bloque les raids et les sabotages dans les deux sens", () => {
+  it("une ancienne plage de couvre-feu ne bloque plus ni raid ni sabotage", () => {
     const sleeper = { ...newPlayerState(midnight), curfew: { start: 0 }, academy: 3 };
     const raider = { ...newPlayerState(midnight), troops: { milicien: 10 } };
     const at = midnight + 3_600_000;
     const ctx = { now: at, attackerId: "a", victimId: "b", victimRate: 1 };
-    expect(raidBlocker(raider, sleeper, ctx)).toMatch(/couvre-feu/);
-    expect(raidBlocker({ ...raider, curfew: { start: 0 } }, newPlayerState(midnight), ctx)).toMatch(/couvre-feu/);
-    expect(sabotageBlocker(sleeper, at, raider)).toMatch(/couvre-feu/);
+    expect(raidBlocker(raider, sleeper, ctx) ?? "").not.toMatch(/couvre-feu/);
+    expect(sabotageBlocker(sleeper, at, raider) ?? "").not.toMatch(/couvre-feu/);
   });
 });
+
 
 describe("lots du chantier", () => {
   useS2();

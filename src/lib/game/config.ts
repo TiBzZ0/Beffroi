@@ -197,9 +197,12 @@ export const DAILY_QUESTS = [
   { id: "renforts", family: "combattre", icon: "🤝", label: "Envoie des renforts à un allié", goal: 1 },
   { id: "recherche", family: "combattre", icon: "⚗️", label: "Termine une recherche", goal: 1 },
   { id: "espion", family: "combattre", icon: "🕵️", label: "Envoie une reconnaissance", goal: 1 },
+  { id: "embuscade", family: "combattre", icon: "🏹", label: "Intercepte, sabote ou guette un convoi ennemi (ou déloge une embuscade)", goal: 1 },
+  { id: "contrat", family: "combattre", icon: "📜", label: "Pars remplir un contrat de seigneur ou attaquer un camp de bandits", goal: 1 },
   { id: "convoi", family: "participer", icon: "🛒", label: "Expédie un convoi toi-même (départ ou ravitaillement)", goal: 1 },
   { id: "evenement", family: "participer", icon: "🎪", label: "Prends part à un événement", goal: 1 },
   { id: "message", family: "participer", icon: "💬", label: "Écris un message dans le chat", goal: 1 },
+  { id: "commerce", family: "participer", icon: "🛤️", label: "Affecte une escorte, loue des mercenaires ou propose une route commerciale", goal: 1 },
 ] as const;
 export type DailyQuestId = (typeof DAILY_QUESTS)[number]["id"];
 export const DAILY_FAMILIES: readonly DailyFamily[] = ["batir", "combattre", "participer"];

@@ -171,7 +171,6 @@ import {
   recordGift,
   type StageShare,
   type Curfew,
-  inCurfew,
   addWounded,
   woundedOf,
   fairness,
@@ -226,6 +225,7 @@ import { armyFromBudget, armySize, armyValue, battle, cleanArmy, estimateChance,
 import { recordContribution } from "@/lib/redis";
 import { addRelics, assignCaptain, assignRelic, CAPTAIN_COST, cleanCaptains, cleanOffer, cleanRelics, drawTraits, dropRelic, addCaptain, HUNT_TARGETS, expeditionSpeed, makeCaptain, makeRelic, RARITY_LABEL, RELICS, TRAIT_IDS, TRAITS, type Relic, type TraitId } from "./captains";
 import { applyRiftFight, cleanRift, expeditionOpts, floorRenown, floorTrain, guardianBattle, isGuardian, splitLosses, riftFightBlocker, riftFloor, riftOf, riftReturn, riftSend, riftWeek, RIFT_CHEST_EVERY, RIFT_CHEST_SECONDS } from "./rift";
+import { MERC_ARMY } from "./s2/mercs";
 import { combatLevels, COMPANY_VALUE, FIXED_EVENT_COMPANIES, FIXED_TRAIN, FORTRESS_COMPANIES, LORD_COMPANIES, LORD_RAID_SHARE, LORD_TRAIN, trainLevels, cleanCompanies, cleanFortLevels, cleanRecruits, cleanWorks, setIronArmy } from "./companies";
 import { castleBlocker, generateMap, inCentre, REGION_BONUS, type S2Map } from "./s2/map";
 import { s2Map, setS2Map, s2Enabled } from "./s2/rules";
@@ -1501,7 +1501,6 @@ function fortressLevels(f: FortressRow, entities: Map<string, Entity>): Levels {
 function fortressBlocker(me: Entity, state: PlayerState, f: FortressRow, now: number, army?: Army): string | null {
   if (me.allianceId === null) return "Rejoins une alliance pour assiéger la forteresse.";
   if (f.holder === me.allianceId) return "Ton alliance tient déjà cette forteresse.";
-  if (inCurfew(state, now)) return "Tu es en couvre-feu : pas d'attaque pendant ta plage.";
   // A13 : 30 minutes sans assaut après une prise, le temps de poster une garnison.
   if (f.holder !== null && now < f.capturedAt + FORTRESS_TRUCE_MS) return `La forteresse vient de changer de mains : pas d'assaut avant ${new Date(f.capturedAt + FORTRESS_TRUCE_MS).toLocaleTimeString("fr-FR", { hour: "2-digit", minute: "2-digit", timeZone: "Europe/Paris" })}.`;
   if (armySize(army ?? attackArmy(state)) === 0) return "Il te faut des troupes pour l'assaut.";
@@ -2151,7 +2150,7 @@ function rivalsFor(
             }
           : {}),
         ...(seesInner
-          ? { levels: s.levels as Record<string, number>, spyLevel: s.spyLevel ?? 0, researchQueue: s.research.map((r) => ({ id: r.id, endsAt: r.endsAt })), wounded: (s.wounded ?? {}) as Record<string, number>, healAt: s.healAt, curfewStart: s.curfew?.start ?? null }
+          ? { levels: s.levels as Record<string, number>, spyLevel: s.spyLevel ?? 0, researchQueue: s.research.map((r) => ({ id: r.id, endsAt: r.endsAt })), wounded: (s.wounded ?? {}) as Record<string, number>, healAt: s.healAt }
           : {}),
         lootCap: e.isLord ? (lordFixed ?? lordCap) : myRate * PVP_LOOT_CAP_SECONDS,
         lootSafe: extraSecured(s) || undefined,
@@ -2177,7 +2176,6 @@ function rivalsFor(
         burnedUntil: s.burnedUntil,
         totalPlundered: s.totalPlundered,
         lastSeen: e.isLord ? undefined : e.lastSeen,
-        curfew: e.isLord ? undefined : inCurfew(s, now),
         revenge,
         blocker: raidBlocker(myState, s, ctx),
         ...(e.isLord || allied
@@ -3661,7 +3659,7 @@ async function settlePillage(
   const victim = entities.get(m.target);
   const map = s2Map();
   if (!victim || victim.isLord || !map || !m.conc) return commit(owner, replace(owner.state, turn));
-  const aState = advanceEntity(owner, at, world, flat);
+  let aState = advanceEntity(owner, at, world, flat);
   let vState = advanceEntity(victim, at, world, flat);
   const why = pillageBlocker(vState.s2, m.conc, at, { allied: isAllied(owner, victim), sameIp: sameIp(owner, victim) });
   const c = vState.s2?.conc.find((x) => x.id === m.conc);
@@ -3682,9 +3680,12 @@ async function settlePillage(
   let foeLost: Army = {};
   let chance = 1;
   if (defense) {
-    const att = { army: m.troops, levels: combatLevels(aState), boost: regionBoost(aState, armyBoost(aState, "attack")) };
-    const f = routeFight(att, defense, `pillage:${m.id}`);
-    ({ won, chance, lost, foeLost } = f);
+    const ar = armySide(aState, m.troops, at);
+    const f = routeFight(ar.side, defense, `pillage:${m.id}`);
+    ({ won, chance, foeLost } = f);
+    const split = ar.settle(aState, f.lost);
+    aState = split.state;
+    lost = split.own;
     if (route) vState = route.hurt(vState, lossesBeyondTower(foeLost, defense, tower), won);
   }
   const loot = won ? pillageLoot(c, map, stagesDone) : null;
@@ -3732,7 +3733,7 @@ async function settleIntercept(
   const victim = entities.get(m.target);
   const map = s2Map();
   if (!victim || victim.isLord || !map || !m.conc || !m.convoy) return commit(owner, replace(owner.state, turn));
-  const aState = advanceEntity(owner, at, world, flat);
+  let aState = advanceEntity(owner, at, world, flat);
   let vState = advanceEntity(victim, at, world, flat);
   const v = vState.s2?.convoys.find((x) => x.conc === m.conc && x.depart === m.convoy);
   const why = interceptBlocker(vState.s2, v, { allied: isAllied(owner, victim), sameIp: sameIp(owner, victim), newbieUntil: protectedUntil(vState.s2!) }, at - 1);
@@ -3747,8 +3748,12 @@ async function settleIntercept(
   let lost: Army = {};
   let foeLost: Army = {};
   if (route) {
-    const f = routeFight({ army: m.troops, levels: combatLevels(aState), boost: regionBoost(aState, armyBoost(aState, "attack")) }, route.side, `intercept:${m.id}`);
-    ({ won, chance, lost, foeLost } = f);
+    const ar = armySide(aState, m.troops, at);
+    const f = routeFight(ar.side, route.side, `intercept:${m.id}`);
+    ({ won, chance, foeLost } = f);
+    const split = ar.settle(aState, f.lost);
+    aState = split.state;
+    lost = split.own;
     vState = route.hurt(vState, foeLost, won);
   }
   const taken = won ? interceptTake(v, stagesDone) : 0;
@@ -3849,13 +3854,13 @@ async function settleAmbushHit(
     notify(admin, [owner.id], { title: "🗡️ Embuscade introuvable", body: "Elle était levée avant ton arrivée. Ton armée rentre.", tag: "march" });
     return commit(owner, replace(owner.state, turn));
   }
-  const aState = advanceEntity(owner, at, world, flat);
+  const advanced = advanceEntity(owner, at, world, flat);
   let fState = advanceEntity(foe, at, world, flat);
-  const f = routeFight(
-    { army: m.troops, levels: combatLevels(aState), boost: regionBoost(aState, armyBoost(aState, "attack")) },
-    { army: am.troops, levels: combatLevels(fState), boost: regionBoost(fState, armyBoost(fState, "defense")) },
-    `ambush_hit:${m.id}`,
-  );
+  const ar = armySide(advanced, m.troops, at);
+  const fight = routeFight(ar.side, { army: am.troops, levels: combatLevels(fState), boost: regionBoost(fState, armyBoost(fState, "defense")) }, `ambush_hit:${m.id}`);
+  const split = ar.settle(advanced, fight.lost);
+  const aState = split.state;
+  const f = { ...fight, lost: split.own };
   const left = cleanArmy(Object.fromEntries((Object.entries(am.troops) as [string, number][]).map(([id, n]) => [id, n - ((f.foeLost as Record<string, number>)[id] ?? 0)])) as Army);
   // Vaincue, l'embuscade se lève à l'heure du combat : le serveur la règle (butin pris jusque-là), puis elle rentre.
   const nextAm: March = { ...am, troops: left, ...(f.won || armySize(left) === 0 ? { holdUntil: at } : {}) };
@@ -3872,6 +3877,32 @@ async function settleAmbushHit(
   await addChronicle(admin, seasonId, { kind: "raid", actor_id: owner.id, target_id: foe.id, details: { success: f.won, chance: f.chance, ambushHit: true, attackerLost: f.lost, defenderLost: f.foeLost } });
   notify(admin, [foe.id], { title: f.won ? "🗡️ Embuscade délogée" : "🏹 Embuscade tenue", body: fText.slice(3), tag: "raid" });
   return "changed";
+}
+
+/**
+ * Vague C : l'armée qui part sur les routes (pillage, interception, camp, contrat, délogement), et les mercenaires loués
+ * « à l'armée » qui se joignent à elle. `settle` retire leurs morts de leur compagnie et rend les pertes propres à l'armée.
+ */
+function armySide(state: PlayerState, troops: Army, at: number): { side: Side; settle: (s: PlayerState, lost: Army) => { state: PlayerState; own: Army } } {
+  const base: Side = { army: troops, levels: combatLevels(state), boost: regionBoost(state, armyBoost(state, "attack")) };
+  const mm = (state.s2?.mercs ?? []).find((x) => x.conc === MERC_ARMY && x.until > at && x.men > 0);
+  if (!mm) return { side: base, settle: (s, lost) => ({ state: s, own: lost }) };
+  const army = { ...(troops as Record<string, number>) };
+  const levels = { ...((base.levels ?? {}) as Record<string, number>) };
+  const mine = army[mm.unit] ?? 0;
+  const theirs = (trainLevels(mm.train) as Record<string, number>)[mm.unit] ?? 0;
+  levels[mm.unit] = mine > 0 ? ((levels[mm.unit] ?? 0) * mine + theirs * mm.men) / (mine + mm.men) : theirs;
+  army[mm.unit] = mine + mm.men;
+  return {
+    side: { ...base, army: army as Army, levels: levels as Levels },
+    settle: (s, lost) => {
+      const dead = { ...(lost as Record<string, number>) };
+      const mercDead = Math.min(mm.men, Math.round(((dead[mm.unit] ?? 0) * mm.men) / (mine + mm.men)));
+      dead[mm.unit] = Math.max(0, (dead[mm.unit] ?? 0) - mercDead);
+      const s2 = s.s2 && mercDead > 0 ? { ...s.s2, mercs: (s.s2.mercs ?? []).map((x) => (x.lord === mm.lord && x.conc === MERC_ARMY ? { ...x, men: x.men - mercDead } : x)).filter((x) => x.men > 0) } : s.s2;
+      return { state: { ...s, s2 }, own: cleanArmy(dead as Army) };
+    },
+  };
 }
 
 /** Escorte et mercenaires d'une concession d'un joueur, et comment appliquer leurs pertes. */
@@ -3915,8 +3946,12 @@ async function settleCamp(
     notify(admin, [owner.id], { title: "🏕️ Camp déserté", body: "Les bandits avaient levé le camp. Ton armée rentre.", tag: "march" });
     return commit(owner, replace(owner.state, { ...m, status: "back", returnAt: m.arriveAt + outMs, outcome: "turned" }));
   }
-  const aState = advanceEntity(owner, at, world, flat);
-  const f = routeFight({ army: m.troops, levels: combatLevels(aState), boost: regionBoost(aState, armyBoost(aState, "attack")) }, campSide(camp, at), `camp:${m.id}`);
+  const advanced = advanceEntity(owner, at, world, flat);
+  const ar = armySide(advanced, m.troops, at);
+  const fight = routeFight(ar.side, campSide(camp, at), `camp:${m.id}`);
+  const split = ar.settle(advanced, fight.lost);
+  const aState = split.state;
+  const f = { ...fight, lost: split.own };
   const survivors = cleanArmy(Object.fromEntries((Object.entries(m.troops) as [string, number][]).map(([id, n]) => [id, n - ((f.lost as Record<string, number>)[id] ?? 0)])) as Army);
   let healed = addWounded(aState, woundedOf(f.lost, f.won ? WOUNDED_WINNER : WOUNDED_ATTACKER_BEATEN), at);
   const iron = f.won ? campLoot(currentSeasonStart, at) : 0;
@@ -3944,9 +3979,13 @@ async function settleContract(
   const map = s2Map();
   const k = m.contract;
   if (!map || !k) return commit(owner, replace(owner.state, { ...m, status: "back", returnAt: m.arriveAt + outMs, outcome: "turned" }));
-  const aState = advanceEntity(owner, at, world, flat);
+  const advanced = advanceEntity(owner, at, world, flat);
   const foe = contractFoe({ id: m.target, lord: k.lord, kind: k.kind, rival: k.rival, pos: [0, 0], gold: k.gold }, map, currentSeasonStart, at);
-  const f = routeFight({ army: m.troops, levels: combatLevels(aState), boost: regionBoost(aState, armyBoost(aState, "attack")) }, foe, `contract:${m.id}`);
+  const ar = armySide(advanced, m.troops, at);
+  const fight = routeFight(ar.side, foe, `contract:${m.id}`);
+  const split = ar.settle(advanced, fight.lost);
+  const aState = split.state;
+  const f = { ...fight, lost: split.own };
   const survivors = cleanArmy(Object.fromEntries((Object.entries(m.troops) as [string, number][]).map(([id, n]) => [id, n - ((f.lost as Record<string, number>)[id] ?? 0)])) as Army);
   let healed = addWounded(aState, woundedOf(f.lost, f.won ? WOUNDED_WINNER : WOUNDED_ATTACKER_BEATEN), at);
   const rival = k.rival ? map.lords.find((l) => l.id === k.rival) : undefined;
@@ -4268,6 +4307,7 @@ function dailyContextOf(me: Entity, state: PlayerState, entities: Map<string, En
     allies: me.allianceId === null ? 0 : [...entities.values()].filter((e) => !e.isLord && e.id !== me.id && e.allianceId === me.allianceId).length,
     levels: levelSum(state),
     spyLevel: state.spyLevel ?? 0,
+    castle: !!state.s2?.castle,
   };
 }
 
@@ -4384,7 +4424,6 @@ function hallSiegeBlocker(me: Entity, state: PlayerState, g: Guild, wars: WarRow
   if (g.allianceId === me.allianceId) return "C'est la halle de ton alliance.";
   if (!warBetween(wars, me.allianceId, g.allianceId, now)) return "On n'assiège une halle qu'en guerre contre son alliance.";
   if (g.immuneUntil > now) return `Cette halle a déjà subi un assaut : à l'abri jusqu'à ${new Date(g.immuneUntil).toLocaleTimeString("fr-FR", { hour: "2-digit", minute: "2-digit", timeZone: "Europe/Paris" })}.`;
-  if (inCurfew(state, now)) return "Tu es en couvre-feu : pas d'attaque pendant ta plage.";
   if (armySize(army ?? attackArmy(state)) === 0) return "Il te faut des troupes pour l'assaut.";
   return null;
 }
@@ -4928,7 +4967,7 @@ async function placeMole(
   const paid = fromGold(current, { ...goldView(current), stone: goldView(current).stone - cost, moles });
   if (caught) return { cost, caught, target, state: paid, message: `🐀 Ta taupe a été démasquée en s'installant chez ${target.name}.` };
   const t = target.state;
-  const mole: Mole = { id: marchId(), target: key, until: now + MOLE_MS * (lin(current, "taupe") ? LIN_MOLE : 1), distance, seen: (t.marches ?? []).map((m) => m.id), shielded: t.shieldUntil > now, curfew: inCurfew(t, now) };
+  const mole: Mole = { id: marchId(), target: key, until: now + MOLE_MS * (lin(current, "taupe") ? LIN_MOLE : 1), distance, seen: (t.marches ?? []).map((m) => m.id), shielded: t.shieldUntil > now, curfew: false };
   return { cost, caught, target, state: { ...paid, moles: [...moles, mole] }, message: `🐀 Ta taupe est en place chez ${target.name} pour ${lin(current, "taupe") ? "3" : "2"} h : elle te préviendra de ses départs d'armée, de son bouclier et de son couvre-feu.` };
 }
 
@@ -4961,10 +5000,8 @@ async function settleMoles(admin: SupabaseClient, seasonId: number, entities: Ma
         }
         const shielded = t.shieldUntil > now;
         if (mo.shielded && !shielded) log.push(`🐀 ${target.name} n'a plus de bouclier.`);
-        const curfew = inCurfew(t, now);
-        if (curfew !== mo.curfew) log.push(curfew ? `🐀 ${target.name} entre en couvre-feu.` : `🐀 ${target.name} sort du couvre-feu.`);
-        if (fresh.length === 0 && shielded === mo.shielded && curfew === mo.curfew) continue;
-        next = { ...mo, seen: [...mo.seen, ...fresh.map((m) => m.id)].slice(-30), shielded, curfew };
+        if (fresh.length === 0 && shielded === mo.shielded) continue;
+        next = { ...mo, seen: [...mo.seen, ...fresh.map((m) => m.id)].slice(-30), shielded };
         const gap = spyLevelOf(owner) - defenseSpyLevel(target, now);
         if (log.some(() => Math.random() < spyRisk(gap, mo.distance) / 2 + (lin(t, "sentinelles") ? LIN_SPY_CATCH : 0))) {
           next = null;

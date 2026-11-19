@@ -22,7 +22,7 @@ export interface DailyState {
 }
 
 /** Compteurs du jour, relevés par le serveur. */
-export type DailyCounts = Partial<Record<"don" | "ameliorer" | "marche" | "seigneur" | "renforts" | "convoi" | "evenement" | "message" | "espion", number>>;
+export type DailyCounts = Partial<Record<"don" | "ameliorer" | "marche" | "seigneur" | "renforts" | "convoi" | "evenement" | "message" | "espion" | "embuscade" | "contrat" | "commerce", number>>;
 
 /** Ce qui rend une quête possible pour ce joueur. */
 export interface DailyContext {
@@ -32,6 +32,8 @@ export interface DailyContext {
   levels: number;
   /** E4 : niveau d'espionnage (la quête « reconnaissance » le demande). */
   spyLevel?: number;
+  /** Vague C : château posé sur la carte de la saison 2 (quêtes de routes). */
+  castle?: boolean;
 }
 
 const DAY_MS = 86_400_000;
@@ -67,6 +69,8 @@ function feasible(id: DailyQuestId, ctx: DailyContext): boolean {
   if (id === "seigneur") return ctx.troops > 0;
   if (id === "renforts") return ctx.allies > 0;
   if (id === "espion") return (ctx.spyLevel ?? 0) >= 1;
+  if (id === "embuscade" || id === "contrat") return !!ctx.castle && ctx.troops > 0;
+  if (id === "commerce") return !!ctx.castle;
   return true;
 }
 

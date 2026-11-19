@@ -253,6 +253,8 @@ export interface S2State {
   tradeSafe?: boolean;
   /** Architecte royal (fixé à chaque calcul) : un convoi par jour passe intact. */
   archShield?: boolean;
+  /** Forteresses tenues par l'alliance (fixé à chaque calcul) : 4 cases de passage libre autour de chacune. */
+  safeZones?: Pos[];
   /** Jour (UTC, en jours depuis 1970) où l'Architecte royal a déjà protégé un convoi. */
   archDay?: number;
 }

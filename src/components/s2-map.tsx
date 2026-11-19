@@ -7,7 +7,7 @@ import { guideDone, openTutorial } from "@/components/s2-tutorial";
 import { armySize, estimateChance } from "@/lib/game/battle";
 import { armySpeedBonus, attackArmy, playerAttackOpts, travelMs } from "@/lib/game/engine";
 import { interceptPoint, sabotagePrice, tradePay, TRADE_MAX } from "@/lib/game/s2/players";
-import { mercBlocker, mercOffer, mercPrice, mercsNow } from "@/lib/game/s2/mercs";
+import { MERC_ARMY, mercBlocker, mercOffer, mercPrice, mercsNow } from "@/lib/game/s2/mercs";
 import { garrisonOfView } from "@/lib/game/s2/lords";
 import { campSide, CONTRACT_MIN_CHANCE, CONTRACT_TEXT, contractFoe, contractsFor, fightChance, HOSTILITY_LEVELS, hostilityAt, hostilityLevel, safeBlocker, safePrice } from "@/lib/game/s2/convoys";
 import { dailyDay } from "@/lib/game/daily";
@@ -330,7 +330,7 @@ function S2Panel({ snap, live, now, world, picked, busy, act, castlesOthers }: {
     return (
       <div className="s2-panel">
         <div className="row-title">🏰 {f?.name ?? "Forteresse"}</div>
-        <div className="row-desc">Bonus pour l&apos;alliance qui la tient : {fortressBonus(picked.idx)}.</div>
+        <div className="row-desc">Bonus pour l&apos;alliance qui la tient : {fortressBonus(picked.idx)}. À 4 cases autour, ses convois passent sans patrouille, embuscade ni bandits.</div>
         <div className="row-desc">{f?.holderName ? `Tenue par ${f.holderName}.` : "Gardée par une garnison neutre."}{castle ? ` À ${cheb(fp, castle)} cases de ton château.` : ""} Assaut, espion et garnison : onglet Alliance.</div>
         {castle && mineHeld && (
           <div className="s2-settings">
@@ -529,28 +529,30 @@ function CampPanel({ live, camp, now, busy, act }: { live: PlayerState; camp: No
 function Mercs({ snap, live, lord, now, busy, act }: { snap: GameSnapshot; live: PlayerState; lord: S2WorldView["lords"][number]; now: number; busy: boolean; act: (a: GameAction) => Promise<void> }) {
   const s2 = live.s2!;
   const ml = snap.s2!.map.lords.find((x) => x.id === lord.id);
-  const [conc, setConc] = useState(s2.conc[0]?.id ?? "");
-  if (!ml || s2.conc.length === 0) return null;
+  const [conc, setConc] = useState(s2.conc[0]?.id ?? MERC_ARMY);
+  if (!ml || !s2.castle) return null;
   const price = mercPrice(ml, live.seasonStart || now, now);
   const offer = mercOffer(ml, live.seasonStart || now, now);
   const why = mercBlocker(s2, ml, conc, price, now);
   const hired = mercsNow(s2, now).find((m) => m.lord === lord.id);
   const unit = unitOf(offer.unit);
   const site = (id: string) => {
+    if (id === MERC_ARMY) return "ton armée";
     const c = s2.conc.find((x) => x.id === id);
     return c ? snap.s2!.map.sites[c.site]?.name ?? "concession" : "concession";
   };
   return (
     <div className="s2-settings">
       {hired ? (
-        <span>⚔️ Ses mercenaires escortent {site(hired.conc)} encore {dur(hired.until - now)} ({hired.men} hommes).</span>
+        <span>⚔️ Ses mercenaires {hired.conc === MERC_ARMY ? "marchent avec ton armée sur les routes" : `escortent ${site(hired.conc)}`} encore {dur(hired.until - now)} ({hired.men} hommes).</span>
       ) : (
         <>
-          <span>⚔️ Mercenaires : {offer.men} {unit ? unit.plural.toLowerCase() : offer.unit}, entraînement {offer.train}, pour 12 h d&apos;escorte</span>
-          <select className="input" value={conc} onChange={(e) => setConc(e.target.value)} aria-label="Concession à escorter">
+          <span>⚔️ Mercenaires : {offer.men} {unit ? unit.plural.toLowerCase() : offer.unit}, entraînement {offer.train}, pour 12 h, à l&apos;escorte d&apos;une concession ou avec ton armée (ils se joignent à tes pillages, interceptions, camps, contrats et délogements)</span>
+          <select className="input" value={conc} onChange={(e) => setConc(e.target.value)} aria-label="Concession à escorter, ou ton armée">
             {s2.conc.map((c) => (
               <option key={c.id} value={c.id}>{site(c.id)}</option>
             ))}
+            <option value={MERC_ARMY}>⚔️ avec ton armée</option>
           </select>
           <button className="btn btn-small" disabled={busy || !!why} title={why ?? undefined} onClick={() => void act({ type: "s2", op: "merc", id: lord.id, to: conc })}>
             Louer · 🪙 {formatNumber(price)}

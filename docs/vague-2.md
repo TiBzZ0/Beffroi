@@ -73,14 +73,22 @@ Les rapports de route vont dans `S2State.log` (catégorie « combats »), regrou
 
 La migration `20261119100000_wave2_world.sql` ajoute `season_maps.world` et `world_version`, la colonne `fortresses.idx` (clé primaire `(season_id, idx)`) et la fonction `apply_fortress_at`. Elle ne supprime rien.
 
-Écarts avec la spécification : les mercenaires servent d'escorte de concession (ils ne partent pas en attaque) ; une expédition ne se voit pas sur la carte, seule la garnison réduite du seigneur se voit.
+Écarts avec la spécification : la zone de passage libre des forteresses ne couvre que les convois de l'alliance qui la tient.
 
-## Ce qui reste à faire
+## Vague 3 : ce qui est livré (19 novembre)
 
-| Chantier | Où le brancher |
+| Chantier | Où |
 |---|---|
-| Tours de site, nœuds de Lignée du commerce (vague C) | `S2State`, `lineage.ts` |
-| Expéditions visibles sur la carte | `S2State.sent` contient déjà leur départ et leur retour |
+| Expéditions visibles : trait pointillé du fief à la cible, liste « Expéditions des seigneurs » | `S2State.sent[].to` (écrit par `convoyRisk`), `S2WorldView.expeditions` (`s2WorldView`), `s2-canvas.ts`, `Expeditions` (s2-map.tsx) |
+| Alerte sur la route d'une concession : embuscades et camps repérés à une case | `RouteSection` (s2-domain.tsx) |
+| Déloger une embuscade : l'armée part du château ; vaincue, l'embuscade se lève (`holdUntil` = heure du combat) | action `ambush_hit`, marche `kind: "ambush_hit"` (`March.ambush`), `settleAmbushHit` (server.ts) |
+| Tour de site : bâtiment de concession `tour`, 5 niveaux ; +1 case de vue et 100 arbalétriers par niveau contre le pillage | `CONC_BUILDINGS.tour`, `concBuildingMax` (economy.ts) ; `watchPoints` (point de vue `[x, y, bonus]`), `withTower`, `lossesBeyondTower` (players.ts), `settlePillage` |
+| Lignée du Marchand : Comptoirs (+1 route), Marchandage (+20 % d'or), Guetteurs (+2 cases de vue), Convoyeurs (escortes +10 %), Guides (patrouilles −20 %), Grand marchand (convois de commerce intouchables, +25 %) | `NODES` (lineage.ts) ; champs calculés `tradeBonus`, `tradeSafe` (engine.ts `perked`), `escortBoost`, `setTradeOffer(max)`, `activeTrades(max)` |
+| Architecte royal en saison 2 : le premier convoi du jour qui devait perdre arrive intact | `archShield` (calculé), `S2State.archDay` (gardé), `lose()` dans `convoyRisk` |
+| Quêtes du jour de routes : embuscade, contrat ou camp, escorte ou commerce | `DAILY_QUESTS` (config.ts), `feasible` (daily.ts), migration `20261119120000_daily_routes.sql` |
+| Mercenaires avec l'armée : loués « à l'armée », ils se joignent aux pillages, interceptions, camps, contrats et délogements | `MERC_ARMY` (mercs.ts), `armySide` (server.ts) |
+| Passage libre à 4 cases d'une forteresse tenue par l'alliance : ni patrouille, ni embuscade, ni bandits | `safeZones` (calculé depuis `fortsHeld`), `FORT_SAFE_REACH` (convoys.ts) |
+| Couvre-feu retiré du jeu (le champ reste stocké, sans effet) | blocages de raid, de sabotage, de forteresse et de halle ; rapport d'espion ; taupe |
 
 ## Régions
 
@@ -88,10 +96,10 @@ Froid donne +10 % de PV au combat (`regionBoost`, engine.ts). Désert donne +10 
 
 ## Restes de la saison 1 encore en place
 
-Ces morceaux ne servent plus en jeu, mais ils touchent la base de données ou des fonctions partagées. Ils ont été laissés pour ne rien casser :
+Ces morceaux ne servent plus en jeu, mais ils touchent la base de données ou des fonctions partagées. Ils ont été laissés pour ne rien casser ; les retirer efface des données stockées, à faire au changement de saison avec l'accord du propriétaire :
 
 - `generators` dans `PlayerState` et dans la table `player_states`, et la destruction de bâtiments dans `resolveRaid` (engine.ts).
-- `curfew` et `inCurfew` : vérifiés dans les blocages, mais plus réglables.
+- `curfew` : encore lu et réécrit dans le JSON `military` (pour ne pas effacer de données), mais sans effet depuis la vague 3.
 - Des champs S1 encore lus ou écrits dans le JSON `military` (`veinAt`, `quest`, `questFlags`, `merchantEvent`, `ruinImmuneUntil`…).
 - `setS2Geometry` : la bascule entre la carte S1 (15 × 15) et la carte S2 (41 × 41) existe toujours dans config.ts, toujours activée.
 - `total_plundered` dans `player_states` : plus affiché depuis le remplacement du classement des pillards.

@@ -38,7 +38,6 @@ import {
   ADVISED_TITHE,
   DONOR_TIER_ECUS,
   DONOR_TIER_BONUS,
-  CURFEW_MINUTES,
   LOT_ECUS,
   MASTER_BONUSES,
   type MasterBonusKind,
@@ -1516,13 +1515,6 @@ export function AllianceTab({ snap, live, now, run }: { snap: GameSnapshot; live
   );
 }
 
-/** Heure locale (« 23 h » ou « 23 h 30 ») d'une minute UTC de la journée. */
-function localTime(utcMinute: number): string {
-  const local = (utcMinute - new Date().getTimezoneOffset() + 2880) % 1440;
-  const h = Math.floor(local / 60);
-  const m = local % 60;
-  return m ? `${h} h ${String(m).padStart(2, "0")}` : `${h} h`;
-}
 
 /** U1 : l'état du jeu à portée des cartes qui n'en reçoivent qu'une partie (temps de trajet). */
 const SnapContext = createContext<{
@@ -1872,7 +1864,6 @@ function SpyReport({ r, now }: { r: RivalView; now: number }) {
     lines.push(`Forge : ${lv.length ? lv.join("  ") : "aucun niveau"} · espionnage ${r.spyLevel ?? 0}`);
     if (r.researchQueue?.length) lines.push(`Recherches : ${r.researchQueue.map((q) => `${q.id === "espionnage" ? "🕵️" : (COMBATANTS.get(q.id as CombatantId)?.icon ?? q.id)} fin dans ${duration(q.endsAt - now)}`).join(", ")}`);
     if (r.wounded && Object.keys(r.wounded).length && (r.healAt ?? 0) > now) lines.push(`Blessés : ${armyIcons(r.wounded)}, de retour dans ${duration((r.healAt ?? 0) - now)}`);
-    if (r.curfewStart !== null && r.curfewStart !== undefined) lines.push(`Couvre-feu de ${localTime(r.curfewStart)} à ${localTime((r.curfewStart + CURFEW_MINUTES) % 1440)}`);
   }
   return (
     <div className="row-desc spy-report num">
@@ -2399,7 +2390,7 @@ function FortressCard({ snap, live, now, run, f, first, many }: { snap: GameSnap
             {f.name}
             {f.mine && <span className="badge badge-level-1">à vous</span>}
           </div>
-          <div className="row-desc num">{f.holderName ? `👑 ${f.holderName}` : "👑 personne (garnison neutre, à pleine force à chaque assaut)"} · {fortressBonus(idx)}</div>
+          <div className="row-desc num">{f.holderName ? `👑 ${f.holderName}` : "👑 personne (garnison neutre, à pleine force à chaque assaut)"} · {fortressBonus(idx)} · passage libre des convois à 4 cases</div>
           <div className="row-desc army-line num">
             {intel ? `🕵️ ${armyIcons(f.army)} · ${duration(f.intelUntil! - now)}` : f.exact ? armyIcons(f.army) : `≈ ${armyIcons(f.army)}`}
           </div>

@@ -711,6 +711,10 @@ export const CHANGELOG: ChangeEntry[] = [
       "⚠️ La section « Route et escorte » d'une concession signale les embuscades et les camps de bandits repérés sur sa route.",
       "🗼 Tour de site : nouveau bâtiment de concession (5 niveaux). Chaque niveau donne +1 case de vue autour du site et 100 arbalétriers qui gardent le stock contre le pillage, avec l'escorte.",
       "🛤️ Lignée : nouvelle branche du Marchand (Comptoirs, Marchandage, Guetteurs, Convoyeurs, Guides, Grand marchand). L'Architecte royal protège maintenant un convoi par jour : le premier qui devait perdre une part de sa charge arrive intact.",
+      "📅 Trois nouvelles quêtes du jour : intercepter, saboter ou guetter un convoi ; remplir un contrat ou attaquer un camp ; affecter une escorte, louer des mercenaires ou proposer une route commerciale.",
+      "⚔️ Mercenaires : ils peuvent aussi marcher avec ton armée (choix « avec ton armée ») et se joignent à tes pillages, interceptions, camps, contrats et délogements pendant 12 h.",
+      "🏰 À 4 cases d'une forteresse tenue par ton alliance, tes convois passent sans patrouille, embuscade ni bandits.",
+      "🌙 Le couvre-feu de la saison 1 ne bloque plus rien.",
     ],
   },
 ];

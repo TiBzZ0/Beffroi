@@ -394,9 +394,13 @@ export function convoyRisk(st: S2State, v: Convoy, rc: RouteContext): number {
     lost += Math.max(0, take);
     return Math.max(0, take);
   };
+  const cells = line(v.from, v.to);
+  // Autour d'une forteresse tenue par l'alliance : ni patrouille, ni embuscade, ni bandits.
+  const sheltered = (c: Pos) => (st.safeZones ?? []).some((z) => cheb(z, c) <= FORT_SAFE_REACH);
   for (const { lord, t } of zonesOnRoute(rc.map, v.from, v.to)) {
     const at = Math.round(v.depart + t * span);
     if (freePass(st, lord.id, at)) continue;
+    if (sheltered(cells[Math.min(cells.length - 1, Math.round(t * (cells.length - 1)))])) continue;
     addHostility(st, rc.map, lord, HOSTILITY.cross, at);
     const lv = HOSTILITY_LEVELS[hostilityLevel(hostilityAt(st, lord.id, at))];
     const chance = Math.min(PATROL_CHANCE_MAX, PATROL_CHANCE[lord.rank] * lv.chance) * (1 - (st.patrolCut ?? 0));
@@ -414,12 +418,11 @@ export function convoyRisk(st: S2State, v: Convoy, rc: RouteContext): number {
     });
     if (lost >= cap - 1e-9) return lost;
   }
-  const cells = line(v.from, v.to);
   // S8 : embuscades posées par d'autres joueurs à une case de la route (une attaque de joueur au plus par convoi).
   if (!v.hit && st.who) {
     for (const a of ambushes) {
       if (a.owner === st.who.id || (a.alliance !== null && a.alliance === st.who.alliance)) continue;
-      const i = cells.findIndex((c) => cheb(c, a.pos) <= AMBUSH_REACH);
+      const i = cells.findIndex((c) => cheb(c, a.pos) <= AMBUSH_REACH && !sheltered(c));
       if (i < 0) continue;
       const at = Math.round(v.depart + (cells.length > 1 ? i / (cells.length - 1) : 0) * span);
       if (at < a.from || at >= a.until || newbieUntil(st) > at) continue;
@@ -434,7 +437,7 @@ export function convoyRisk(st: S2State, v: Convoy, rc: RouteContext): number {
   }
   // Camps de bandits à une case de la route : 15 % d'attaque par camp.
   for (const camp of camps) {
-    const i = cells.findIndex((c) => cheb(c, camp.pos) <= CAMP_REACH);
+    const i = cells.findIndex((c) => cheb(c, camp.pos) <= CAMP_REACH && !sheltered(c));
     if (i < 0) continue;
     const at = Math.round(v.depart + (cells.length > 1 ? i / (cells.length - 1) : 0) * span);
     if (!campActive(camp, at) || rollAt(`camp:${camp.id}:${v.conc}:${v.depart}`, 0) >= CAMP_CHANCE) continue;
@@ -533,6 +536,8 @@ export function annexConvoys(st: S2State, map: S2Map, seasonStart: number, from:
 /** Une armée postée sur une case attaque, pendant 4 h, les convois ennemis qui passent à une case. */
 export const AMBUSH_MS = 4 * H;
 export const AMBUSH_REACH = 1;
+/** Passage libre à 4 cases d'une forteresse tenue par l'alliance du joueur. */
+export const FORT_SAFE_REACH = 4;
 export interface Ambush {
   id: string;
   owner: string;

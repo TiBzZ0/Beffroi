@@ -5,6 +5,7 @@ import { newS2State, type Convoy, type S2State } from "./economy";
 import type { Pos } from "./map";
 import { convoyVisible, interceptBlocker, lossesBeyondTower, setTradeOffer, tradePay, watchPoints, withTower } from "./players";
 import { NODES, BRANCHES } from "../lineage";
+import { MERC_ARMY, mercBlocker } from "./mercs";
 
 const T0 = Date.parse("2026-12-07T15:00:00Z");
 const H = 3_600_000;
@@ -78,5 +79,30 @@ describe("Vague C : Lignée du Marchand", () => {
     expect(convoyRisk(st, convoy(from, to, T0 + hits[0] * 7 * 60_000), rc())).toBe(0);
     expect(st.archDay).toBeGreaterThan(0);
     expect(convoyRisk(st, convoy(from, to, T0 + hits[1] * 7 * 60_000), rc())).toBeGreaterThan(0);
+  });
+});
+
+describe("Vague C : mercenaires avec l'armée, passage libre des forteresses", () => {
+  useS2();
+  it("des mercenaires peuvent être loués pour l'armée, une seule compagnie à la fois", () => {
+    const lord = MAP.lords[0];
+    const s: S2State = { ...newS2State(T0), castle: [5, 5], gold: 1e9, safe: allSafe() };
+    expect(mercBlocker(s, lord, MERC_ARMY, 10, T0)).toBeNull();
+    const hired: S2State = { ...s, mercs: [{ lord: MAP.lords[1].id, unit: "milicien", men: 1000, train: 1, until: T0 + H, conc: MERC_ARMY }] };
+    expect(mercBlocker(hired, lord, MERC_ARMY, 10, T0)).toMatch(/armée/);
+  });
+
+  it("à 4 cases d'une forteresse tenue par l'alliance, un camp n'attaque pas", () => {
+    const from: Pos = [2, 30];
+    const to: Pos = [12, 30];
+    setCamps([{ id: "k1", pos: [7, 31], from: T0 }]);
+    let open = 0;
+    let shel = 0;
+    for (let i = 0; i < 60; i++) {
+      if (convoyRisk({ ...newS2State(T0), castle: to, safe: allSafe() }, convoy(from, to, T0 + i * 7 * 60_000), rc()) > 0) open++;
+      if (convoyRisk({ ...newS2State(T0), castle: to, safe: allSafe(), safeZones: [[7, 28]] }, convoy(from, to, T0 + i * 7 * 60_000), rc()) > 0) shel++;
+    }
+    expect(open).toBeGreaterThan(0);
+    expect(shel).toBe(0);
   });
 });
