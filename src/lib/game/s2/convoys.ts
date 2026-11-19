@@ -416,7 +416,7 @@ export function convoyRisk(st: S2State, v: Convoy, rc: RouteContext): number {
       if (armySize(fight.lost) > 0) rc.hurt(v.conc, fight.lost, fight.won, at);
       const taken = fight.won ? 0 : Math.min(lose(), load0 / 3);
       st.ambushed = [...(st.ambushed ?? []), { id: a.id, at, res, taken, lost: fight.foeLost as Record<string, number>, won: !fight.won }].slice(-20);
-      pushLog(st, at, `🏹 ${what} : embuscade de ${a.name} ${fight.won ? "repoussée par l'escorte" : `, −${fmt(taken)} ${RESOURCE_ICON[res]}`}.`.replace(" ,", ","), { cat: "combats" });
+      pushLog(st, at, `🏹 ${what} : embuscade de ${a.name} ${fight.won ? "repoussée par l'escorte" : `, −${fmt(Math.floor(taken))} ${RESOURCE_ICON[res]}`}.`.replace(" ,", ","), { cat: "combats" });
       break;
     }
     if (lost >= cap - 1e-9) return lost;
