@@ -568,12 +568,20 @@ export type MapPos = readonly [number, number];
 export let BELFRY_POS: MapPos = [8, 8];
 export let FORTRESS_POS: MapPos = [8, 4];
 /** Saison 2 (S5) : quatre forteresses aux points cardinaux ; la saison 1 n'en a qu'une. */
-export const S2_FORTRESSES: { pos: MapPos; name: string }[] = [
-  { pos: [20, 13], name: "Forteresse du Nord" },
-  { pos: [27, 20], name: "Forteresse de l'Est" },
-  { pos: [20, 27], name: "Forteresse du Sud" },
-  { pos: [13, 20], name: "Forteresse de l'Ouest" },
+export const S2_FORTRESSES: { pos: MapPos; name: string; bonus: string }[] = [
+  { pos: [20, 13], name: "Forteresse du Nord", bonus: "+10 % de production pour l'alliance" },
+  { pos: [27, 20], name: "Forteresse de l'Est", bonus: "convois de l'alliance 15 % plus rapides" },
+  { pos: [20, 27], name: "Forteresse du Sud", bonus: "escortes de l'alliance +15 % de dégâts" },
+  { pos: [13, 20], name: "Forteresse de l'Ouest", bonus: "patrouilles des seigneurs 25 % moins souvent sur les convois de l'alliance" },
 ];
+/** Bonus de chaque forteresse de la saison 2 (ils se cumulent, chacun est différent). */
+export const FORT_PRODUCTION_S2 = 0.1;
+export const FORT_CONVOY_SPEED = 0.15;
+export const FORT_ESCORT_DAMAGE = 0.15;
+export const FORT_PATROL_CUT = 0.25;
+export function fortressBonus(i: number): string {
+  return s2Geometry ? (S2_FORTRESSES[i]?.bonus ?? "") : "+20 % de production pour l'alliance";
+}
 export function fortressCount(): number {
   return s2Geometry ? S2_FORTRESSES.length : 1;
 }

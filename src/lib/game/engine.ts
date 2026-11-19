@@ -82,6 +82,10 @@ import {
   MIN_EXPOSED_SHARE,
   SHIELD_MS,
   FORTRESS_PRODUCTION_BONUS,
+  FORT_CONVOY_SPEED,
+  FORT_ESCORT_DAMAGE,
+  FORT_PATROL_CUT,
+  FORT_PRODUCTION_S2,
   CATCH_UP_MAX,
   CATCH_UP_MIN_GAP,
   CATCH_UP_PER_DECADE,
@@ -215,6 +219,8 @@ export interface PlayerState {
   titheSet: boolean;
   /** Son alliance tient la forteresse (bonus de production). Fixé par le serveur, jamais enregistré. */
   fortress?: boolean;
+  /** Saison 2 : forteresses tenues par l'alliance du joueur (0 Nord, 1 Est, 2 Sud, 3 Ouest), fixé à chaque lecture. */
+  fortsHeld?: number[];
   /** Prime de lot (D2) : +10 % de production tant que moins de ce nombre d'étapes sont finies. Fixé par le serveur. */
   lotBonusUntilStage?: number;
   /** Bonus du maître d'œuvre (D3) pour les membres du premier lot fini. Fixé par le serveur. */
@@ -350,11 +356,14 @@ export function extraSecured(state: PlayerState): number {
 export interface March {
   id: string;
   /** Raid, renforts envoyés à un allié, assaut ou garnison de la forteresse (T6). */
-  kind: "raid" | "reinforce" | "fortress" | "station" | "event" | "hall_station" | "hall_siege" | "pillage" | "contract" | "intercept" | "camp";
+  kind: "raid" | "reinforce" | "fortress" | "station" | "event" | "hall_station" | "hall_siege" | "pillage" | "contract" | "intercept" | "camp" | "ambush";
   /** Vague B : concession visée par un pillage, ou dont on intercepte un convoi. */
   conc?: string;
   /** S8 : départ du convoi intercepté (avec `conc`, il l'identifie). */
   convoy?: number;
+  /** S8 : embuscade posée sur la case `pos`, en place jusqu'à `holdUntil`. */
+  pos?: [number, number];
+  holdUntil?: number;
   /** Vague B : contrat d'un seigneur que l'armée part remplir. */
   contract?: { lord: string; kind: "escorte" | "interception" | "camp"; rival?: string; gold: number };
   /** H5 : aile visée par un assaut de halle. */
@@ -422,6 +431,10 @@ export function recallMarch(state: PlayerState, id: string, now: number): Result
   if (!m) return { ok: false, error: "Armée introuvable." };
   if (m.status === "camp") {
     return { ok: true, value: { ...state, marches: (state.marches ?? []).map((x) => (x.id === id ? { ...x, status: "back", returnAt: now + (x.arriveAt - x.departAt), outcome: "recalled" } : x)) } };
+  }
+  // S8 : une embuscade en place se lève ; le serveur la règle aussitôt (butin pris jusque-là), puis elle rentre.
+  if (m.kind === "ambush" && m.status === "out" && now >= m.arriveAt) {
+    return { ok: true, value: { ...state, marches: (state.marches ?? []).map((x) => (x.id === id ? { ...x, holdUntil: Math.min(x.holdUntil ?? now, now) } : x)) } };
   }
   if (m.status !== "out" || now >= m.arriveAt) return { ok: false, error: "Elle est déjà arrivée." };
   return { ok: true, value: { ...state, marches: (state.marches ?? []).map((x) => (x.id === id ? { ...x, status: "back", returnAt: now + (now - x.departAt), outcome: "recalled" } : x)) } };
@@ -563,7 +576,7 @@ export function catchUpBonus(produced: number, leaderProduced: number): number {
 
 /** Multiplicateur global de production (améliorations, chantier, héritage, coup de pouce). */
 export function productionMultiplier(state: PlayerState, world: WorldState, stagesDone: number): number {
-  const m = (1 + (world.legacyBonus ?? 0)) * (state.fortress ? FORTRESS_PRODUCTION_BONUS : 1) * (1 + (state.catchUp ?? 0)) * (1 + DONOR_TIER_BONUS * (state.donorTiers ?? 0)) * (stagesDone < (state.lotBonusUntilStage ?? 0) ? 1 + LOT_BONUS : 1);
+  const m = (1 + (world.legacyBonus ?? 0)) * (state.s2 ? 1 + (state.fortsHeld?.includes(0) ? FORT_PRODUCTION_S2 : 0) : state.fortress ? FORTRESS_PRODUCTION_BONUS : 1) * (1 + (state.catchUp ?? 0)) * (1 + DONOR_TIER_BONUS * (state.donorTiers ?? 0)) * (stagesDone < (state.lotBonusUntilStage ?? 0) ? 1 + LOT_BONUS : 1);
   return m * (1 + WING_PRODUCTION[wingLevel(state.hall, "loge")]) * stageMultiplier(stagesDone, "production") * (1 + LEGACY_CARRIER * legacyLevel(state, "carrier") + (lin(state, "carriere") ? LIN_PRODUCTION : 0));
 }
 
@@ -645,7 +658,7 @@ export function advance(state: PlayerState, now: number, world: WorldState, opts
     const base = productionValue(state.s2, map) / 3600;
     const multiplier = (t: number) => (base > 0 ? rateAt(state, world, t, opts) / base : 1);
     // S10 : Cave profonde (+30 min de stock local), Charpentiers (convois 10 % plus rapides), Grands chariots (charge +25 %).
-    const perked = { ...state.s2, stockBonusHours: lin(state, "cave") ? 0.5 : 0, convoySpeed: lin(state, "charpentiers") ? 0.1 : 0, loadBonus: lin(state, "fondations") ? 0.25 : 0 };
+    const perked = { ...state.s2, stockBonusHours: lin(state, "cave") ? 0.5 : 0, convoySpeed: (lin(state, "charpentiers") ? 0.1 : 0) + (state.fortsHeld?.includes(1) ? FORT_CONVOY_SPEED : 0), patrolCut: state.fortsHeld?.includes(3) ? FORT_PATROL_CUT : 0, loadBonus: lin(state, "fondations") ? 0.25 : 0 };
     // Vague B : escortes, patrouilles, brigands et expéditions, réglés à l'arrivée des convois.
     const route = routeOf(state, map, stagesDoneAt(world, now));
     const { s: s2, arrived } = settleS2(perked, { map, stageConcessions: stagesDoneAt(world, now) >= 1 ? 1 : 0, multiplier, breakpoints: events.filter((t) => t > state.s2!.at && t < now), belfryDone: stagesDoneAt(world, now) >= TOTAL_STAGES, banditsFrom: (state.seasonStart || 0) + BANDIT_GRACE_MS, risk: (st, v) => convoyRisk(st, v, route.rc), guard: (st, c, at) => banditGuard(st, c, at, route.rc), extra: (st, from, to) => {
@@ -759,7 +772,8 @@ function mergeBoost(a: Boost | undefined, b: Boost | undefined): Boost | undefin
 
 /** Bonus d'une escorte : région (froid), et « La tour de guet » (+15 % de dégâts). */
 export function escortBoost(state: PlayerState, unit: UnitId, stagesDone: number): Boost | undefined {
-  return regionBoost(state, stagesDone >= WATCH_STAGE ? { atk: { [unit]: 1 + WATCH_ESCORT_BONUS } } : undefined);
+  const k = (stagesDone >= WATCH_STAGE ? 1 + WATCH_ESCORT_BONUS : 1) * (state.fortsHeld?.includes(2) ? 1 + FORT_ESCORT_DAMAGE : 1);
+  return regionBoost(state, k > 1 ? { atk: { [unit]: k } } : undefined);
 }
 
 /** Verse de la pierre dans le chantier commun. */

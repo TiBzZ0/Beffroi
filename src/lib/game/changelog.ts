@@ -692,4 +692,13 @@ export const CHANGELOG: ChangeEntry[] = [
       "🕯️ Un convoi ne peut être visé que par un seul saboteur, réussi ou non, et une seule embuscade à la fois.",
     ],
   },
+  {
+    id: 77,
+    date: "19 novembre",
+    minSeason: 2,
+    items: [
+      "🏹 Embuscade : touche une case de la carte pour y poster ton armée 4 h. Elle attaque chaque convoi ennemi qui passe à une case (un tiers de sa charge, contre son escorte). Les joueurs dont la vue couvre la case la voient sur la carte. Le butin rentre avec ton armée quand l'embuscade se lève (bouton « Lever » pour l'arrêter plus tôt).",
+      "🏰 Chaque forteresse a son bonus, cumulable : Nord +10 % de production, Est convois 15 % plus rapides, Sud escortes +15 % de dégâts, Ouest patrouilles des seigneurs 25 % moins souvent sur vos convois.",
+    ],
+  },
 ];

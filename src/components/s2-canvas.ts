@@ -642,6 +642,22 @@ export function drawMap(c: CanvasRenderingContext2D, d: DrawInput) {
       c.fill();
       c.stroke();
     }
+  // Embuscades : un arc, rouge si elle est ennemie.
+  for (const a of world.ambushes ?? []) {
+    if (!visible(a.pos[0], a.pos[1])) continue;
+    const [px, py] = mid(a.pos[0], a.pos[1]);
+    c.globalAlpha = a.from > d.now ? 0.5 : 1;
+    c.strokeStyle = a.mine ? "#8b1e1e" : a.ally ? "#2f6db3" : "#c4473a";
+    c.lineWidth = Math.max(1.5, S / 9);
+    c.beginPath();
+    c.arc(px - S * 0.1, py, S * 0.3, -1.2, 1.2);
+    c.moveTo(px - S * 0.1 + Math.cos(-1.2) * S * 0.3, py + Math.sin(-1.2) * S * 0.3);
+    c.lineTo(px - S * 0.1 + Math.cos(1.2) * S * 0.3, py + Math.sin(1.2) * S * 0.3);
+    c.moveTo(px - S * 0.3, py);
+    c.lineTo(px + S * 0.3, py);
+    c.stroke();
+    c.globalAlpha = 1;
+  }
   // Camps de bandits.
   for (const k of world.camps ?? []) {
     if (!visible(k.pos[0], k.pos[1])) continue;

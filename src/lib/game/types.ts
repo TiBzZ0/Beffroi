@@ -279,6 +279,8 @@ export interface S2WorldView {
   lords: { id: string; name: string; rank: Rank; pos: [number, number]; companies: number; home: number; patrol: UnitId; train: number; fief: number; reformAt: number; vassal?: { owner: string; alliance: number | null; until: number; name: string }; annexed?: { alliance: number; name: string; since: number; members: number }; rival?: string; away?: number }[];
   /** Mes convois et ceux de mon alliance, et ceux des autres qui passent à portée de mes sites (S8 : « La tour de guet »). */
   convoys: { from: [number, number]; to: [number, number]; depart: number; arrive: number; res: Resource; size: "petite" | "moyenne" | "grosse"; mine: boolean; owner?: string; ownerName?: string; conc?: string; escort?: boolean; hit?: boolean; sabotaged?: boolean; ally?: boolean; why?: string }[];
+  /** S8 : embuscades en place (les miennes, celles de mon alliance, et celles des autres à portée de vision). */
+  ambushes?: { id: string; owner: string; name: string; pos: [number, number]; from: number; until: number; mine: boolean; ally: boolean; size: number }[];
   /** Portée de vision des convois des autres, en cases. */
   vision?: number;
   /** Camps de bandits (présents, ou à venir avec leur heure d'apparition). */
@@ -407,6 +409,8 @@ export type GameAction =
   | { type: "intercept"; target: string; conc: string; depart: number; troops?: Record<string, number> }
   /** S8 : saboter un convoi d'un autre joueur (un espion payé en or). */
   | { type: "convoy_sabotage"; target: string; conc: string; depart: number }
+  /** S8 : poster une embuscade sur une case pour 4 h. */
+  | { type: "ambush"; x: number; y: number; troops?: Record<string, number> }
   /** Détruire un camp de bandits de la carte. */
   | { type: "camp"; id: string; troops?: Record<string, number> }
   | { type: "contribute"; amount: number }

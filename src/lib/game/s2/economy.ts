@@ -228,6 +228,8 @@ export interface S2State {
   trade?: { to: string; at: number }[];
   /** Expéditions parties contre le joueur : le fief du seigneur garde une garnison réduite jusqu'à `back`. */
   sent?: { lord: string; at: number; back: number; n: number }[];
+  /** S8 : convois pris dans une embuscade d'un autre joueur (le serveur en rend le butin et les pertes à l'embusqué). */
+  ambushed?: { id: string; at: number; res: Resource; taken: number; lost: Record<string, number>; won: boolean }[];
   /** Vague C : compagnies de mercenaires louées à un seigneur, affectées à l'escorte d'une concession. */
   mercs?: { lord: string; unit: string; men: number; train: number; until: number; conc: string }[];
   /** Vague C : hostilité retirée par les rivalités, par seigneur (30 points : sauf-conduit offert). */
@@ -238,6 +240,8 @@ export interface S2State {
   stockBonusHours?: number;
   /** Charpentiers : convois plus rapides (part). */
   convoySpeed?: number;
+  /** Forteresse de l'Ouest (fixé à chaque calcul) : part des attaques de patrouille évitées. */
+  patrolCut?: number;
   /** Grands chariots : charge des convois en plus (part, ajoutée à la charronnerie). */
   loadBonus?: number;
 }
@@ -756,8 +760,8 @@ const RES: Resource[] = ["pierre", "fer", "or"];
 const REGION_IDS: RegionId[] = ["froid", "montagne", "plaine", "collines", "desert", "cote", "foret"];
 
 /** Vague B : hostilité, sauf-conduits, rancunes, expéditions et vassaux (clés limitées aux identifiants courts). */
-function cleanRelations(r: Record<string, unknown>): Pick<S2State, "host" | "safe" | "grudge" | "expAt" | "vassals" | "contracts" | "trade" | "sent" | "rivalDrop" | "mercs"> {
-  const out: Pick<S2State, "host" | "safe" | "grudge" | "expAt" | "vassals" | "contracts" | "trade" | "sent" | "rivalDrop" | "mercs"> = {};
+function cleanRelations(r: Record<string, unknown>): Pick<S2State, "host" | "safe" | "grudge" | "expAt" | "vassals" | "contracts" | "trade" | "sent" | "rivalDrop" | "mercs" | "ambushed"> {
+  const out: Pick<S2State, "host" | "safe" | "grudge" | "expAt" | "vassals" | "contracts" | "trade" | "sent" | "rivalDrop" | "mercs" | "ambushed"> = {};
   const rec = (v: unknown) => (v && typeof v === "object" && !Array.isArray(v) ? Object.entries(v as Record<string, unknown>).slice(0, 40) : []);
   const host = rec(r.host).flatMap(([k, v]) => {
     const x = (v ?? {}) as { v?: unknown; at?: unknown };
@@ -773,6 +777,10 @@ function cleanRelations(r: Record<string, unknown>): Pick<S2State, "host" | "saf
   if (Array.isArray(r.trade)) {
     const t = (r.trade as { to?: unknown; at?: unknown }[]).filter((x) => x && typeof x.to === "string").slice(0, 6).map((x) => ({ to: String(x.to).slice(0, 64), at: num(x.at) }));
     if (t.length) out.trade = t;
+  }
+  if (Array.isArray(r.ambushed)) {
+    const t = (r.ambushed as Record<string, unknown>[]).filter((x) => x && typeof x.id === "string" && RES.includes(x.res as Resource)).slice(-20).map((x) => ({ id: String(x.id), at: num(x.at), res: x.res as Resource, taken: num(x.taken), lost: Object.fromEntries(Object.entries((x.lost ?? {}) as Record<string, unknown>).filter(([, n]) => num(n) > 0).map(([k, n]) => [k, num(n)])), won: x.won === true }));
+    if (t.length) out.ambushed = t;
   }
   if (Array.isArray(r.mercs)) {
     const t = (r.mercs as Record<string, unknown>[]).filter((x) => x && typeof x.lord === "string" && typeof x.unit === "string" && typeof x.conc === "string" && num(x.men) > 0).slice(0, 6).map((x) => ({ lord: String(x.lord), unit: String(x.unit), men: Math.floor(num(x.men)), train: num(x.train), until: num(x.until), conc: String(x.conc) }));

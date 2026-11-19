@@ -27,6 +27,7 @@ import {
   setS2Geometry,
   MAX_ALLIANCE_SIZE,
   HALL,
+  fortressBonus,
   HALL_ALL,
   ONLINE_MS,
   COMBATANTS,
@@ -2385,7 +2386,7 @@ function FortressCard({ snap, live, now, run, f, first, many }: { snap: GameSnap
       {first && (
         <BlockHead
           title={many ? "Forteresses" : "Forteresse"}
-          info={many ? "Quatre forteresses aux points cardinaux. Chacune n'est défendue que par les troupes que les membres de l'alliance qui la tient y envoient. Tenir une forteresse donne +20 % de production à l'alliance (sans cumul entre forteresses), et ouvre une route commerciale depuis vos châteaux." : "La forteresse n'est défendue que par les troupes que les membres de l'alliance qui la tient y envoient. L'alliance qui la tient gagne +20 % de production."}
+          info={many ? "Quatre forteresses aux points cardinaux, chacune avec son bonus pour l'alliance qui la tient (ils se cumulent). Une forteresse prise n'est défendue que par les troupes que les membres de l'alliance y envoient ; elle ouvre aussi une route commerciale depuis vos châteaux." : "La forteresse n'est défendue que par les troupes que les membres de l'alliance qui la tient y envoient. L'alliance qui la tient gagne +20 % de production."}
         />
       )}
       <div className="row">
@@ -2397,7 +2398,7 @@ function FortressCard({ snap, live, now, run, f, first, many }: { snap: GameSnap
             {f.name}
             {f.mine && <span className="badge badge-level-1">à vous</span>}
           </div>
-          <div className="row-desc num">{f.holderName ? `👑 ${f.holderName}` : "👑 personne (garnison neutre)"} · +20 % de production</div>
+          <div className="row-desc num">{f.holderName ? `👑 ${f.holderName}` : "👑 personne (garnison neutre, à pleine force à chaque assaut)"} · {fortressBonus(idx)}</div>
           <div className="row-desc army-line num">
             {intel ? `🕵️ ${armyIcons(f.army)} · ${duration(f.intelUntil! - now)}` : f.exact ? armyIcons(f.army) : `≈ ${armyIcons(f.army)}`}
           </div>

@@ -59,6 +59,8 @@ Les rapports de route vont dans `S2State.log` (catégorie « combats »), regrou
 | Chantier | Où |
 |---|---|
 | Interception (S8) : point d'embuscade, combat contre l'escorte, tiers de la charge, Désert +10 %, renom `intercept` (2, 10 par jour) | `s2/players.ts` (`interceptPoint`, `interceptTake`, `hitConvoy`), action `intercept`, marche `kind: "intercept"`, `settleIntercept` (server.ts) |
+| Embuscade posée sur une case : 4 h, convois ennemis à une case, une attaque de joueur par convoi ; registre `setAmbushes` (rempli dans `syncRoutes` depuis les marches `kind: "ambush"`), résultats notés chez la victime (`S2State.ambushed`) et relevés par `settleAmbush` quand elle se lève | `convoyRisk` (convoys.ts), action `ambush`, `marchDue` |
+| Bonus des forteresses : Nord +10 % de production, Est convois +15 % de vitesse, Sud escortes +15 % de dégâts, Ouest patrouilles −25 % | `S2_FORTRESSES`, `FORT_*` (config.ts), `PlayerState.fortsHeld` (fixé dans `loadEntities`) |
 | Sabotage : 1 h × REF / 4 en or, 60 % (+10 % Forêt, moins la vigilance de la cible), 15 % détruits, 15 min de retard | `sabotaged`, action `convoy_sabotage` (server.ts) |
 | Vision des convois : 5 cases autour du château et des concessions, +4 avec « La tour de guet » ; mes convois et ceux de l'alliance toujours | `visionRange`, `watchPoints`, filtre dans `s2WorldView` |
 | Routes commerciales : proposées des deux côtés (`S2State.trade`), ou vers une forteresse de l'alliance (`fort:<n>`) ; un convoi par heure (`dest: "commerce"`) | `setTradeOffer`, `activeTrades` (registre `setTrades`, rempli dans `syncRoutes`), `tradeConvoys` (`ctx.extra`) |

@@ -388,7 +388,7 @@ export function convoyRisk(st: S2State, v: Convoy, rc: RouteContext): number {
     if (freePass(st, lord.id, at)) continue;
     addHostility(st, rc.map, lord, HOSTILITY.cross, at);
     const lv = HOSTILITY_LEVELS[hostilityLevel(hostilityAt(st, lord.id, at))];
-    const chance = Math.min(PATROL_CHANCE_MAX, PATROL_CHANCE[lord.rank] * lv.chance);
+    const chance = Math.min(PATROL_CHANCE_MAX, PATROL_CHANCE[lord.rank] * lv.chance) * (1 - (st.patrolCut ?? 0));
     const key = `p:${v.conc}:${v.depart}:${lord.id}`;
     if (rollAt(key, 0) >= chance) continue;
     const fight = routeFight(rc.escort(v.conc, at), patrolSide(lord, rc.seasonStart, at), key);
@@ -403,8 +403,25 @@ export function convoyRisk(st: S2State, v: Convoy, rc: RouteContext): number {
     });
     if (lost >= cap - 1e-9) return lost;
   }
-  // Camps de bandits à une case de la route : 15 % d'attaque par camp.
   const cells = line(v.from, v.to);
+  // S8 : embuscades posées par d'autres joueurs à une case de la route (une attaque de joueur au plus par convoi).
+  if (!v.hit && st.who) {
+    for (const a of ambushes) {
+      if (a.owner === st.who.id || (a.alliance !== null && a.alliance === st.who.alliance)) continue;
+      const i = cells.findIndex((c) => cheb(c, a.pos) <= AMBUSH_REACH);
+      if (i < 0) continue;
+      const at = Math.round(v.depart + (cells.length > 1 ? i / (cells.length - 1) : 0) * span);
+      if (at < a.from || at >= a.until || newbieUntil(st) > at) continue;
+      const fight = routeFight(rc.escort(v.conc, at), a.side, `amb:${a.id}:${v.conc}:${v.depart}`);
+      if (armySize(fight.lost) > 0) rc.hurt(v.conc, fight.lost, fight.won, at);
+      const taken = fight.won ? 0 : Math.min(lose(), load0 / 3);
+      st.ambushed = [...(st.ambushed ?? []), { id: a.id, at, res, taken, lost: fight.foeLost as Record<string, number>, won: !fight.won }].slice(-20);
+      pushLog(st, at, `🏹 ${what} : embuscade de ${a.name} ${fight.won ? "repoussée par l'escorte" : `, −${fmt(taken)} ${RESOURCE_ICON[res]}`}.`.replace(" ,", ","), { cat: "combats" });
+      break;
+    }
+    if (lost >= cap - 1e-9) return lost;
+  }
+  // Camps de bandits à une case de la route : 15 % d'attaque par camp.
   for (const camp of camps) {
     const i = cells.findIndex((c) => cheb(c, camp.pos) <= CAMP_REACH);
     if (i < 0) continue;
@@ -497,6 +514,30 @@ export function annexConvoys(st: S2State, map: S2Map, seasonStart: number, from:
     }
   }
 }
+
+// ---------------------------------------------------------------------------
+// Embuscades posées par les joueurs (S8)
+// ---------------------------------------------------------------------------
+
+/** Une armée postée sur une case attaque, pendant 4 h, les convois ennemis qui passent à une case. */
+export const AMBUSH_MS = 4 * H;
+export const AMBUSH_REACH = 1;
+export interface Ambush {
+  id: string;
+  owner: string;
+  name: string;
+  alliance: number | null;
+  pos: Pos;
+  from: number;
+  until: number;
+  side: Side;
+}
+let ambushes: Ambush[] = [];
+/** Embuscades en place (fixées par le serveur d'après les marches de tous les joueurs). */
+export function setAmbushes(a: Ambush[]): void {
+  ambushes = a;
+}
+const newbieUntil = (s: S2State) => (s.launchUntil ? s.launchUntil - 24 * H + 48 * H : 0);
 
 // ---------------------------------------------------------------------------
 // Camps de bandits sur la carte

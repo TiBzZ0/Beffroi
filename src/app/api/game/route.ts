@@ -7,7 +7,7 @@ import { createAdminClient, getCurrentUser } from "@/lib/supabase/server";
 // Point d'entrée unique du jeu. Le client n'envoie que des intentions
 // (« améliorer une concession »), jamais de valeurs (« j'ai 5 000 pierres »).
 
-const ACTIONS = new Set<GameAction["type"]>(["sync", "contribute", "raid", "spy", "mole", "counter", "rumor", "alliance_create", "alliance_invite", "alliance_accept", "alliance_decline", "alliance_leave", "reinforce", "recall", "war_declare", "fortress_attack", "fortress_station", "fortress_recall", "event_attack", "research", "research_cancel", "legacy_buy", "inbox_read", "academy", "sabotage", "tithe", "master_choice", "march_recall", "tournament_join", "daily", "hall", "lineage_buy", "lineage_respec", "company", "rift", "captain", "s2", "pillage", "contract", "intercept", "convoy_sabotage", "camp"]);
+const ACTIONS = new Set<GameAction["type"]>(["sync", "contribute", "raid", "spy", "mole", "counter", "rumor", "alliance_create", "alliance_invite", "alliance_accept", "alliance_decline", "alliance_leave", "reinforce", "recall", "war_declare", "fortress_attack", "fortress_station", "fortress_recall", "event_attack", "research", "research_cancel", "legacy_buy", "inbox_read", "academy", "sabotage", "tithe", "master_choice", "march_recall", "tournament_join", "daily", "hall", "lineage_buy", "lineage_respec", "company", "rift", "captain", "s2", "pillage", "contract", "intercept", "convoy_sabotage", "camp", "ambush"]);
 
 function json(body: ActionResponse, status = 200) {
   return NextResponse.json(body, { status, headers: { "Cache-Control": "no-store" } });

@@ -10,6 +10,7 @@ import {
   freePass,
   hostilityAt,
   rivalOf,
+  setAmbushes,
   setAnnexed,
   setCamps,
   zonesOnRoute,
@@ -184,5 +185,23 @@ describe("Vague C : rivalités, mercenaires, chute", () => {
     annexConvoys(st, MAP, T0, T0, T0 + 3 * H, () => 60_000);
     expect(st.convoys.length).toBeGreaterThanOrEqual(3);
     expect(zonesOnRoute(MAP, [0, 0], [1, 1])).toBeDefined();
+  });
+});
+
+describe("S8 : embuscade posée sur une case", () => {
+  useS2();
+  it("attaque les convois ennemis qui passent à une case pendant qu'elle est en place, jamais les siens ni ceux d'un allié", () => {
+    const from: Pos = [2, 30];
+    const to: Pos = [12, 30];
+    setAmbushes([{ id: "a1", owner: "x", name: "X", alliance: 3, pos: [7, 31], from: T0, until: T0 + 4 * H, side: { army: { piquier: 600 } } }]);
+    const st: S2State = { ...newS2State(T0), castle: to, safe: allSafe(), who: { id: "moi", alliance: null } };
+    const lost = convoyRisk(st, convoy(from, to, T0 + H), rc());
+    expect(lost).toBeCloseTo(300);
+    expect(st.ambushed?.[0]).toMatchObject({ id: "a1", won: true });
+    // Un convoi déjà attaqué par un joueur, un allié, ou une embuscade levée : rien.
+    expect(convoyRisk({ ...st, ambushed: [] }, { ...convoy(from, to, T0 + H), hit: true }, rc())).toBe(0);
+    expect(convoyRisk({ ...st, who: { id: "moi", alliance: 3 } }, convoy(from, to, T0 + H), rc())).toBe(0);
+    expect(convoyRisk({ ...st }, convoy(from, to, T0 + 5 * H), rc())).toBe(0);
+    setAmbushes([]);
   });
 });

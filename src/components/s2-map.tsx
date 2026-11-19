@@ -17,6 +17,7 @@ import { formatNumber } from "@/lib/game/format";
 import type { PlayerState } from "@/lib/game/engine";
 import type { GameAction, GameSnapshot, S2WorldView } from "@/lib/game/types";
 import { tierOf, RESOURCE_ICON, RESOURCE_LABEL, takeConcessionBlocker } from "@/lib/game/s2/economy";
+import { fortressBonus } from "@/lib/game/config";
 import { castleBlocker, cheb, inCentre, RANKS, REGIONS, S2_FORTRESSES, S2_SIZE, type Pos } from "@/lib/game/s2/map";
 
 type Run = (action: GameAction) => Promise<unknown>;
@@ -246,6 +247,7 @@ function S2Panel({ snap, live, now, world, picked, busy, act, castlesOthers }: {
   if (!picked) return (
     <>
       <p className="row-desc s2-panel">Touche une case, un site, un seigneur, un camp ou une forteresse pour le voir ici.</p>
+      {castle && <Ambushes world={world} now={now} busy={busy} act={act} />}
       {castle && <ConvoysInSight snap={snap} live={live} now={now} busy={busy} act={act} />}
       {castle && <TradeRoutes snap={snap} live={live} now={now} busy={busy} act={act} />}
       {castle && <Contracts snap={snap} live={live} now={now} busy={busy} act={act} />}
@@ -268,6 +270,7 @@ function S2Panel({ snap, live, now, world, picked, busy, act, castlesOthers }: {
             <button className="btn btn-primary" data-tuto="place" disabled={busy} onClick={() => void act({ type: "s2", op: "place", x: p[0], y: p[1] })}>Poser mon château ici</button>
           )
         )}
+        {castle && <AmbushHere world={world} live={live} pos={p} now={now} busy={busy} act={act} />}
       </div>
     );
   }
@@ -326,6 +329,7 @@ function S2Panel({ snap, live, now, world, picked, busy, act, castlesOthers }: {
     return (
       <div className="s2-panel">
         <div className="row-title">🏰 {f?.name ?? "Forteresse"}</div>
+        <div className="row-desc">Bonus pour l&apos;alliance qui la tient : {fortressBonus(picked.idx)}.</div>
         <div className="row-desc">{f?.holderName ? `Tenue par ${f.holderName}.` : "Gardée par une garnison neutre."}{castle ? ` À ${cheb(fp, castle)} cases de ton château.` : ""} Assaut, espion et garnison : onglet Alliance.</div>
         {castle && mineHeld && (
           <div className="s2-settings">
@@ -353,6 +357,44 @@ function S2Panel({ snap, live, now, world, picked, busy, act, castlesOthers }: {
           </button>
         </div>
       )}
+    </div>
+  );
+}
+
+/** S8 : poster une embuscade sur cette case (4 h, convois ennemis à une case). */
+function AmbushHere({ world, live, pos, now, busy, act }: { world: S2WorldView; live: PlayerState; pos: Pos; now: number; busy: boolean; act: (a: GameAction) => Promise<void> }) {
+  const mine = attackArmy(live);
+  const placed = (world.ambushes ?? []).find((a) => a.mine && a.until > now);
+  const taken = world.map.sites.some((x) => x.pos[0] === pos[0] && x.pos[1] === pos[1]) || world.lords.some((l) => l.pos[0] === pos[0] && l.pos[1] === pos[1]);
+  const why = inCentre(pos) ? "Pas d'embuscade dans le centre du royaume." : taken ? "Case occupée." : placed ? "Tu as déjà une embuscade en place." : armySize(mine) === 0 ? "Aucune troupe au château." : null;
+  return (
+    <div className="s2-settings">
+      <span>🏹 Embuscade : toutes tes troupes au château s&apos;y postent 4 h et attaquent chaque convoi ennemi qui passe à une case (un tiers de sa charge, contre son escorte). Les voisins dont la vue couvre la case la repèrent.</span>
+      <button className="btn btn-small" disabled={busy || !!why} title={why ?? undefined} onClick={() => void act({ type: "ambush", x: pos[0], y: pos[1] })}>Poster ici</button>
+    </div>
+  );
+}
+
+/** S8 : embuscades en place (les miennes, celles de l'alliance, celles des autres repérées près de mes terres). */
+function Ambushes({ world, now, busy, act }: { world: S2WorldView; now: number; busy: boolean; act: (a: GameAction) => Promise<void> }) {
+  const list = (world.ambushes ?? []).filter((a) => a.until > now);
+  if (list.length === 0) return null;
+  return (
+    <div className="s2-panel s2-contracts">
+      <div className="row-title">🏹 Embuscades</div>
+      <ul>
+        {list.map((a) => (
+          <li key={a.id}>
+            <span>
+              {a.mine ? "La tienne" : a.ally ? `${a.name} (alliance)` : `⚠️ ${a.name}`} en ({a.pos[0]}, {a.pos[1]}) · {a.from > now ? `en place dans ${dur(a.from - now)}` : `encore ${dur(a.until - now)}`}
+              {!a.mine && !a.ally ? ` · environ ${formatNumber(Math.round(a.size / 100) * 100)} hommes : tes convois qui passent à une case seront attaqués.` : ""}
+            </span>
+            {a.mine && a.from <= now && (
+              <button className="btn btn-small" disabled={busy} onClick={() => void act({ type: "march_recall", id: a.id })}>Lever</button>
+            )}
+          </li>
+        ))}
+      </ul>
     </div>
   );
 }
