@@ -126,14 +126,17 @@ export interface Concession {
   /** Vague B : dernier pillage par un joueur (une fois toutes les 6 h par concession). */
   raidedAt?: number;
 }
-export type ConcBuildingId = "atelier" | "ecurie" | "grenier";
+export type ConcBuildingId = "atelier" | "ecurie" | "grenier" | "tour";
 export const CONC_BUILDINGS: Record<ConcBuildingId, { name: string; icon: string; per: number; text: string }> = {
   atelier: { name: "Atelier", icon: "⚒️", per: 0.08, text: "+8 % de production de cette concession par niveau" },
   ecurie: { name: "Écurie", icon: "🐴", per: 0.1, text: "+10 % de charge des convois de cette concession par niveau" },
   grenier: { name: "Grenier", icon: "🌾", per: 0.25, text: "+25 % de stock local de cette concession par niveau" },
+  tour: { name: "Tour de site", icon: "🗼", per: 1, text: "+1 case de vue autour du site, et 100 arbalétriers qui gardent le stock contre le pillage, par niveau (5 au plus)" },
 };
 export const CONC_BUILDING_IDS = Object.keys(CONC_BUILDINGS) as ConcBuildingId[];
 export const CONC_BUILDING_MAX = 10;
+/** Niveau maximal d'un bâtiment de concession (la tour de site s'arrête à 5). */
+export const concBuildingMax = (id: ConcBuildingId) => (id === "tour" ? 5 : CONC_BUILDING_MAX);
 export const concBuildingCost = (level: number) => Math.round(30 * Math.pow(2.2, level - 1));
 export const concBuildingMs = (level: number) => rampMs(level, CONC_BUILDING_MAX, 4 * H);
 const cbLevel = (c: Concession, id: ConcBuildingId) => c.cb?.[id] ?? 0;
@@ -227,7 +230,7 @@ export interface S2State {
   /** S8 : routes commerciales proposées (château d'un autre joueur, ou forteresse `fort:<n>`), depuis `at`. */
   trade?: { to: string; at: number }[];
   /** Expéditions parties contre le joueur : le fief du seigneur garde une garnison réduite jusqu'à `back`. */
-  sent?: { lord: string; at: number; back: number; n: number }[];
+  sent?: { lord: string; at: number; back: number; n: number; to?: Pos }[];
   /** S8 : convois pris dans une embuscade d'un autre joueur (le serveur en rend le butin et les pertes à l'embusqué). */
   ambushed?: { id: string; at: number; res: Resource; taken: number; lost: Record<string, number>; won: boolean }[];
   /** Vague C : compagnies de mercenaires louées à un seigneur, affectées à l'escorte d'une concession. */
@@ -244,6 +247,14 @@ export interface S2State {
   patrolCut?: number;
   /** Grands chariots : charge des convois en plus (part, ajoutée à la charronnerie). */
   loadBonus?: number;
+  /** Marchandage, Grand marchand (fixés à chaque calcul) : or des routes commerciales en plus (part). */
+  tradeBonus?: number;
+  /** Grand marchand (fixé à chaque calcul) : les convois de commerce ne peuvent pas être attaqués. */
+  tradeSafe?: boolean;
+  /** Architecte royal (fixé à chaque calcul) : un convoi par jour passe intact. */
+  archShield?: boolean;
+  /** Jour (UTC, en jours depuis 1970) où l'Architecte royal a déjà protégé un convoi. */
+  archDay?: number;
 }
 
 export function newS2State(now: number): S2State {
@@ -641,7 +652,7 @@ export function concBuildBlocker(s: S2State, id: string, b: unknown, map: S2Map,
   if (typeof b !== "string" || !(b in CONC_BUILDINGS)) return "Bâtiment inconnu.";
   if (c.cwork && c.cwork.until > now) return "Un chantier est déjà en cours dans cette concession.";
   const level = cbLevel(c, b as ConcBuildingId) + 1;
-  if (level > CONC_BUILDING_MAX) return "Niveau maximal.";
+  if (level > concBuildingMax(b as ConcBuildingId)) return "Niveau maximal.";
   if (level > c.level) return `Monte d'abord la concession au niveau ${level}.`;
   if (b !== "atelier" && c.level < TIERS[1].from) return `${CONC_BUILDINGS[b as ConcBuildingId].name} : à partir du palier Exploitation (niveau ${TIERS[1].from}).`;
   if (concBuildingCost(level) > concessionBudget(c, map) + 1e-6) return "Réserve et stock de la concession insuffisants : envoie-lui des ressources.";
@@ -787,7 +798,7 @@ function cleanRelations(r: Record<string, unknown>): Pick<S2State, "host" | "saf
     if (t.length) out.mercs = t;
   }
   if (Array.isArray(r.sent)) {
-    const t = (r.sent as { lord?: unknown; at?: unknown; back?: unknown; n?: unknown }[]).filter((x) => x && typeof x.lord === "string").slice(-10).map((x) => ({ lord: String(x.lord), at: num(x.at), back: num(x.back), n: Math.max(1, Math.floor(num(x.n, 1))) }));
+    const t = (r.sent as { lord?: unknown; at?: unknown; back?: unknown; n?: unknown; to?: unknown }[]).filter((x) => x && typeof x.lord === "string").slice(-10).map((x) => ({ lord: String(x.lord), at: num(x.at), back: num(x.back), n: Math.max(1, Math.floor(num(x.n, 1))), ...(Array.isArray((x as { to?: unknown }).to) && (x as { to: unknown[] }).to.length === 2 ? { to: [Math.floor(num((x as { to: unknown[] }).to[0])), Math.floor(num((x as { to: unknown[] }).to[1]))] as Pos } : {}) }));
     if (t.length) out.sent = t;
   }
   if (Array.isArray(r.grudge)) {
@@ -830,6 +841,7 @@ export function cleanS2(raw: unknown, now: number): S2State {
     produced: num(r.produced),
     ...(num(r.giftOwed) > 0 ? { giftOwed: num(r.giftOwed) } : {}),
     ...(num(r.launchUntil) > 0 ? { launchUntil: num(r.launchUntil) } : {}),
+    ...(num(r.archDay) > 0 ? { archDay: Math.floor(num(r.archDay)) } : {}),
     ...(Array.isArray(r.log) ? { log: (r.log as Record<string, unknown>[]).filter((l) => l && typeof l.text === "string").slice(-LOG_MAX).map((l) => ({ at: num(l.at), text: String(l.text).slice(0, 200), ...(l.cat === "combats" ? { cat: "combats" as const } : {}), ...(typeof l.key === "string" ? { key: l.key.slice(0, 80), sum: num(l.sum), n: Math.max(1, Math.floor(num(l.n, 1))) } : {}) })) } : {}),
     ...cleanRelations(r),
   };

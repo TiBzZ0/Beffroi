@@ -1,6 +1,6 @@
 // L1, L2 : le renom et la Lignée (règles pures, sans base de données).
 // Le renom se gagne par des actions et ne grossit pas avec la production. Il repart de zéro à chaque saison.
-// La Lignée : trois branches de neuf nœuds sur quatre rangs, achetés en renom ; un seul nœud de rang 4 en tout.
+// La Lignée : trois branches de neuf nœuds (et celle du Marchand, six nœuds) sur quatre rangs, achetés en renom ; un seul nœud de rang 4 en tout.
 
 import { s2GeometryOn } from "./config";
 
@@ -29,12 +29,13 @@ export const RENOWN_CAPPED: RenownSource[] = ["pillage", "intercept", "lord", "r
 /** Pour l'essai de la saison 0 : 20 renom offerts, une fois. */
 export const RENOWN_GIFT_SEASON = 0;
 
-export type BranchId = "batisseur" | "guerre" | "espion";
+export type BranchId = "batisseur" | "guerre" | "espion" | "marchand";
 
 export const BRANCHES: { id: BranchId; icon: string; name: string }[] = [
   { id: "batisseur", icon: "⛏️", name: "Bâtisseur" },
   { id: "guerre", icon: "⚔️", name: "Seigneur de guerre" },
   { id: "espion", icon: "🕵️", name: "Maître espion" },
+  { id: "marchand", icon: "🛤️", name: "Marchand" },
 ];
 
 export interface LineageNode {
@@ -52,7 +53,7 @@ const EFFECT_S2: Record<string, string> = {
   cave: "+30 min de stock local sur tes concessions.",
   charpentiers: "Convois 10 % plus rapides.",
   fondations: "Grands chariots : charge des convois +25 %.",
-  architecte: "Une fois par jour, un convoi ne peut pas être attaqué (avec les combats de convois).",
+  architecte: "Une fois par jour, le premier convoi qui devait perdre une part de sa charge (patrouille, bandits, embuscade, expédition) arrive intact.",
 };
 export function nodeEffect(n: Pick<LineageNode, "id" | "effect">): string {
   return (s2GeometryOn() && EFFECT_S2[n.id]) || n.effect;
@@ -88,6 +89,14 @@ export const NODES: LineageNode[] = [
   { id: "ombres", branch: "espion", rank: 3, icon: "🌑", name: "Ombres", effect: "Tes armées en approche apparaissent « ? » chez la cible." },
   { id: "faux", branch: "espion", rank: 3, icon: "🃏", name: "Faux rapports", effect: "Un espion qui te vise rapporte des chiffres faussés de ±30 %." },
   { id: "maitre_ombres", branch: "espion", rank: 4, icon: "🦇", name: "Maître des ombres", effect: "Une fois par jour, ton espion ne peut pas être surpris." },
+
+  // Vague C : la branche du commerce (saison 2 : routes commerciales, convois, escortes).
+  { id: "comptoirs", branch: "marchand", rank: 1, icon: "🏪", name: "Comptoirs", effect: "Une route commerciale de plus (4 au lieu de 3)." },
+  { id: "marchandage", branch: "marchand", rank: 1, icon: "🪙", name: "Marchandage", effect: "Routes commerciales : +20 % d'or par convoi." },
+  { id: "guetteurs", branch: "marchand", rank: 2, icon: "🔭", name: "Guetteurs", effect: "+2 cases de vue sur les convois et les embuscades autour de tes sites." },
+  { id: "convoyeurs", branch: "marchand", rank: 2, icon: "🛡️", name: "Convoyeurs", effect: "Escortes de convoi : +10 % de dégâts." },
+  { id: "guides", branch: "marchand", rank: 3, icon: "🧭", name: "Guides", effect: "Patrouilles des seigneurs : 20 % d'attaques en moins sur tes routes." },
+  { id: "grand_marchand", branch: "marchand", rank: 4, icon: "⚖️", name: "Grand marchand", effect: "Les convois de tes routes commerciales ne peuvent pas être attaqués, et rapportent 25 % d'or en plus." },
 ];
 export const NODE_BY_ID = new Map(NODES.map((n) => [n.id, n]));
 export type NodeId = string;
@@ -121,6 +130,12 @@ export const LIN_SPY_SPEED = 0.25;
 export const LIN_SPY_CATCH = 0.1;
 export const LIN_MOLE = 1.5;
 export const LIN_SABOTAGE = 0.75;
+export const LIN_TRADE_ROUTES = 1;
+export const LIN_TRADE_GOLD = 0.2;
+export const LIN_VISION = 2;
+export const LIN_ESCORT = 0.1;
+export const LIN_PATROL_CUT = 0.2;
+export const LIN_TRADE_GOLD_TOP = 0.25;
 
 export interface LineageState {
   nodes: string[];

@@ -1624,7 +1624,7 @@ a {
 .lin-gauges { margin-bottom: 10px; }
 .chip-full { opacity: 0.6; }
 .lin-tabs { display: none; }
-.lin-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; }
+.lin-grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 12px; }
 .lin-col-title { margin-top: 0; }
 .lin-rank { margin-bottom: 10px; }
 .lin-rank-label { font-size: 0.75rem; color: var(--ink-soft); margin: 0 0 4px; text-transform: uppercase; letter-spacing: 0.04em; }
@@ -2135,4 +2135,10 @@ a {
   display: grid;
   gap: 6px;
   margin: 8px 0;
+}
+
+/* Danger repéré sur une route de concession (embuscade, camp de bandits). */
+.s2-warn {
+  color: var(--danger, #c4473a);
+  font-weight: 600;
 }

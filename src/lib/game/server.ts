@@ -234,13 +234,13 @@ import { applyCompanyOp } from "./company-ops";
 import { REF, VALUE, cleanS2, type S2State } from "./s2/economy";
 import { AMBUSH_MS, campTrain, rivalOf, setAmbushes, type Ambush } from "./s2/convoys";
 import { ANNEX_AFTER, annexedOf, CAMP_COUNT, CAMP_RESPAWN_MS, campActive, campLoot, campSide, campSpot, campsList, routeEnd, setAnnexed, setCamps, type Annexed, type Camp } from "./s2/convoys";
-import { activeTrades, convoyAt, convoyVisible, hitConvoy, interceptBlocker, interceptLoot, interceptPoint, interceptTake, sabotageBlocker as convoySabotageBlocker, sabotageChance as convoySabotageChance, sabotaged, sabotagePrice, setTrades, tradesOf, visionRange, watchPoints } from "./s2/players";
+import { activeTrades, convoyAt, convoyVisible, hitConvoy, interceptBlocker, interceptLoot, interceptPoint, interceptTake, sabotageBlocker as convoySabotageBlocker, sabotageChance as convoySabotageChance, sabotaged, sabotagePrice, setTrades, TRADE_MAX, tradesOf, visionRange, watchPoints, withTower, lossesBeyondTower } from "./s2/players";
 import { protectedUntil } from "./s2/convoys";
 import { escortSide } from "./engine";
 import type { Side } from "./s2/convoys";
 import { contractBlocker, CONTRACT_MIN_CHANCE, contractFoe, contractsFor, fightChance, takeContract, afterLordAttack, cleanEscorts, concRes, HOSTILITY, pillageBlocker, pillaged, pillageLoot, routeFight, setLordNames, setVassals, VASSAL_MS, withHostility, type Vassal } from "./s2/convoys";
 import { afterDefeat, afterVassal, lordAway, lordCompanies, setLordAway, cleanLordS2, companiesHome, fiefLoot, garrison, lordTrain, patrolUnit, REFORM_MS, settleFief } from "./s2/lords";
-import { buyNode, cleanLineage, lin, lineageMark, LIN_MOLE, LIN_SPY_CATCH, NODE_BY_ID, nodeEffect, parisDay, RENOWN, RENOWN_GIFT_SEASON, renownAvailable, respec, type RenownSource } from "./lineage";
+import { buyNode, cleanLineage, lin, lineageMark, LIN_MOLE, LIN_TRADE_ROUTES, LIN_VISION, LIN_SPY_CATCH, NODE_BY_ID, nodeEffect, parisDay, RENOWN, RENOWN_GIFT_SEASON, renownAvailable, respec, type RenownSource } from "./lineage";
 import { notify, notifyEach, type PushMessage } from "@/lib/push";
 
 // Toute la logique qui fait foi : charger l'état, le recalculer, appliquer l'intention
@@ -592,7 +592,7 @@ function syncRoutes(entities: Map<string, Entity>, forts: { key: string; name: s
     }
   }
   setAmbushes(amb);
-  setTrades(activeTrades([...entities.values()].filter((e) => !e.isLord).map((e) => ({ id: e.id, name: e.name, s2: e.state.s2, alliance: e.allianceId })), forts));
+  setTrades(activeTrades([...entities.values()].filter((e) => !e.isLord).map((e) => ({ id: e.id, name: e.name, s2: e.state.s2, alliance: e.allianceId, max: TRADE_MAX + (lin(e.state, "comptoirs") ? LIN_TRADE_ROUTES : 0) })), forts));
 }
 
 // ---------------------------------------------------------------------------
@@ -2271,7 +2271,7 @@ function s2WorldView(entities: Map<string, Entity>, meId: string, now: number, w
   const ref = REF(Math.max(0, (now - currentSeasonStart) / 86_400_000));
   const size = (value: number) => (value < ref / 3 ? "petite" : value < ref ? "moyenne" : "grosse") as "petite" | "moyenne" | "grosse";
   // S8 : je vois les convois des autres qui passent à portée de mes sites (« La tour de guet » ajoute 4 cases).
-  const vision = visionRange(stagesDoneAt(world, now));
+  const vision = visionRange(stagesDoneAt(world, now)) + (me && lin(me.state, "guetteurs") ? LIN_VISION : 0);
   const points = watchPoints(me?.state.s2, map);
   for (const e of entities.values()) {
     const s2 = e.state.s2;
@@ -2282,7 +2282,7 @@ function s2WorldView(entities: Map<string, Entity>, meId: string, now: number, w
     if (e.id !== meId && me) {
       for (const c of s2.conc) {
         const why = pillageBlocker(s2, c.id, now, { allied: isAllied(me, e), sameIp: sameIp(me, e) });
-        occupants.push({ owner: e.id, name: e.name, conc: c.id, site: c.site, level: c.level, escort: (e.state.escorts ?? []).some((x) => x.conc === c.id && x.men > 0) || (s2.mercs ?? []).some((x) => x.conc === c.id && x.until > now), ...(why ? { why } : {}) });
+        occupants.push({ owner: e.id, name: e.name, conc: c.id, site: c.site, level: c.level, ...((c.cb?.tour ?? 0) > 0 ? { tower: c.cb!.tour } : {}), escort: (e.state.escorts ?? []).some((x) => x.conc === c.id && x.men > 0) || (s2.mercs ?? []).some((x) => x.conc === c.id && x.until > now), ...(why ? { why } : {}) });
       }
     }
     for (const v of s2.convoys) {
@@ -2355,7 +2355,20 @@ function s2WorldView(entities: Map<string, Entity>, meId: string, now: number, w
       ambushes.push({ id: m.id, owner: e.id, name: e.name, pos: [m.pos[0], m.pos[1]], from: m.arriveAt, until: m.holdUntil ?? m.arriveAt, mine, ally, size: armySize(m.troops) });
     }
   }
-  return { map, castles, taken, lords, convoys, occupants, vision, camps, trades, forts: fortList, ambushes };
+  // Expéditions des seigneurs encore dehors : les miennes, celles de l'alliance, et celles qui passent près de mes sites.
+  const expeditions: NonNullable<S2WorldView["expeditions"]> = [];
+  for (const e of entities.values()) {
+    if (e.isLord) continue;
+    for (const x of e.state.s2?.sent ?? []) {
+      const l = map.lords.find((y) => y.id === x.lord);
+      if (!l || !x.to || x.back <= now) continue;
+      const mine = e.id === meId;
+      const ally = !mine && !!me && isAllied(me, e);
+      if (!mine && !ally && !convoyVisible(points, vision, x.to) && !convoyVisible(points, vision, l.pos)) continue;
+      expeditions.push({ lord: l.id, lordName: entities.get(l.id)?.name ?? l.id, from: [l.pos[0], l.pos[1]], to: [x.to[0], x.to[1]], at: x.at, back: x.back, n: x.n, target: e.name, mine });
+    }
+  }
+  return { map, castles, taken, lords, convoys, occupants, vision, camps, trades, forts: fortList, ambushes, expeditions };
 }
 
 function s2Others(entities: Map<string, Entity>, meId: string): S2Others {
@@ -2994,6 +3007,41 @@ export async function runAction(admin: SupabaseClient, userId: string, action: G
         const { data } = await admin.rpc("commit_state", { p_season: season.id, p_state: toJson(me, current, {}), p_touch: true, p_contribution: 0, p_stage_bases: stageSizes, p_active_window_days: ACTIVE_WINDOW_DAYS, p_action: null, p_details: null });
         if ((data as { conflict?: boolean } | null)?.conflict) continue;
       }
+    } else if (action.type === "ambush_hit") {
+      // Déloger l'embuscade repérée d'un autre joueur : l'armée part du château, le combat a lieu sur la case.
+      const map = s2Map();
+      const id = String(action.id);
+      const owner = [...entities.values()].find((e) => !e.isLord && (e.state.marches ?? []).some((m) => m.id === id && m.kind === "ambush"));
+      const am = owner?.state.marches?.find((m) => m.id === id);
+      const seen = !!map && !!am?.pos && convoyVisible(watchPoints(current.s2, map), visionRange(stagesDoneAt(world, now)) + (lin(current, "guetteurs") ? LIN_VISION : 0), am.pos);
+      if (!map || !current.s2?.castle) error = "Pose d'abord ton château.";
+      else if (!owner || !am || !am.pos || am.status !== "out" || (am.holdUntil ?? 0) <= now) error = "Cette embuscade est levée.";
+      else if (owner.id === me.id) error = "C'est ta propre embuscade.";
+      else if (isAllied(me, owner)) error = "On n'attaque pas l'embuscade d'un allié.";
+      else if (sameIp(me, owner)) error = "On n'attaque pas un compte de la même adresse.";
+      else if (!seen) error = "Cette embuscade n'est pas à portée de tes sites.";
+      else if ((current.marches ?? []).some((m) => m.kind === "ambush_hit" && m.status === "out" && m.ambush === id)) error = "Ton armée marche déjà sur cette embuscade.";
+      else {
+        const wanted = (action.troops && typeof action.troops === "object" ? action.troops : current.troops) as Army;
+        const sending = sendTroops(current, wanted);
+        if (!sending.ok) error = sending.error;
+        else {
+          const outMs = travelMs(sending.value.sent, mapDistance(current.s2.castle, am.pos), armySpeedBonus(current));
+          if (now + outMs >= (am.holdUntil ?? 0)) error = `Trop loin : ton armée arriverait après la levée de l'embuscade (dans ${Math.max(1, Math.round(((am.holdUntil ?? 0) - now) / 60_000))} min).`;
+          else {
+            const march: March = { id: marchId(), kind: "ambush_hit", target: owner.id, ambush: id, pos: [am.pos[0], am.pos[1]], troops: sending.value.sent, departAt: now, arriveAt: now + Math.max(60_000, outMs), status: "out", returnAt: 0, revealed: true, warned: true, loot: 0, ransom: 0 };
+            finalState = { ...sending.value.state, marches: [...(current.marches ?? []), march] };
+            const { data, error: rpcError } = await admin.rpc("commit_state", { p_season: season.id, p_state: toJson(me, finalState, {}), p_touch: true, p_contribution: 0, p_stage_bases: stageSizes, p_active_window_days: ACTIVE_WINDOW_DAYS, p_action: "ambush_hit", p_details: { target: owner.id, id, troops: sending.value.sent } });
+            if (rpcError) throw new Error(`Départ impossible : ${rpcError.message}`);
+            if ((data as { conflict?: boolean } | null)?.conflict) continue;
+            message = `🗡️ Ton armée marche sur l'embuscade de ${owner.name} : combat dans ${Math.max(1, Math.round(Math.max(60_000, outMs) / 60_000))} min.`;
+          }
+        }
+      }
+      if (error) {
+        const { data } = await admin.rpc("commit_state", { p_season: season.id, p_state: toJson(me, current, {}), p_touch: true, p_contribution: 0, p_stage_bases: stageSizes, p_active_window_days: ACTIVE_WINDOW_DAYS, p_action: null, p_details: null });
+        if ((data as { conflict?: boolean } | null)?.conflict) continue;
+      }
     } else if (action.type === "camp") {
       // Détruire un camp de bandits de la carte : l'armée part du château, le combat se joue à l'arrivée.
       const camp = campsList().find((c) => c.id === String(action.id));
@@ -3268,12 +3316,13 @@ function cleanMarches(raw: unknown): March[] {
     .map((m) => ({
       id: String(m.id),
       // Toutes les sortes d'armées doivent survivre à la relecture (sinon une marche d'événement redevient un raid).
-      kind: (["reinforce", "fortress", "station", "event", "hall_station", "hall_siege", "pillage", "contract", "intercept", "camp", "ambush"].includes(m.kind) ? m.kind : "raid") as March["kind"],
+      kind: (["reinforce", "fortress", "station", "event", "hall_station", "hall_siege", "pillage", "contract", "intercept", "camp", "ambush", "ambush_hit"].includes(m.kind) ? m.kind : "raid") as March["kind"],
       target: String(m.target),
       ...(typeof m.conc === "string" ? { conc: m.conc } : {}),
       ...(Number.isFinite(Number(m.convoy)) && Number(m.convoy) > 0 ? { convoy: Number(m.convoy) } : {}),
       ...(Array.isArray(m.pos) && m.pos.length === 2 ? { pos: [Math.floor(Number(m.pos[0]) || 0), Math.floor(Number(m.pos[1]) || 0)] as [number, number] } : {}),
       ...(Number(m.holdUntil) > 0 ? { holdUntil: Number(m.holdUntil) } : {}),
+      ...(typeof m.ambush === "string" ? { ambush: m.ambush } : {}),
       ...(m.contract && typeof m.contract === "object" && typeof m.contract.lord === "string" && ["escorte", "interception", "camp"].includes(m.contract.kind)
         ? { contract: { lord: String(m.contract.lord), kind: m.contract.kind, ...(typeof m.contract.rival === "string" ? { rival: m.contract.rival } : {}), gold: Math.max(0, Number(m.contract.gold) || 0) } }
         : {}),
@@ -3467,6 +3516,7 @@ async function settleMarches(
   if (m.kind === "intercept") return settleIntercept(admin, seasonId, owner, m, at, entities, world, flat, replace, commit);
   if (m.kind === "ambush") return settleAmbush(admin, seasonId, owner, m, at, entities, world, flat, replace);
   if (m.kind === "camp") return settleCamp(admin, seasonId, owner, m, at, entities, world, flat, replace, commit);
+  if (m.kind === "ambush_hit") return settleAmbushHit(admin, seasonId, owner, m, at, entities, world, flat, replace, commit);
   if (m.kind === "contract") return settleContract(admin, seasonId, owner, m, at, world, flat, replace, commit);
 
   if (!m.warned) {
@@ -3623,16 +3673,19 @@ async function settlePillage(
   const stagesDone = stagesDoneAt(world, at);
   // L'escorte de la concession (et ses mercenaires) défend.
   const route = routeSide(vState, c.id, stagesDone, at);
+  // Vague C : les arbalétriers de la tour de site défendent avec l'escorte.
+  const tower = c.cb?.tour ?? 0;
+  const defense = withTower(route?.side ?? null, tower);
   const escort = !!route;
   let won = true;
   let lost: Army = {};
   let foeLost: Army = {};
   let chance = 1;
-  if (route) {
+  if (defense) {
     const att = { army: m.troops, levels: combatLevels(aState), boost: regionBoost(aState, armyBoost(aState, "attack")) };
-    const f = routeFight(att, route.side, `pillage:${m.id}`);
+    const f = routeFight(att, defense, `pillage:${m.id}`);
     ({ won, chance, lost, foeLost } = f);
-    vState = route.hurt(vState, foeLost, won);
+    if (route) vState = route.hurt(vState, lossesBeyondTower(foeLost, defense, tower), won);
   }
   const loot = won ? pillageLoot(c, map, stagesDone) : null;
   const res = concRes(map, c);
@@ -3646,7 +3699,7 @@ async function settlePillage(
   const fmt = (n: number) => Math.round(n).toLocaleString("fr-FR");
   const icons = { pierre: "🪨", fer: "⚔️", or: "🪙" } as const;
   const what = (Object.entries(lootS2) as [keyof typeof icons, number][]).filter(([, n]) => n > 0).map(([k, n]) => `${fmt(n)} ${icons[k]}`).join(", ") || "rien";
-  const vText = won ? `⛏️ ${owner.name} a pillé ${site.name}${escort ? " malgré ton escorte" : ""} : −${what}.` : `🛡️ Ton escorte a repoussé ${owner.name} à ${site.name}.`;
+  const vText = won ? `⛏️ ${owner.name} a pillé ${site.name}${escort ? " malgré ton escorte" : tower > 0 ? " malgré ta tour" : ""} : −${what}.` : `🛡️ ${escort ? "Ton escorte" : "Ta tour"} a repoussé ${owner.name} à ${site.name}.`;
   vState = { ...vState, s2: { ...vState.s2!, log: [...(vState.s2!.log ?? []), { at, text: vText, cat: "combats" as const }].slice(-40) } };
   const survivors = cleanArmy(Object.fromEntries((Object.entries(m.troops) as [string, number][]).map(([id, n]) => [id, n - ((lost as Record<string, number>)[id] ?? 0)])) as Army);
   const healed = addWounded(aState, woundedOf(lost, won ? WOUNDED_WINNER : WOUNDED_ATTACKER_BEATEN), at);
@@ -3772,6 +3825,52 @@ async function settleAmbush(
   if ((await writeStates(admin, seasonId, list, "ambush_end", { id: m.id, hits, fights })) === "conflict") return "conflict";
   for (let i = 0; i < hits; i++) await grantRenown(admin, seasonId, owner, "intercept", "Embuscade");
   if (fights > 0) notify(admin, [owner.id], { title: "🏹 Embuscade levée", body: text.slice(3), tag: "raid" });
+  return "changed";
+}
+
+/** Une armée arrive sur une embuscade : vaincue, l'embuscade se lève aussitôt ; sinon elle reste, affaiblie. */
+async function settleAmbushHit(
+  admin: SupabaseClient,
+  seasonId: number,
+  owner: Entity,
+  m: March,
+  at: number,
+  entities: Map<string, Entity>,
+  world: WorldState,
+  flat: Map<string, number>,
+  replace: (state: PlayerState, next: March | null) => PlayerState,
+  commit: (e: Entity, state: PlayerState) => Promise<"changed" | "conflict">,
+): Promise<"changed" | "conflict"> {
+  const outMs = Math.max(60_000, m.arriveAt - m.departAt);
+  const turn: March = { ...m, status: "back", returnAt: m.arriveAt + outMs, outcome: "turned" };
+  const foe = entities.get(m.target);
+  const am = foe?.state.marches?.find((x) => x.id === m.ambush && x.kind === "ambush");
+  if (!foe || !am || am.status !== "out" || am.arriveAt > at || (am.holdUntil ?? 0) <= at || armySize(am.troops) === 0) {
+    notify(admin, [owner.id], { title: "🗡️ Embuscade introuvable", body: "Elle était levée avant ton arrivée. Ton armée rentre.", tag: "march" });
+    return commit(owner, replace(owner.state, turn));
+  }
+  const aState = advanceEntity(owner, at, world, flat);
+  let fState = advanceEntity(foe, at, world, flat);
+  const f = routeFight(
+    { army: m.troops, levels: combatLevels(aState), boost: regionBoost(aState, armyBoost(aState, "attack")) },
+    { army: am.troops, levels: combatLevels(fState), boost: regionBoost(fState, armyBoost(fState, "defense")) },
+    `ambush_hit:${m.id}`,
+  );
+  const left = cleanArmy(Object.fromEntries((Object.entries(am.troops) as [string, number][]).map(([id, n]) => [id, n - ((f.foeLost as Record<string, number>)[id] ?? 0)])) as Army);
+  // Vaincue, l'embuscade se lève à l'heure du combat : le serveur la règle (butin pris jusque-là), puis elle rentre.
+  const nextAm: March = { ...am, troops: left, ...(f.won || armySize(left) === 0 ? { holdUntil: at } : {}) };
+  fState = addWounded({ ...fState, marches: (fState.marches ?? []).map((x) => (x.id === am.id ? nextAm : x)) }, woundedOf(f.foeLost, f.won ? WOUNDED_DEFENDER_BEATEN : WOUNDED_WINNER), at);
+  const fText = f.won ? `🗡️ ${owner.name} a délogé ton embuscade (${armySize(f.foeLost)} hommes perdus) : elle rentre.` : `🏹 Ton embuscade a repoussé l'armée de ${owner.name} (${armySize(f.foeLost)} hommes perdus).`;
+  if (fState.s2) fState = { ...fState, s2: { ...fState.s2, log: [...(fState.s2.log ?? []), { at, text: fText, cat: "combats" as const }].slice(-40) } };
+  const survivors = cleanArmy(Object.fromEntries((Object.entries(m.troops) as [string, number][]).map(([id, n]) => [id, n - ((f.lost as Record<string, number>)[id] ?? 0)])) as Army);
+  let healed = addWounded(aState, woundedOf(f.lost, f.won ? WOUNDED_WINNER : WOUNDED_ATTACKER_BEATEN), at);
+  const aText = f.won ? `🗡️ Embuscade de ${foe.name} délogée (${Math.round(f.chance * 100)} % de chance)${armySize(f.lost) > 0 ? `, ${armySize(f.lost)} hommes perdus` : ""}.` : `🗡️ L'embuscade de ${foe.name} a tenu (${Math.round(f.chance * 100)} % de chance) : ${armySize(f.lost)} hommes perdus.`;
+  if (healed.s2) healed = { ...healed, s2: { ...healed.s2, log: [...(healed.s2.log ?? []), { at, text: aText, cat: "combats" as const }].slice(-40) } };
+  const back: March = { ...m, troops: survivors, status: "back", returnAt: at + outMs, outcome: f.won ? "won" : "lost" };
+  const written = await writeStates(admin, seasonId, [{ e: owner, state: replace(healed, armySize(survivors) > 0 ? back : null) }, { e: foe, state: fState }], "ambush_hit", { target: foe.id, id: am.id, success: f.won });
+  if (written === "conflict") return "conflict";
+  await addChronicle(admin, seasonId, { kind: "raid", actor_id: owner.id, target_id: foe.id, details: { success: f.won, chance: f.chance, ambushHit: true, attackerLost: f.lost, defenderLost: f.foeLost } });
+  notify(admin, [foe.id], { title: f.won ? "🗡️ Embuscade délogée" : "🏹 Embuscade tenue", body: fText.slice(3), tag: "raid" });
   return "changed";
 }
 

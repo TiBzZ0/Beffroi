@@ -248,6 +248,7 @@ function S2Panel({ snap, live, now, world, picked, busy, act, castlesOthers }: {
     <>
       <p className="row-desc s2-panel">Touche une case, un site, un seigneur, un camp ou une forteresse pour le voir ici.</p>
       {castle && <Ambushes world={world} now={now} busy={busy} act={act} />}
+      {castle && <Expeditions world={world} now={now} />}
       {castle && <ConvoysInSight snap={snap} live={live} now={now} busy={busy} act={act} />}
       {castle && <TradeRoutes snap={snap} live={live} now={now} busy={busy} act={act} />}
       {castle && <Contracts snap={snap} live={live} now={now} busy={busy} act={act} />}
@@ -392,6 +393,29 @@ function Ambushes({ world, now, busy, act }: { world: S2WorldView; now: number; 
             {a.mine && a.from <= now && (
               <button className="btn btn-small" disabled={busy} onClick={() => void act({ type: "march_recall", id: a.id })}>Lever</button>
             )}
+            {!a.mine && !a.ally && a.from <= now && (
+              <button className="btn btn-small" disabled={busy} title="Toutes tes troupes au château partent la déloger. Vaincue, elle se lève aussitôt." onClick={() => void act({ type: "ambush_hit", id: a.id })}>🗡️ Déloger</button>
+            )}
+          </li>
+        ))}
+      </ul>
+    </div>
+  );
+}
+
+/** Expéditions des seigneurs encore dehors (contre mes convois, ceux de l'alliance, ou vues près de mes terres). */
+function Expeditions({ world, now }: { world: S2WorldView; now: number }) {
+  const list = (world.expeditions ?? []).filter((x) => x.back > now);
+  if (list.length === 0) return null;
+  return (
+    <div className="s2-panel s2-contracts">
+      <div className="row-title">⚔️ Expéditions des seigneurs</div>
+      <ul>
+        {list.map((x) => (
+          <li key={`${x.lord}-${x.at}`}>
+            <span>
+              {x.lordName} · {x.n} compagnie{x.n > 1 ? "s" : ""} {x.mine ? "partie contre tes convois" : `partie contre ${x.target}`} · de retour au fief dans {dur(x.back - now)} : sa garnison est affaiblie d&apos;ici là.
+            </span>
           </li>
         ))}
       </ul>
@@ -456,7 +480,7 @@ function TradeRoutes({ snap, live, now, busy, act }: { snap: GameSnapshot; live:
     <div className="s2-panel s2-contracts">
       <div className="row-title">🛤️ Routes commerciales</div>
       {list.length === 0 ? (
-        <p className="row-desc">Aucune route. Touche le château d&apos;un autre joueur pour lui en proposer une (elle s&apos;ouvre quand il la propose aussi), ou une forteresse tenue par ton alliance. Un convoi par heure rapporte de l&apos;or selon la longueur de la route (+10 % en Côte) ; il peut être attaqué. {TRADE_MAX} routes au plus.</p>
+        <p className="row-desc">Aucune route. Touche le château d&apos;un autre joueur pour lui en proposer une (elle s&apos;ouvre quand il la propose aussi), ou une forteresse tenue par ton alliance. Un convoi par heure rapporte de l&apos;or selon la longueur de la route (+10 % en Côte) ; il peut être attaqué. {TRADE_MAX} routes au plus ({TRADE_MAX + 1} avec les Comptoirs de la Lignée).</p>
       ) : (
         <ul>
           {list.map((t) => (
@@ -623,7 +647,7 @@ function Occupants({ world, live, siteId, busy, act }: { world: S2WorldView; liv
         {list.map((o) => (
           <li key={o.conc}>
             <span>
-              {o.name} · niv. {o.level} · {o.escort ? "🛡️ escortée" : "sans escorte"}
+              {o.name} · niv. {o.level} · {o.escort ? "🛡️ escortée" : "sans escorte"}{o.tower ? ` · 🗼 tour niv. ${o.tower} (${o.tower * 100} arbalétriers)` : ""}
             </span>
             {o.why ? (
               <span className="row-desc"> · {o.why}</span>
@@ -635,7 +659,7 @@ function Occupants({ world, live, siteId, busy, act }: { world: S2WorldView; liv
           </li>
         ))}
       </ul>
-      <p className="row-desc">Le pillage se joue contre l&apos;escorte de la route ; sans escorte, il réussit. Ton armée revient avec le butin.</p>
+      <p className="row-desc">Le pillage se joue contre l&apos;escorte de la route et les gardes de la tour du site ; sans l&apos;une ni l&apos;autre, il réussit. Ton armée revient avec le butin.</p>
     </div>
   );
 }

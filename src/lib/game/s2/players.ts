@@ -2,8 +2,10 @@
 // Règles pures, partagées par le navigateur (aperçu) et le serveur (qui fait foi).
 
 import { DESERT_LOOT_BONUS, REF, VALUE, type Convoy, type S2State } from "./economy";
-import { line, lossCap, WATCH_STAGE } from "./convoys";
+import { line, lossCap, WATCH_STAGE, type Side } from "./convoys";
+import type { Army } from "../battle";
 import { cheb, REGION_BONUS, type Pos, type S2Map } from "./map";
+import { trainLevels } from "../companies";
 
 const H = 3_600_000;
 const DAY = 24 * H;
@@ -27,15 +29,53 @@ export function visionRange(stagesDone: number): number {
   return CONVOY_VISION + (stagesDone >= WATCH_STAGE ? WATCH_VISION : 0);
 }
 
-/** Les cases d'où le joueur voit les convois des autres : son château et les sites de ses concessions. */
-export function watchPoints(s: S2State | undefined, map: S2Map): Pos[] {
+/** Un point de vue : une case, et les cases de vue en plus (tour de site). */
+export type WatchPoint = [number, number] | [number, number, number];
+
+/** Les cases d'où le joueur voit les convois des autres : son château et les sites de ses concessions (+1 case par niveau de tour). */
+export function watchPoints(s: S2State | undefined, map: S2Map): WatchPoint[] {
   if (!s?.castle) return [];
-  return [s.castle, ...s.conc.map((c) => map.sites[c.site]?.pos).filter((p): p is Pos => !!p)];
+  const out: WatchPoint[] = [[s.castle[0], s.castle[1]]];
+  for (const c of s.conc) {
+    const p = map.sites[c.site]?.pos;
+    if (p) out.push([p[0], p[1], (c.cb?.tour ?? 0) * TOWER_VISION]);
+  }
+  return out;
 }
 
 /** Un convoi d'un autre joueur est visible s'il passe à portée d'un de ses sites. */
-export function convoyVisible(points: Pos[], range: number, at: Pos): boolean {
-  return points.some((p) => cheb(p, at) <= range);
+export function convoyVisible(points: WatchPoint[], range: number, at: Pos): boolean {
+  return points.some((p) => cheb([p[0], p[1]], at) <= range + (p[2] ?? 0));
+}
+
+// ---------------------------------------------------------------------------
+// Tours de site (vague C)
+// ---------------------------------------------------------------------------
+
+/** Chaque niveau de tour : +1 case de vue autour du site, et 100 arbalétriers qui gardent le stock contre le pillage. */
+export const TOWER_VISION = 1;
+export const TOWER_GUARDS = 100;
+/** Le camp qui défend une concession pillée : son escorte (et ses mercenaires), plus les gardes de sa tour. */
+export function withTower(side: Side | null, level: number): Side | null {
+  if (level <= 0) return side;
+  const guards = TOWER_GUARDS * level;
+  const lv = (trainLevels(level * 2) as Record<string, number>).arbaletrier ?? 0;
+  if (!side) return { army: { arbaletrier: guards } as Army, levels: { arbaletrier: lv } };
+  const army = { ...(side.army as Record<string, number>) };
+  const levels = { ...((side.levels ?? {}) as Record<string, number>) };
+  const mine = army.arbaletrier ?? 0;
+  levels.arbaletrier = mine > 0 ? ((levels.arbaletrier ?? 0) * mine + lv * guards) / (mine + guards) : lv;
+  army.arbaletrier = mine + guards;
+  return { ...side, army: army as Army, levels };
+}
+
+/** Pertes de la défense sans celles des gardes de la tour (qui se relèvent toujours). */
+export function lossesBeyondTower(lost: Army, side: Side, level: number): Army {
+  const guards = TOWER_GUARDS * Math.max(0, level);
+  const total = (side.army as Record<string, number>).arbaletrier ?? 0;
+  const dead = { ...(lost as Record<string, number>) };
+  if (guards > 0 && total > 0 && dead.arbaletrier) dead.arbaletrier = Math.round(dead.arbaletrier * Math.max(0, total - guards) / total);
+  return dead as Army;
 }
 
 // ---------------------------------------------------------------------------
@@ -72,6 +112,7 @@ export function interceptBlocker(target: S2State | undefined, v: Convoy | undefi
   if (rel.sameIp) return "On n'attaque pas un compte de la même adresse.";
   if (rel.newbieUntil > now) return "Joueur arrivé depuis moins de 48 h : ses convois sont protégés.";
   if (v.hit) return "Ce convoi a déjà été attaqué par un joueur.";
+  if (target.tradeSafe && v.conc.startsWith("trade:")) return "Convoi de commerce d'un Grand marchand : on ne peut pas l'attaquer.";
   return null;
 }
 
@@ -160,7 +201,7 @@ export function tradesOf(playerId: string | undefined): TradeRoute[] {
 
 export function tradePay(s: S2State, from: Pos, to: Pos, seasonStart: number, t: number): number {
   const ref = REF(Math.max(0, (t - seasonStart) / DAY));
-  return (TRADE_HOURS_PER_CELL * ref * cheb(from, to) * (s.region === "cote" ? 1 + REGION_BONUS : 1)) / 4 / VALUE.or;
+  return (TRADE_HOURS_PER_CELL * ref * cheb(from, to) * (s.region === "cote" ? 1 + REGION_BONUS : 1) * (1 + (s.tradeBonus ?? 0))) / 4 / VALUE.or;
 }
 
 /** Chaque heure pleine, un convoi part vers l'autre bout de chaque route active ; il rapporte de l'or à l'arrivée. */
@@ -179,7 +220,7 @@ export function tradeConvoys(st: S2State, seasonStart: number, from: number, to:
 }
 
 /** Les routes actives : celles que les deux bouts ont proposées (ou une forteresse tenue par l'alliance). */
-export function activeTrades(players: { id: string; name: string; s2?: S2State; alliance: number | null }[], forts: { key: string; name: string; pos: Pos; holder: number | null }[]): Record<string, TradeRoute[]> {
+export function activeTrades(players: { id: string; name: string; s2?: S2State; alliance: number | null; max?: number }[], forts: { key: string; name: string; pos: Pos; holder: number | null }[]): Record<string, TradeRoute[]> {
   const byId = new Map(players.map((p) => [p.id, p]));
   const out: Record<string, TradeRoute[]> = {};
   for (const p of players) {
@@ -195,18 +236,18 @@ export function activeTrades(players: { id: string; name: string; s2?: S2State; 
       const back = o?.s2?.trade?.find((x) => x.to === p.id);
       if (o?.s2?.castle && back) list.push({ to: o.id, name: o.name, pos: o.s2.castle, since: Math.max(t.at, back.at) });
     }
-    if (list.length) out[p.id] = list.slice(0, TRADE_MAX);
+    if (list.length) out[p.id] = list.slice(0, p.max ?? TRADE_MAX);
   }
   return out;
 }
 
 /** Propose (ou retire) une route commerciale vers un autre château ou une forteresse. */
-export function setTradeOffer(s: S2State, to: string, on: boolean, now: number, selfId?: string): { ok: true; value: S2State } | { ok: false; error: string } {
+export function setTradeOffer(s: S2State, to: string, on: boolean, now: number, selfId?: string, max = TRADE_MAX): { ok: true; value: S2State } | { ok: false; error: string } {
   if (!s.castle) return { ok: false, error: "Pose d'abord ton château." };
   if (!to || to === selfId) return { ok: false, error: "Choisis un autre château." };
   const list = s.trade ?? [];
   if (!on) return { ok: true, value: { ...s, trade: list.filter((t) => t.to !== to) } };
   if (list.some((t) => t.to === to)) return { ok: false, error: "Route déjà proposée." };
-  if (list.length >= TRADE_MAX) return { ok: false, error: `${TRADE_MAX} routes commerciales au plus.` };
+  if (list.length >= max) return { ok: false, error: `${max} routes commerciales au plus.` };
   return { ok: true, value: { ...s, trade: [...list, { to, at: now }] } };
 }

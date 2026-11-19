@@ -281,6 +281,8 @@ export interface S2WorldView {
   convoys: { from: [number, number]; to: [number, number]; depart: number; arrive: number; res: Resource; size: "petite" | "moyenne" | "grosse"; mine: boolean; owner?: string; ownerName?: string; conc?: string; escort?: boolean; hit?: boolean; sabotaged?: boolean; ally?: boolean; why?: string }[];
   /** S8 : embuscades en place (les miennes, celles de mon alliance, et celles des autres à portée de vision). */
   ambushes?: { id: string; owner: string; name: string; pos: [number, number]; from: number; until: number; mine: boolean; ally: boolean; size: number }[];
+  /** Expéditions des seigneurs en cours (vers mes convois, ceux de l'alliance, ou repérées près de mes sites) : retour au fief à `back`. */
+  expeditions?: { lord: string; lordName: string; from: [number, number]; to: [number, number]; at: number; back: number; n: number; target: string; mine: boolean }[];
   /** Portée de vision des convois des autres, en cases. */
   vision?: number;
   /** Camps de bandits (présents, ou à venir avec leur heure d'apparition). */
@@ -290,7 +292,7 @@ export interface S2WorldView {
   /** Les quatre forteresses (position, alliance qui la tient). */
   forts?: { idx: number; name: string; pos: [number, number]; holder: number | null; holderName: string | null }[];
   /** Vague B : concessions des autres joueurs (pour le pillage), avec la raison d'un refus. */
-  occupants?: { owner: string; name: string; conc: string; site: number; level: number; escort: boolean; why?: string }[];
+  occupants?: { owner: string; name: string; conc: string; site: number; level: number; escort: boolean; tower?: number; why?: string }[];
 }
 
 export interface GameSnapshot {
@@ -411,6 +413,8 @@ export type GameAction =
   | { type: "convoy_sabotage"; target: string; conc: string; depart: number }
   /** S8 : poster une embuscade sur une case pour 4 h. */
   | { type: "ambush"; x: number; y: number; troops?: Record<string, number> }
+  /** Déloger l'embuscade repérée d'un autre joueur (combat à l'arrivée). */
+  | { type: "ambush_hit"; id: string; troops?: Record<string, number> }
   /** Détruire un camp de bandits de la carte. */
   | { type: "camp"; id: string; troops?: Record<string, number> }
   | { type: "contribute"; amount: number }

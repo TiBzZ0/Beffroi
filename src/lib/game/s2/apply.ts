@@ -1,13 +1,13 @@
 // Actions de la saison 2, partagées par le serveur (qui fait foi) et le navigateur (aperçu immédiat).
 import { COMPANY_CAP, createCompany } from "../companies";
 import { stagesDoneAt, type PlayerState, type Result, type WorldState } from "../engine";
-import { lin, LIN_GENERATOR_DISCOUNT } from "../lineage";
+import { lin, LIN_GENERATOR_DISCOUNT, LIN_TRADE_ROUTES } from "../lineage";
 import type { GameAction } from "../types";
 import { build, buyConcession, concBuild, type ConcBuildingId, dropConcession, exchangeBlocker, firstConcessionSites, LAUNCH_MS, marketQuote, setConcession, shipNow, START_STONE, supplyBlocker, supplyConcession, takeConcession, upgradeConcession, type BuildingId } from "./economy";
 import { castleBlocker, regionAt, type Resource } from "./map";
 import { buySafe, releaseEscort, setEscort } from "./convoys";
 import { hireMerc } from "./mercs";
-import { setTradeOffer } from "./players";
+import { setTradeOffer, TRADE_MAX } from "./players";
 import { s2Map } from "./rules";
 
 export interface S2Outcome {
@@ -90,7 +90,7 @@ export function applyS2Action(state: PlayerState, action: Extract<GameAction, { 
     }
     case "trade": {
       // S8 : proposer ou retirer une route commerciale (active quand l'autre bout la propose aussi).
-      const r = setTradeOffer(s2, String(action.to ?? ""), action.on !== false, now, s2.who?.id);
+      const r = setTradeOffer(s2, String(action.to ?? ""), action.on !== false, now, s2.who?.id, TRADE_MAX + (lin(state, "comptoirs") ? LIN_TRADE_ROUTES : 0));
       if (!r.ok) return r;
       const opened = action.on !== false && others.offers?.(String(action.to));
       return done({ ...state, s2: r.value }, "trade", { to: action.to, on: action.on !== false }, action.on === false ? "🛤️ Route commerciale fermée." : opened ? "🛤️ Route commerciale ouverte : un convoi part chaque heure." : "🛤️ Route commerciale proposée : elle s'ouvre dès que l'autre bout la propose aussi.");

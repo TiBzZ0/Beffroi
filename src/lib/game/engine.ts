@@ -134,7 +134,7 @@ import { s2Map } from "./s2/rules";
 import { combatLevels, companyLevels, lockedMen, trainLevels, refRate, settleArmy, type ArmyWorks, type Company, type Escort, type RecruitOrder } from "./companies";
 import { annexConvoys, banditGuard, convoyRisk, vassalConvoys, WATCH_ESCORT_BONUS, WATCH_STAGE, type RouteContext, type Side } from "./s2/convoys";
 import { tradeConvoys } from "./s2/players";
-import { lin, LIN_ATTACK, LIN_ATTACK_LOSSES, LIN_CAVE_SECONDS, LIN_DONOR_TIERS, LIN_FORT_DAMAGE, LIN_FORTUNE, LIN_PRODUCTION, LIN_PROTECTED, LIN_PVP_CAP, LIN_RESEARCH_SPEED, LIN_REVENGE_MS, LIN_SABOTAGE, LIN_SPEED, LIN_SPY_SPEED, LIN_WOUNDED, type LineageState } from "./lineage";
+import { lin, LIN_ATTACK, LIN_ATTACK_LOSSES, LIN_CAVE_SECONDS, LIN_DONOR_TIERS, LIN_FORT_DAMAGE, LIN_FORTUNE, LIN_PRODUCTION, LIN_PROTECTED, LIN_PVP_CAP, LIN_RESEARCH_SPEED, LIN_REVENGE_MS, LIN_SABOTAGE, LIN_SPEED, LIN_SPY_SPEED, LIN_WOUNDED, LIN_ESCORT, LIN_PATROL_CUT, LIN_TRADE_GOLD, LIN_TRADE_GOLD_TOP, type LineageState } from "./lineage";
 
 export interface PlayerState {
   stone: number;
@@ -356,7 +356,7 @@ export function extraSecured(state: PlayerState): number {
 export interface March {
   id: string;
   /** Raid, renforts envoyés à un allié, assaut ou garnison de la forteresse (T6). */
-  kind: "raid" | "reinforce" | "fortress" | "station" | "event" | "hall_station" | "hall_siege" | "pillage" | "contract" | "intercept" | "camp" | "ambush";
+  kind: "raid" | "reinforce" | "fortress" | "station" | "event" | "hall_station" | "hall_siege" | "pillage" | "contract" | "intercept" | "camp" | "ambush" | "ambush_hit";
   /** Vague B : concession visée par un pillage, ou dont on intercepte un convoi. */
   conc?: string;
   /** S8 : départ du convoi intercepté (avec `conc`, il l'identifie). */
@@ -364,6 +364,8 @@ export interface March {
   /** S8 : embuscade posée sur la case `pos`, en place jusqu'à `holdUntil`. */
   pos?: [number, number];
   holdUntil?: number;
+  /** Armée envoyée déloger une embuscade : id de la marche visée (chez le joueur `target`). */
+  ambush?: string;
   /** Vague B : contrat d'un seigneur que l'armée part remplir. */
   contract?: { lord: string; kind: "escorte" | "interception" | "camp"; rival?: string; gold: number };
   /** H5 : aile visée par un assaut de halle. */
@@ -658,7 +660,7 @@ export function advance(state: PlayerState, now: number, world: WorldState, opts
     const base = productionValue(state.s2, map) / 3600;
     const multiplier = (t: number) => (base > 0 ? rateAt(state, world, t, opts) / base : 1);
     // S10 : Cave profonde (+30 min de stock local), Charpentiers (convois 10 % plus rapides), Grands chariots (charge +25 %).
-    const perked = { ...state.s2, stockBonusHours: lin(state, "cave") ? 0.5 : 0, convoySpeed: (lin(state, "charpentiers") ? 0.1 : 0) + (state.fortsHeld?.includes(1) ? FORT_CONVOY_SPEED : 0), patrolCut: state.fortsHeld?.includes(3) ? FORT_PATROL_CUT : 0, loadBonus: lin(state, "fondations") ? 0.25 : 0 };
+    const perked = { ...state.s2, stockBonusHours: lin(state, "cave") ? 0.5 : 0, convoySpeed: (lin(state, "charpentiers") ? 0.1 : 0) + (state.fortsHeld?.includes(1) ? FORT_CONVOY_SPEED : 0), patrolCut: 1 - (1 - (state.fortsHeld?.includes(3) ? FORT_PATROL_CUT : 0)) * (1 - (lin(state, "guides") ? LIN_PATROL_CUT : 0)), loadBonus: lin(state, "fondations") ? 0.25 : 0, tradeBonus: (lin(state, "marchandage") ? LIN_TRADE_GOLD : 0) + (lin(state, "grand_marchand") ? LIN_TRADE_GOLD_TOP : 0), tradeSafe: lin(state, "grand_marchand"), archShield: lin(state, "architecte") };
     // Vague B : escortes, patrouilles, brigands et expéditions, réglés à l'arrivée des convois.
     const route = routeOf(state, map, stagesDoneAt(world, now));
     const { s: s2, arrived } = settleS2(perked, { map, stageConcessions: stagesDoneAt(world, now) >= 1 ? 1 : 0, multiplier, breakpoints: events.filter((t) => t > state.s2!.at && t < now), belfryDone: stagesDoneAt(world, now) >= TOTAL_STAGES, banditsFrom: (state.seasonStart || 0) + BANDIT_GRACE_MS, risk: (st, v) => convoyRisk(st, v, route.rc), guard: (st, c, at) => banditGuard(st, c, at, route.rc), extra: (st, from, to) => {
@@ -772,7 +774,7 @@ function mergeBoost(a: Boost | undefined, b: Boost | undefined): Boost | undefin
 
 /** Bonus d'une escorte : région (froid), et « La tour de guet » (+15 % de dégâts). */
 export function escortBoost(state: PlayerState, unit: UnitId, stagesDone: number): Boost | undefined {
-  const k = (stagesDone >= WATCH_STAGE ? 1 + WATCH_ESCORT_BONUS : 1) * (state.fortsHeld?.includes(2) ? 1 + FORT_ESCORT_DAMAGE : 1);
+  const k = (stagesDone >= WATCH_STAGE ? 1 + WATCH_ESCORT_BONUS : 1) * (state.fortsHeld?.includes(2) ? 1 + FORT_ESCORT_DAMAGE : 1) * (lin(state, "convoyeurs") ? 1 + LIN_ESCORT : 1);
   return regionBoost(state, k > 1 ? { atk: { [unit]: k } } : undefined);
 }
 

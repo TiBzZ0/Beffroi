@@ -1641,6 +1641,7 @@ function targetName(snap: GameSnapshot, id: string): string {
   if (id.startsWith("treasure:")) return "Trésor";
   if (id.startsWith("camp:") || snap.s2?.camps?.some((k) => k.id === id)) return "Camp de bandits";
   if (id.startsWith("convoy:")) return "Convoi";
+  if (id.startsWith("ambush:")) return `Embuscade (${id.split(":").slice(1).join(", ")})`;
   if (id.startsWith("siege:")) return "Beffroi";
   if (id.startsWith("hall:")) return snap.map?.halls?.find((h) => `hall:${h.id}` === id)?.name ?? "Halle";
   // Vague B : contrat d'un seigneur (« jour:seigneur »).
@@ -1668,7 +1669,7 @@ interface MoveRow {
   recall?: string;
 }
 
-const MARCH_ICON: Record<string, string> = { raid: "⚔️", reinforce: "🛡️", station: "🛡️", hall_station: "🛡️", fortress: "🏰", hall_siege: "🏛️", event: "🎪", pillage: "⛏️", contract: "📜", intercept: "🏇", camp: "🏕️" };
+const MARCH_ICON: Record<string, string> = { raid: "⚔️", reinforce: "🛡️", station: "🛡️", hall_station: "🛡️", fortress: "🏰", hall_siege: "🏛️", event: "🎪", pillage: "⛏️", contract: "📜", intercept: "🏇", camp: "🏕️", ambush: "🏹", ambush_hit: "🗡️" };
 
 /** U1 : tableau des mouvements, visible depuis tous les onglets. */
 export function Movements({ snap, live, now, run }: { snap: GameSnapshot; live: PlayerState; now: number; run: ReturnType<typeof useGame>["run"] }) {
@@ -2826,7 +2827,18 @@ function reportOf(e: ChronicleEntry, me: string, myAlliance: number | null, riva
     cat = personal ? "combats" : allyOf(e.actorId) || allyOf(e.targetId) ? "alliance" : "royaume";
     const won = d.success !== false;
     const site = (d as { pillage?: boolean; site?: string }).pillage ? (d as { site?: string }).site ?? "une concession" : null;
-    if (site) {
+    const dx = d as { intercept?: boolean; ambushHit?: boolean };
+    if (dx.ambushHit) {
+      icon = "🗡️";
+      if (attacker) title = won ? `Embuscade de ${e.targetName} délogée` : `L'embuscade de ${e.targetName} a tenu`;
+      else if (e.targetId === me) title = won ? `${e.actorName} déloge ton embuscade` : `Ton embuscade repousse ${e.actorName}`;
+      else title = won ? `${e.actorName} déloge l'embuscade de ${e.targetName}` : `L'embuscade de ${e.targetName} repousse ${e.actorName}`;
+    } else if (dx.intercept) {
+      icon = "🏇";
+      if (attacker) title = won ? `Convoi de ${e.targetName} intercepté` : `Interception repoussée par ${e.targetName}`;
+      else if (e.targetId === me) title = won ? `${e.actorName} intercepte ton convoi` : `Ton escorte repousse ${e.actorName}`;
+      else title = won ? `${e.actorName} intercepte un convoi de ${e.targetName}` : `${e.targetName} repousse ${e.actorName}`;
+    } else if (site) {
       icon = "⛏️";
       if (attacker) title = won ? `Pillage de ${site}` : `Pillage repoussé à ${site}`;
       else if (e.targetId === me) title = won ? `${e.actorName} pille ${site}` : `Pillage de ${e.actorName} repoussé`;

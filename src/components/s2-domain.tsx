@@ -17,7 +17,7 @@ import {
   buildingMs,
   buyConcessionBlocker,
   CONC_BUILDING_IDS,
-  CONC_BUILDING_MAX,
+  concBuildingMax,
   CONC_BUILDINGS,
   concBuildBlocker,
   concBuildingCost,
@@ -50,7 +50,7 @@ import {
   type S2State,
 } from "@/lib/game/s2/economy";
 import { cheb, RANKS, REGIONS, S2_BELFRY, type Resource, type S2Map } from "@/lib/game/s2/map";
-import { escortBlocker, fightChance, HOSTILITY_LEVELS, patrolSide, protectedUntil, routeDangers, routeEnd } from "@/lib/game/s2/convoys";
+import { AMBUSH_REACH, CAMP_CHANCE, CAMP_REACH, escortBlocker, fightChance, HOSTILITY_LEVELS, line, patrolSide, protectedUntil, routeDangers, routeEnd } from "@/lib/game/s2/convoys";
 import { allocation, companyLevels } from "@/lib/game/companies";
 import { escortBoost } from "@/lib/game/engine";
 import { UNITS } from "@/lib/game/config";
@@ -510,12 +510,12 @@ function ConcessionView({ snap, live, s2, c, now, run, select }: { snap: GameSna
                 </div>
                 <p className="card-text">{CONC_BUILDINGS[b].text}.</p>
                 {working && <Work icon="🔨" label={`Niveau ${working.level}`} start={working.until - concBuildingMs(working.level)} until={working.until} now={now} />}
-                {lvl < CONC_BUILDING_MAX && (
+                {lvl < concBuildingMax(b) && (
                   <button className="btn btn-small btn-primary" data-tuto={`cbuild-${b}`} disabled={!!why} title={why ?? undefined} onClick={() => void run({ type: "s2", op: "cbuild", id: c.id, building: b })}>
                     Niveau {lvl + 1} · 🧱 {formatNumber(concBuildingCost(lvl + 1))} · ⏱ {dur(concBuildingMs(lvl + 1))}
                   </button>
                 )}
-                {why && lvl < CONC_BUILDING_MAX && <p className="card-why">{why}</p>}
+                {why && lvl < concBuildingMax(b) && <p className="card-why">{why}</p>}
               </div>
             );
           })}
@@ -644,6 +644,19 @@ function RouteSection({ snap, live, s2, c, now, run }: { snap: GameSnapshot; liv
           })}
         </ul>
       )}
+      {(() => {
+        const path = line(site.pos, end);
+        const near = (p: readonly number[], r: number) => path.some((q) => Math.max(Math.abs(q[0] - p[0]), Math.abs(q[1] - p[1])) <= r);
+        const traps = (world.ambushes ?? []).filter((a) => !a.mine && !a.ally && a.until > now && near(a.pos, AMBUSH_REACH));
+        const camps = (world.camps ?? []).filter((k) => k.from <= now && near(k.pos, CAMP_REACH));
+        if (traps.length === 0 && camps.length === 0) return null;
+        return (
+          <p className="row-desc s2-warn">
+            {traps.map((a) => `🏹 Embuscade de ${a.name} en (${a.pos[0]}, ${a.pos[1]}) sur cette route, ${a.from > now ? `en place dans ${dur(a.from - now)}` : `encore ${dur(a.until - now)}`}. `).join("")}
+            {camps.length > 0 ? `🏕️ ${camps.length > 1 ? `${camps.length} camps de bandits` : "Un camp de bandits"} au bord de cette route (${Math.round(CAMP_CHANCE * 100)} % d'attaque par convoi).` : ""}
+          </p>
+        );
+      })()}
       {escort && company ? (
         <div className="s2-settings">
           <span>

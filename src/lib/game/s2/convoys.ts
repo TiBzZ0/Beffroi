@@ -378,7 +378,18 @@ export function convoyRisk(st: S2State, v: Convoy, rc: RouteContext): number {
   const span = Math.max(0, v.arrive - v.depart);
   const res = v.res as Resource;
   const what = `Convoi ${siteName(rc.map, st, v)}`.trim();
+  // Vague C, Grand marchand : les convois de commerce ne sont jamais attaqués.
+  if (st.tradeSafe && v.conc.startsWith("trade:")) return 0;
+  // Architecte royal : le premier convoi du jour qui devait perdre une part de sa charge arrive intact.
+  let shielded = false;
   const lose = () => {
+    const day = Math.floor(v.arrive / DAY);
+    if (!shielded && st.archShield && st.archDay !== day) {
+      shielded = true;
+      st.archDay = day;
+      pushLog(st, v.arrive, `📐 ${what} : l'Architecte royal lui a fait prendre un autre chemin, il arrive intact.`, { cat: "combats" });
+    }
+    if (shielded) return 0;
     const take = Math.min(cap - lost, load0 * lossCap(rc.stagesDone));
     lost += Math.max(0, take);
     return Math.max(0, take);
@@ -458,7 +469,7 @@ export function convoyRisk(st: S2State, v: Convoy, rc: RouteContext): number {
     // Le fief garde une garnison réduite le temps de l'aller-retour ; battues par l'escorte, ses compagnies attendent la reformation.
     const trip = rc.march ? rc.march(foe.pos, v.to) : cheb(foe.pos, v.to) * 10 * 60_000;
     const n = expeditionCompanies(foe);
-    st.sent = [...(st.sent ?? []).filter((x) => x.back > v.arrive - DAY), { lord: foe.id, at: v.arrive - trip, back: fight.won ? v.arrive + EXPEDITION_REFORM_MS : v.arrive + trip, n }].slice(-10);
+    st.sent = [...(st.sent ?? []).filter((x) => x.back > v.arrive - DAY), { lord: foe.id, at: v.arrive - trip, back: fight.won ? v.arrive + EXPEDITION_REFORM_MS : v.arrive + trip, n, to: [v.to[0], v.to[1]] as Pos }].slice(-10);
     const taken = fight.won ? 0 : lose();
     pushLog(st, v.arrive, `⚔️ ${what} : expédition de ${lordName(foe)} ${fight.won ? "repoussée par l'escorte" : `, −${fmt(taken)} ${RESOURCE_ICON[res]}`}.`.replace(" ,", ","), { cat: "combats" });
   }

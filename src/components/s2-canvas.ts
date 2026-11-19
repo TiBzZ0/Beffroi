@@ -658,6 +658,34 @@ export function drawMap(c: CanvasRenderingContext2D, d: DrawInput) {
     c.stroke();
     c.globalAlpha = 1;
   }
+  // Expéditions des seigneurs : un trait pointillé du fief vers la cible, et la troupe qui rentre.
+  for (const x of world.expeditions ?? []) {
+    const [ax, ay] = mid(x.from[0], x.from[1]);
+    const [zx, zy] = mid(x.to[0], x.to[1]);
+    c.strokeStyle = x.mine ? "#c4473a" : "rgba(196,71,58,.6)";
+    c.lineWidth = Math.max(1, S / 12);
+    c.setLineDash([S * 0.25, S * 0.2]);
+    c.beginPath();
+    c.moveTo(ax, ay);
+    c.lineTo(zx, zy);
+    c.stroke();
+    c.setLineDash([]);
+    const f = Math.min(1, Math.max(0, (d.now - x.at) / Math.max(1, x.back - x.at)));
+    const k = f < 0.5 ? f * 2 : 2 - f * 2;
+    const px = ax + (zx - ax) * k;
+    const py = ay + (zy - ay) * k;
+    c.fillStyle = "#c4473a";
+    c.strokeStyle = "#1a1a1a";
+    c.lineWidth = 1;
+    c.beginPath();
+    c.moveTo(px, py - S * 0.25);
+    c.lineTo(px + S * 0.2, py);
+    c.lineTo(px, py + S * 0.25);
+    c.lineTo(px - S * 0.2, py);
+    c.closePath();
+    c.fill();
+    c.stroke();
+  }
   // Camps de bandits.
   for (const k of world.camps ?? []) {
     if (!visible(k.pos[0], k.pos[1])) continue;
