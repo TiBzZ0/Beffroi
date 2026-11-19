@@ -2342,7 +2342,7 @@ function s2Others(entities: Map<string, Entity>, meId: string): S2Others {
     for (const c of e.state.s2.conc) count.set(c.site, (count.get(c.site) ?? 0) + 1);
     if (e.state.s2.castle) castles.push(e.state.s2.castle);
   }
-  return { taken: (id) => count.get(id) ?? 0, castles };
+  return { taken: (id) => count.get(id) ?? 0, castles, offers: (to) => to.startsWith("fort:") || !!entities.get(to)?.state.s2?.trade?.some((t) => t.to === meId) };
 }
 
 function applySimpleAction(state: PlayerState, action: GameAction, now: number, world: WorldState, others?: S2Others): Result<Outcome> {
@@ -2889,7 +2889,9 @@ export async function runAction(admin: SupabaseClient, userId: string, action: G
       else if (!victim || victim.isLord || !vState?.s2) error = "Cible inconnue.";
       else if (victim.id === me.id) error = "C'est ton propre convoi.";
       else if (action.type === "intercept") {
-        const why = interceptBlocker(vState.s2, v, rel, now);
+        // Une seule embuscade à la fois sur un même convoi.
+        const ambushed = v && [...entities.values()].some((o) => (o.state.marches ?? []).some((x) => x.kind === "intercept" && x.status === "out" && x.target === victim.id && x.conc === v.conc && x.convoy === v.depart));
+        const why = interceptBlocker(vState.s2, v, rel, now) ?? (ambushed ? "Une embuscade attend déjà ce convoi." : null);
         const wanted = (action.troops && typeof action.troops === "object" ? action.troops : current.troops) as Army;
         const sending = why ? null : sendTroops(current, wanted);
         const point = v && sending?.ok ? interceptPoint(v, current.s2.castle, (cells) => travelMs(sending.value.sent, cells, armySpeedBonus(current)), now) : null;
@@ -2922,6 +2924,8 @@ export async function runAction(admin: SupabaseClient, userId: string, action: G
             text = `🕯️ Un convoi a été saboté en route : −${Math.round(r.destroyed).toLocaleString("fr-FR")} ${({ pierre: "🪨", fer: "⚔️", or: "🪙" } as const)[v.res]}, 15 min de retard.`;
             message = `🕯️ Sabotage réussi : le convoi de ${victim.name} perd ${Math.round(r.destroyed).toLocaleString("fr-FR")} et arrive 15 min plus tard.`;
           } else {
+            // Le convoi est sur ses gardes : plus de sabotage possible sur lui.
+            vNext = { ...vState, s2: { ...vState.s2, convoys: vState.s2.convoys.map((x) => (x.conc === v.conc && x.depart === v.depart ? { ...x, sabotaged: true } : x)) } };
             text = `🕯️ Un saboteur de ${me.name} a été surpris près d'un de tes convois.`;
             message = `🕯️ Ton saboteur a été repéré (${Math.round(chance * 100)} % de chance) : le convoi passe intact.`;
           }
@@ -3156,7 +3160,14 @@ export async function runAction(admin: SupabaseClient, userId: string, action: G
       : null;
     const titles = titlesFrom(hall);
     allianceNames = names;
-    const s2World = s2WorldView(entities, userId, now, world, conflicts.forts, names);
+    // La vue du monde part de l'état qui vient d'être écrit (route ouverte, expédition réglée) : registres recalculés.
+    const viewEntities = new Map(entities);
+    const meEntity = entities.get(userId);
+    if (meEntity && s2Map()) {
+      viewEntities.set(userId, { ...meEntity, state: finalState });
+      syncRoutes(viewEntities, conflicts.forts.map((f) => ({ key: `fort:${f.idx}`, name: fortressName(f.idx), pos: [fortressPos(f.idx)[0], fortressPos(f.idx)[1]] as [number, number], holder: f.holder })));
+    }
+    const s2World = s2WorldView(viewEntities, userId, now, world, conflicts.forts, names);
     const snapshot: GameSnapshot = {
       ...(s2World ? { s2: s2World } : {}),
       serverNow: now,
@@ -3455,6 +3466,10 @@ async function settleMarches(
   // Vague C : la troisième vassalité d'une même alliance annexe le fief ; battre un fief annexé le libère (garnison à moitié).
   if (fief) fight.value.victim = { ...fight.value.victim, lordS2: rep.success ? afterVassal(afterDefeat(fief, at, vassal), owner.allianceId, at, ANNEX_AFTER) : fief };
   const annexedNow = fief && rep.success ? (fight.value.victim.lordS2 as { annexed?: { alliance: number } } | undefined)?.annexed : undefined;
+  if (annexedNow && !fief?.annexed && owner.allianceId !== null && fight.value.attacker.s2) {
+    const s2a = fight.value.attacker.s2;
+    fight.value.attacker = { ...fight.value.attacker, s2: { ...s2a, log: [...(s2a.log ?? []), { at, text: `👑 ${victim.name} est annexé par ton alliance jusqu'à la fin de la saison : sa production est partagée entre vous.`, cat: "combats" as const }].slice(-40) } };
+  }
   if (annexedNow && !fief?.annexed && owner.allianceId !== null) {
     notify(admin, [...entities.values()].filter((e) => !e.isLord && e.allianceId === owner.allianceId).map((e) => e.id), { title: "👑 Fief annexé", body: `${victim.name} appartient désormais à votre alliance : sa production est partagée entre vous, sa zone laisse passer vos convois.`, tag: "raid" });
   }
@@ -3493,7 +3508,8 @@ async function settleMarches(
   // L1 : renom du vainqueur (jamais entre alliés ni entre comptes d'une même adresse).
   const fair = !isAllied(owner, victim) && !sameIp(owner, victim);
   if (rep.success && !owner.isLord && fair) await grantRenown(admin, seasonId, owner, victim.isLord ? "lord" : "raid", `Victoire sur ${victim.name}`);
-  if (vassal) await grantRenown(admin, seasonId, owner, "vassal", `${victim.name} devient ton vassal`);
+  // Un même seigneur ne rapporte le renom de vassalité qu'une fois par jour.
+  if (vassal) await grantRenown(admin, seasonId, owner, "vassal", `${victim.name} devient ton vassal`, `${victim.id}:${dailyDay(at)}`);
   if (!rep.success && !victim.isLord && fair) await grantRenown(admin, seasonId, victim, "defense", `${owner.name} repoussé`);
   if (!victim.isLord) {
     notify(admin, [victim.id], rep.success
@@ -3629,11 +3645,11 @@ async function settleIntercept(
   else vState = { ...vState, s2: { ...vState.s2!, convoys: vState.s2!.convoys.map((x) => (x === v || (x.conc === v.conc && x.depart === v.depart) ? { ...x, hit: true } : x)) } };
   const fmt = (n: number) => Math.round(n).toLocaleString("fr-FR");
   const icon = ({ pierre: "🪨", fer: "⚔️", or: "🪙" } as const)[v.res];
-  const vText = won ? `🏇 ${owner.name} a intercepté un convoi${route ? " malgré son escorte" : ""} : −${fmt(taken)} ${icon}.` : `🛡️ L'escorte d'un convoi a repoussé l'embuscade de ${owner.name}.`;
+  const vText = won ? `🏇 ${owner.name} a intercepté un convoi${route ? " malgré son escorte" : ""} : −${fmt(Math.floor(taken))} ${icon}.` : `🛡️ L'escorte d'un convoi a repoussé l'embuscade de ${owner.name}.`;
   vState = { ...vState, s2: { ...vState.s2!, log: [...(vState.s2!.log ?? []), { at, text: vText, cat: "combats" as const }].slice(-40) } };
   const survivors = cleanArmy(Object.fromEntries((Object.entries(m.troops) as [string, number][]).map(([id, n]) => [id, n - ((lost as Record<string, number>)[id] ?? 0)])) as Army);
   let healed = addWounded(aState, woundedOf(lost, won ? WOUNDED_WINNER : WOUNDED_ATTACKER_BEATEN), at);
-  const aText = won ? `🏇 Embuscade réussie contre ${victim.name} : ${fmt(loot)} ${icon} au retour de ton armée.` : `🏇 Embuscade repoussée par l'escorte de ${victim.name} (${Math.round(chance * 100)} % de chance).`;
+  const aText = won ? `🏇 Embuscade réussie contre ${victim.name} : ${fmt(Math.floor(loot))} ${icon} au retour de ton armée.` : `🏇 Embuscade repoussée par l'escorte de ${victim.name} (${Math.round(chance * 100)} % de chance).`;
   if (healed.s2) healed = { ...healed, s2: { ...healed.s2, log: [...(healed.s2.log ?? []), { at, text: aText, cat: "combats" as const }].slice(-40) } };
   const lootS2 = { pierre: 0, fer: 0, or: 0 };
   if (loot > 0) lootS2[v.res] += Math.floor(loot);

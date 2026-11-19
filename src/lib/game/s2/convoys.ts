@@ -293,7 +293,9 @@ export function afterLordAttack(s: S2State, map: S2Map, lordId: string, at: numb
     return next;
   }
   addHostility(next, map, lord, HOSTILITY.pillage + HOSTILITY.vassal, at);
-  const n = betrayed || hostilityLevel(hostilityAt(next, lordId, at)) >= 2 ? 2 : 1;
+  // Deux rancunes en attente au plus par seigneur : battre plusieurs fois le même ne les empile pas.
+  const pending = (s.grudge ?? []).filter((g) => g.lord === lordId).length;
+  const n = Math.max(0, Math.min(betrayed || hostilityLevel(hostilityAt(next, lordId, at)) >= 2 ? 2 : 1, 2 - pending));
   const due = at + Math.floor(rollAt(`grudge:${lordId}`, at) * GRUDGE_MS);
   next.grudge = [...(s.grudge ?? []), ...Array.from({ length: n }, (_, i) => ({ lord: lordId, due: due + i * 60_000 }))].slice(-10);
   next.vassals = { ...(s.vassals ?? {}), [lordId]: at + VASSAL_MS };

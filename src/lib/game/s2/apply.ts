@@ -22,6 +22,8 @@ import type { MapPos } from "../config";
 export interface S2Others {
   taken: (siteId: number) => number;
   castles: MapPos[];
+  /** S8 : ce joueur (ou une forteresse de mon alliance) me propose-t-il déjà une route commerciale ? */
+  offers?: (to: string) => boolean;
 }
 /** Saison 2 : pose du château, concessions, bâtiments d'appui, marché. */
 export function applyS2Action(state: PlayerState, action: Extract<GameAction, { type: "s2" }>, now: number, world: WorldState, others: S2Others): Result<S2Outcome> {
@@ -90,7 +92,8 @@ export function applyS2Action(state: PlayerState, action: Extract<GameAction, { 
       // S8 : proposer ou retirer une route commerciale (active quand l'autre bout la propose aussi).
       const r = setTradeOffer(s2, String(action.to ?? ""), action.on !== false, now, s2.who?.id);
       if (!r.ok) return r;
-      return done({ ...state, s2: r.value }, "trade", { to: action.to, on: action.on !== false }, action.on === false ? "🛤️ Route commerciale retirée." : "🛤️ Route commerciale proposée : elle s'ouvre dès que l'autre bout la propose aussi.");
+      const opened = action.on !== false && others.offers?.(String(action.to));
+      return done({ ...state, s2: r.value }, "trade", { to: action.to, on: action.on !== false }, action.on === false ? "🛤️ Route commerciale fermée." : opened ? "🛤️ Route commerciale ouverte : un convoi part chaque heure." : "🛤️ Route commerciale proposée : elle s'ouvre dès que l'autre bout la propose aussi.");
     }
     case "merc": {
       const lord = map.lords.find((l) => l.id === String(action.id));

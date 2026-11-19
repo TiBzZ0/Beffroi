@@ -689,6 +689,7 @@ export const CHANGELOG: ChangeEntry[] = [
       "🗡️ Mercenaires : un seigneur neutre ou ton vassal te loue une compagnie pour 12 h, qui escorte la concession de ton choix avec son propre entraînement.",
       "👑 Chute : une alliance qui fait trois fois d'un même seigneur son vassal l'annexe jusqu'à la fin de la saison. Sa production est partagée entre ses membres et sa zone laisse passer leurs convois. Le battre le libère, et sa garnison ne se reforme qu'à moitié.",
       "🏜️ Le désert donne désormais +10 % de butin sur les convois interceptés, à la place de l'or en plus sur chaque convoi arrivé.",
+      "🕯️ Un convoi ne peut être visé que par un seul saboteur, réussi ou non, et une seule embuscade à la fois.",
     ],
   },
 ];

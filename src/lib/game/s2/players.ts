@@ -115,7 +115,7 @@ export function sabotageBlocker(me: S2State | undefined, target: S2State | undef
   if (!me?.castle) return "Pose d'abord ton château.";
   const why = interceptBlocker(target, v, rel, now);
   if (why && !(v?.hit && why.includes("déjà été attaqué"))) return why;
-  if (v?.sabotaged) return "Ce convoi a déjà été saboté.";
+  if (v?.sabotaged) return "Ce convoi a déjà été visé par un saboteur : son escorte veille.";
   if (me.gold < price) return `Il faut ${price.toLocaleString("fr-FR")} 🪙 pour payer le saboteur.`;
   return null;
 }
