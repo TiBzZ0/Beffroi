@@ -709,7 +709,7 @@ export const CHANGELOG: ChangeEntry[] = [
       "🗡️ Une embuscade ennemie repérée peut être délogée (bouton « Déloger » dans la liste des embuscades) : vaincue, elle se lève aussitôt ; sinon elle reste, affaiblie.",
       "⚔️ Les expéditions des seigneurs se voient sur la carte (trait pointillé) et dans la liste « Expéditions des seigneurs », avec l'heure de leur retour au fief.",
       "⚠️ La section « Route et escorte » d'une concession signale les embuscades et les camps de bandits repérés sur sa route.",
-      "🗼 Tour de site : nouveau bâtiment de concession (5 niveaux). Chaque niveau donne +1 case de vue autour du site et 100 arbalétriers qui gardent le stock contre le pillage, avec l'escorte.",
+      "🗼 Tour de site : nouveau bâtiment de concession (5 niveaux). Chaque niveau donne +1 case de vue autour du site et 200 arbalétriers qui gardent le stock contre le pillage, avec l'escorte. Elle se bâtit dès le niveau 1 de la concession.",
       "🛤️ Lignée : nouvelle branche du Marchand (Comptoirs, Marchandage, Guetteurs, Convoyeurs, Guides, Grand marchand). L'Architecte royal protège maintenant un convoi par jour : le premier qui devait perdre une part de sa charge arrive intact.",
       "📅 Trois nouvelles quêtes du jour : intercepter, saboter ou guetter un convoi ; remplir un contrat ou attaquer un camp ; affecter une escorte, louer des mercenaires ou proposer une route commerciale.",
       "⚔️ Mercenaires : ils peuvent aussi marcher avec ton armée (choix « avec ton armée ») et se joignent à tes pillages, interceptions, camps, contrats et délogements pendant 12 h.",

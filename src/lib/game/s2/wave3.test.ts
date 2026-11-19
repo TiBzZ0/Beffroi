@@ -31,11 +31,11 @@ describe("Vague C : tours de site", () => {
   it("les gardes de la tour se joignent à l'escorte, et leurs pertes ne touchent pas l'escorte", () => {
     expect(withTower(null, 0)).toBeNull();
     const alone = withTower(null, 2)!;
-    expect((alone.army as Record<string, number>).arbaletrier).toBe(200);
+    expect((alone.army as Record<string, number>).arbaletrier).toBe(400);
     const mixed = withTower({ army: { arbaletrier: 300 } as never, levels: { arbaletrier: 2 } }, 1)!;
-    expect((mixed.army as Record<string, number>).arbaletrier).toBe(400);
+    expect((mixed.army as Record<string, number>).arbaletrier).toBe(500);
     const dead = lossesBeyondTower({ arbaletrier: 100 } as never, mixed, 1) as Record<string, number>;
-    expect(dead.arbaletrier).toBe(75);
+    expect(dead.arbaletrier).toBe(60);
   });
 });
 

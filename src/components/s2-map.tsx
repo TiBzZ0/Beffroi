@@ -649,7 +649,7 @@ function Occupants({ world, live, siteId, busy, act }: { world: S2WorldView; liv
         {list.map((o) => (
           <li key={o.conc}>
             <span>
-              {o.name} · niv. {o.level} · {o.escort ? "🛡️ escortée" : "sans escorte"}{o.tower ? ` · 🗼 tour niv. ${o.tower} (${o.tower * 100} arbalétriers)` : ""}
+              {o.name} · niv. {o.level} · {o.escort ? "🛡️ escortée" : "sans escorte"}{o.tower ? ` · 🗼 tour niv. ${o.tower} (${o.tower * 200} arbalétriers)` : ""}
             </span>
             {o.why ? (
               <span className="row-desc"> · {o.why}</span>

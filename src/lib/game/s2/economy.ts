@@ -131,7 +131,7 @@ export const CONC_BUILDINGS: Record<ConcBuildingId, { name: string; icon: string
   atelier: { name: "Atelier", icon: "⚒️", per: 0.08, text: "+8 % de production de cette concession par niveau" },
   ecurie: { name: "Écurie", icon: "🐴", per: 0.1, text: "+10 % de charge des convois de cette concession par niveau" },
   grenier: { name: "Grenier", icon: "🌾", per: 0.25, text: "+25 % de stock local de cette concession par niveau" },
-  tour: { name: "Tour de site", icon: "🗼", per: 1, text: "+1 case de vue autour du site, et 100 arbalétriers qui gardent le stock contre le pillage, par niveau (5 au plus)" },
+  tour: { name: "Tour de site", icon: "🗼", per: 1, text: "+1 case de vue autour du site, et 200 arbalétriers qui gardent le stock contre le pillage, par niveau (5 au plus, dès le niveau 1 de la concession)" },
 };
 export const CONC_BUILDING_IDS = Object.keys(CONC_BUILDINGS) as ConcBuildingId[];
 export const CONC_BUILDING_MAX = 10;
@@ -656,7 +656,7 @@ export function concBuildBlocker(s: S2State, id: string, b: unknown, map: S2Map,
   const level = cbLevel(c, b as ConcBuildingId) + 1;
   if (level > concBuildingMax(b as ConcBuildingId)) return "Niveau maximal.";
   if (level > c.level) return `Monte d'abord la concession au niveau ${level}.`;
-  if (b !== "atelier" && c.level < TIERS[1].from) return `${CONC_BUILDINGS[b as ConcBuildingId].name} : à partir du palier Exploitation (niveau ${TIERS[1].from}).`;
+  if (b !== "atelier" && b !== "tour" && c.level < TIERS[1].from) return `${CONC_BUILDINGS[b as ConcBuildingId].name} : à partir du palier Exploitation (niveau ${TIERS[1].from}).`;
   if (concBuildingCost(level) > concessionBudget(c, map) + 1e-6) return "Réserve et stock de la concession insuffisants : envoie-lui des ressources.";
   return null;
 }

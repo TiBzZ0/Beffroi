@@ -52,9 +52,9 @@ export function convoyVisible(points: WatchPoint[], range: number, at: Pos): boo
 // Tours de site (vague C)
 // ---------------------------------------------------------------------------
 
-/** Chaque niveau de tour : +1 case de vue autour du site, et 100 arbalétriers qui gardent le stock contre le pillage. */
+/** Chaque niveau de tour : +1 case de vue autour du site, et 200 arbalétriers qui gardent le stock contre le pillage. */
 export const TOWER_VISION = 1;
-export const TOWER_GUARDS = 100;
+export const TOWER_GUARDS = 200;
 /** Le camp qui défend une concession pillée : son escorte (et ses mercenaires), plus les gardes de sa tour. */
 export function withTower(side: Side | null, level: number): Side | null {
   if (level <= 0) return side;

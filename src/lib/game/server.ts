@@ -706,7 +706,7 @@ async function loadEntities(admin: SupabaseClient, seasonId: number, userId: str
   const holders = new Set(forts.map((f) => (f.holder as number | null) ?? null).filter((h): h is number => h !== null));
   for (const e of entities.values()) {
     if (e.allianceId === null || !holders.has(e.allianceId)) continue;
-    const held = forts.filter((f) => f.holder === e.allianceId).map((f) => Number(f.idx));
+    const held = forts.filter((f) => f.holder === e.allianceId).map((f) => Number(f.idx)).sort((a, b) => a - b);
     e.state = { ...e.state, fortress: held.includes(0), fortsHeld: held };
   }
   // Coup de pouce aux joueurs très distancés par le premier.
@@ -3875,6 +3875,7 @@ async function settleAmbushHit(
   const written = await writeStates(admin, seasonId, [{ e: owner, state: replace(healed, armySize(survivors) > 0 ? back : null) }, { e: foe, state: fState }], "ambush_hit", { target: foe.id, id: am.id, success: f.won });
   if (written === "conflict") return "conflict";
   await addChronicle(admin, seasonId, { kind: "raid", actor_id: owner.id, target_id: foe.id, details: { success: f.won, chance: f.chance, ambushHit: true, attackerLost: f.lost, defenderLost: f.foeLost } });
+  if (f.won) await grantRenown(admin, seasonId, owner, "intercept", `Embuscade de ${foe.name} délogée`);
   notify(admin, [foe.id], { title: f.won ? "🗡️ Embuscade délogée" : "🏹 Embuscade tenue", body: fText.slice(3), tag: "raid" });
   return "changed";
 }
