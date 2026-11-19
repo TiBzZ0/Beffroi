@@ -339,6 +339,34 @@ export function drawBelfry(c: CanvasRenderingContext2D, x: number, y: number, S:
   c.fill();
 }
 
+/** Camp de bandits : une tente rayée et un feu ; pâle tant qu'il n'est pas installé. */
+export function drawCamp(c: CanvasRenderingContext2D, x: number, y: number, S: number, dim = false) {
+  const w = S * 0.36;
+  c.globalAlpha = dim ? 0.45 : 1;
+  c.fillStyle = "#7a5230";
+  c.strokeStyle = "#1e1a16";
+  c.lineWidth = Math.max(1, S / 14);
+  c.beginPath();
+  c.moveTo(x - w, y + w * 0.7);
+  c.lineTo(x, y - w * 0.8);
+  c.lineTo(x + w, y + w * 0.7);
+  c.closePath();
+  c.fill();
+  c.stroke();
+  c.fillStyle = "#e0c070";
+  c.beginPath();
+  c.moveTo(x - w * 0.18, y + w * 0.7);
+  c.lineTo(x, y - w * 0.1);
+  c.lineTo(x + w * 0.18, y + w * 0.7);
+  c.closePath();
+  c.fill();
+  c.fillStyle = "#e2572b";
+  c.beginPath();
+  c.arc(x + w * 0.95, y + w * 0.6, Math.max(1.5, S * 0.08), 0, 7);
+  c.fill();
+  c.globalAlpha = 1;
+}
+
 export function drawFort(c: CanvasRenderingContext2D, x: number, y: number, S: number, dim = false) {
   const w = S * 0.42;
   c.globalAlpha = dim ? 0.45 : 1;
@@ -543,6 +571,18 @@ export function drawMap(c: CanvasRenderingContext2D, d: DrawInput) {
       c.stroke();
     }
     c.setLineDash([]);
+    // Routes commerciales actives : pointillés dorés jusqu'à l'autre bout.
+    c.strokeStyle = "#c9a35b";
+    c.setLineDash([S * 0.15, S * 0.25]);
+    for (const t of world.trades ?? []) {
+      if (!t.active) continue;
+      const [tx, ty] = mid(t.pos[0], t.pos[1]);
+      c.beginPath();
+      c.moveTo(cx0, cy0);
+      c.lineTo(tx, ty);
+      c.stroke();
+    }
+    c.setLineDash([]);
   }
   // Noms des régions.
   c.textAlign = "center";
@@ -594,13 +634,20 @@ export function drawMap(c: CanvasRenderingContext2D, d: DrawInput) {
       const x = ax + (zx - ax) * f;
       const y = ay + (zy - ay) * f;
       c.fillStyle = RES[cv.res];
-      c.strokeStyle = cv.mine ? "#8b1e1e" : "#1a1a1a";
-      c.lineWidth = cv.mine ? 2 : 1;
+      // Mes convois cerclés de rouge, ceux de l'alliance de bleu, les autres de noir (blanc s'ils peuvent être attaqués).
+      c.strokeStyle = cv.mine ? "#8b1e1e" : cv.ally ? "#2f6db3" : cv.why ? "#1a1a1a" : "#f5f0e1";
+      c.lineWidth = cv.mine || cv.ally || !cv.why ? 2 : 1;
       c.beginPath();
       c.arc(x, y, S * (cv.size === "grosse" ? 0.3 : cv.size === "moyenne" ? 0.22 : 0.16), 0, 7);
       c.fill();
       c.stroke();
     }
+  // Camps de bandits.
+  for (const k of world.camps ?? []) {
+    if (!visible(k.pos[0], k.pos[1])) continue;
+    const [px, py] = mid(k.pos[0], k.pos[1]);
+    drawCamp(c, px, py, S, k.from > d.now);
+  }
   // Coordonnées en bord de vue.
   c.fillStyle = "rgba(233,226,208,.85)";
   c.font = `${Math.max(9, Math.min(13, S * 0.55))}px ${BODY}`;

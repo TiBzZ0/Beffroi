@@ -19,7 +19,8 @@ export const MARKET_RATE = 1 / 3;
 /** Or en plus à chaque convoi arrivé : 3 % de sa charge, en valeur de référence. */
 export const CONVOY_GOLD = 0.03;
 /** Région désert : +10 % sur l'or des convois. */
-export const DESERT_GOLD_BONUS = 0.1;
+/** Désert : +10 % de butin sur les convois interceptés (S8). */
+export const DESERT_LOOT_BONUS = 0.1;
 
 /** REF(j) : production d'une concession typique d'un joueur actif au jour j, en valeur pierre par heure. */
 const REF_POINTS: [number, number][] = [[0, 1_000], [3, 4_500], [7, 6_500], [14, 9_000]];
@@ -168,9 +169,13 @@ export interface Convoy {
   from: Pos;
   to: Pos;
   /** Convoi parti vers le beffroi (sa charge compte comme un don à l'arrivée), ou du château vers la concession `conc` (sa réserve). */
-  dest?: "beffroi" | "concession";
+  dest?: "beffroi" | "concession" | "commerce";
   /** Vague B : charge déjà perdue en route (règle du tiers : jamais plus d'un tiers de la charge de départ). */
   lost?: number;
+  /** S8 : déjà attaqué par un joueur (une attaque de joueur au plus par convoi). */
+  hit?: boolean;
+  /** S8 : déjà saboté. */
+  sabotaged?: boolean;
 }
 /** Une ligne de la boîte de rapports ; `key` regroupe les lignes d'une même heure (patrouilles). */
 export interface S2Log {
@@ -219,6 +224,14 @@ export interface S2State {
   vassals?: Record<string, number>;
   /** Contrats déjà pris aujourd'hui. */
   contracts?: { day: number; taken: string[] };
+  /** S8 : routes commerciales proposées (château d'un autre joueur, ou forteresse `fort:<n>`), depuis `at`. */
+  trade?: { to: string; at: number }[];
+  /** Expéditions parties contre le joueur : le fief du seigneur garde une garnison réduite jusqu'à `back`. */
+  sent?: { lord: string; at: number; back: number; n: number }[];
+  /** Vague C : compagnies de mercenaires louées à un seigneur, affectées à l'escorte d'une concession. */
+  mercs?: { lord: string; unit: string; men: number; train: number; until: number; conc: string }[];
+  /** Vague C : hostilité retirée par les rivalités, par seigneur (30 points : sauf-conduit offert). */
+  rivalDrop?: Record<string, number>;
   /** Fixé par le serveur à chaque lecture, jamais lu de la base : qui est le joueur, et son alliance. */
   who?: { id: string; alliance: number | null };
   /** S10, Lignée (fixés à chaque calcul, jamais lus de la base) : Cave profonde, heures de stock local en plus. */
@@ -250,7 +263,7 @@ export interface S2Context {
   risk?: (st: S2State, v: Convoy) => number;
   /** Vague B : l'escorte de la concession défend contre les brigands ; vrai si elle les repousse. */
   guard?: (st: S2State, c: Concession, at: number) => boolean;
-  /** Vague B : convois en plus partis entre `from` et `to` (tribut des vassaux). */
+  /** Vague B : convois en plus partis entre `from` et `to` (tribut des vassaux, routes commerciales, fiefs annexés). */
   extra?: (st: S2State, from: number, to: number) => void;
 }
 
@@ -430,11 +443,15 @@ export function settleS2(s: S2State, ctx: S2Context, now: number): { s: S2State;
         st.conc = st.conc.map((c) => (c.id === v.conc ? { ...c, fund: (c.fund ?? 0) + v.load * VALUE[v.res] } : c));
         continue;
       }
+      if (v.dest === "commerce") {
+        // Route commerciale : le convoi ne porte rien, il rapporte de l'or à l'arrivée.
+        arrived.or += v.load;
+        continue;
+      }
       if (v.dest === "beffroi") arrived.beffroi += v.load * VALUE[v.res];
       else arrived[v.res] += v.load;
       produced += v.load * VALUE[v.res];
-      // Désert : les caravaniers connaissent les pistes, +10 % d'or par convoi arrivé.
-      arrived.or += (v.load * VALUE[v.res] * CONVOY_GOLD * (st.region === "desert" ? 1 + DESERT_GOLD_BONUS : 1)) / VALUE.or;
+      arrived.or += (v.load * VALUE[v.res] * CONVOY_GOLD) / VALUE.or;
     } else still.push(v);
   }
   st = { ...st, convoys: still, at: now, produced: st.produced + produced };
@@ -739,20 +756,32 @@ const RES: Resource[] = ["pierre", "fer", "or"];
 const REGION_IDS: RegionId[] = ["froid", "montagne", "plaine", "collines", "desert", "cote", "foret"];
 
 /** Vague B : hostilité, sauf-conduits, rancunes, expéditions et vassaux (clés limitées aux identifiants courts). */
-function cleanRelations(r: Record<string, unknown>): Pick<S2State, "host" | "safe" | "grudge" | "expAt" | "vassals" | "contracts"> {
-  const out: Pick<S2State, "host" | "safe" | "grudge" | "expAt" | "vassals" | "contracts"> = {};
+function cleanRelations(r: Record<string, unknown>): Pick<S2State, "host" | "safe" | "grudge" | "expAt" | "vassals" | "contracts" | "trade" | "sent" | "rivalDrop" | "mercs"> {
+  const out: Pick<S2State, "host" | "safe" | "grudge" | "expAt" | "vassals" | "contracts" | "trade" | "sent" | "rivalDrop" | "mercs"> = {};
   const rec = (v: unknown) => (v && typeof v === "object" && !Array.isArray(v) ? Object.entries(v as Record<string, unknown>).slice(0, 40) : []);
   const host = rec(r.host).flatMap(([k, v]) => {
     const x = (v ?? {}) as { v?: unknown; at?: unknown };
     return num(x.v) > 0 ? [[k, { v: Math.min(100, num(x.v)), at: num(x.at) }] as const] : [];
   });
   if (host.length) out.host = Object.fromEntries(host);
-  for (const key of ["safe", "expAt", "vassals"] as const) {
+  for (const key of ["safe", "expAt", "vassals", "rivalDrop"] as const) {
     const list = rec(r[key]).filter(([, v]) => num(v) > 0).map(([k, v]) => [k, num(v)] as const);
     if (list.length) out[key] = Object.fromEntries(list);
   }
   const k = r.contracts as { day?: unknown; taken?: unknown } | undefined;
   if (k && Number.isInteger(Number(k.day)) && Array.isArray(k.taken)) out.contracts = { day: Number(k.day), taken: (k.taken as unknown[]).map(String).slice(-10) };
+  if (Array.isArray(r.trade)) {
+    const t = (r.trade as { to?: unknown; at?: unknown }[]).filter((x) => x && typeof x.to === "string").slice(0, 6).map((x) => ({ to: String(x.to).slice(0, 64), at: num(x.at) }));
+    if (t.length) out.trade = t;
+  }
+  if (Array.isArray(r.mercs)) {
+    const t = (r.mercs as Record<string, unknown>[]).filter((x) => x && typeof x.lord === "string" && typeof x.unit === "string" && typeof x.conc === "string" && num(x.men) > 0).slice(0, 6).map((x) => ({ lord: String(x.lord), unit: String(x.unit), men: Math.floor(num(x.men)), train: num(x.train), until: num(x.until), conc: String(x.conc) }));
+    if (t.length) out.mercs = t;
+  }
+  if (Array.isArray(r.sent)) {
+    const t = (r.sent as { lord?: unknown; at?: unknown; back?: unknown; n?: unknown }[]).filter((x) => x && typeof x.lord === "string").slice(-10).map((x) => ({ lord: String(x.lord), at: num(x.at), back: num(x.back), n: Math.max(1, Math.floor(num(x.n, 1))) }));
+    if (t.length) out.sent = t;
+  }
   if (Array.isArray(r.grudge)) {
     const g = (r.grudge as { lord?: unknown; due?: unknown }[]).filter((x) => x && typeof x.lord === "string").slice(0, 10).map((x) => ({ lord: String(x.lord), due: num(x.due) }));
     if (g.length) out.grudge = g;
@@ -781,7 +810,7 @@ export function cleanS2(raw: unknown, now: number): S2State {
       .filter((v) => v && typeof v === "object" && RES.includes((v as Convoy).res))
       .map((v) => {
         const x = v as Record<string, unknown>;
-        return { conc: String(x.conc), res: x.res as Resource, load: num(x.load), depart: num(x.depart), arrive: num(x.arrive), from: pos(x.from) ?? [0, 0], to: pos(x.to) ?? [0, 0], ...(x.dest === "beffroi" || x.dest === "concession" ? { dest: x.dest } : {}), ...(num(x.lost) > 0 ? { lost: num(x.lost) } : {}) };
+        return { conc: String(x.conc), res: x.res as Resource, load: num(x.load), depart: num(x.depart), arrive: num(x.arrive), from: pos(x.from) ?? [0, 0], to: pos(x.to) ?? [0, 0], ...(x.dest === "beffroi" || x.dest === "concession" || x.dest === "commerce" ? { dest: x.dest } : {}), ...(num(x.lost) > 0 ? { lost: num(x.lost) } : {}), ...(x.hit === true ? { hit: true } : {}), ...(x.sabotaged === true ? { sabotaged: true } : {}) };
       }),
     bld: Object.fromEntries(BUILDING_IDS.map((id) => [id, Math.min(BUILDING_MAX, Math.floor(num(bld[id])))])) as Record<BuildingId, number>,
     works: (Array.isArray(r.works) ? r.works : [])

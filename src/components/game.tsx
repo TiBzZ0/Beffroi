@@ -2,13 +2,18 @@
 
 import { createContext, useContext, useEffect, useId, useRef, useState } from "react";
 import { setS2Map } from "@/lib/game/s2/rules";
-import { setLordNames, setVassals } from "@/lib/game/s2/convoys";
+import { setAnnexed, setCamps, setLordNames, setVassals } from "@/lib/game/s2/convoys";
+import { setTrades } from "@/lib/game/s2/players";
 import type { S2WorldView } from "@/lib/game/types";
 
 /** Vague B : suzerains et noms des seigneurs, pour que le calcul des routes du navigateur suive celui du serveur. */
-function syncLords(world: S2WorldView): void {
+function syncLords(world: S2WorldView, me: string): void {
   setVassals(Object.fromEntries(world.lords.filter((l) => l.vassal).map((l) => [l.id, { owner: l.vassal!.owner, alliance: l.vassal!.alliance, until: l.vassal!.until }])));
   setLordNames(Object.fromEntries(world.lords.map((l) => [l.id, l.name])));
+  // Mêmes registres que le serveur, pour l'aperçu : fiefs annexés, camps de bandits, mes routes commerciales.
+  setAnnexed(Object.fromEntries(world.lords.filter((l) => l.annexed).map((l) => [l.id, { alliance: l.annexed!.alliance, since: l.annexed!.since, members: l.annexed!.members }])));
+  setCamps((world.camps ?? []).map((c) => ({ id: c.id, pos: c.pos, from: c.from })));
+  setTrades({ [me]: (world.trades ?? []).filter((t) => t.active && t.since !== undefined).map((t) => ({ to: t.to, name: t.name, pos: t.pos, since: t.since! })) });
 }
 import { S2MapScreen } from "@/components/s2-map";
 import { placeOf, S2Domain, S2Lands, S2ResourceBar, type Place } from "@/components/s2-domain";
@@ -173,7 +178,7 @@ export function Game({ userId }: { userId: string }) {
   setS2Geometry(true);
   setIronArmy(true);
   setS2Map(snap.s2.map);
-  syncLords(snap.s2);
+  syncLords(snap.s2, snap.userId);
   const live: PlayerState = advance(snap.state, now, world);
   const here = placeOf(live.s2, place);
   const researchDone = tab !== "armee" && researchEnds.some((e) => e <= now && e > armySeenAt);
@@ -1629,11 +1634,11 @@ function clock(at: number): string {
 
 /** U1 : nom lisible d'une cible de marche ou d'espion. */
 function targetName(snap: GameSnapshot, id: string): string {
-  if (id === "fortress") return snap.fortress.name;
+  if (id === "fortress" || id.startsWith("fortress:")) return (snap.fortresses ?? [snap.fortress]).find((f) => (f.idx ?? 0) === (id === "fortress" ? 0 : Number(id.slice(9))))?.name ?? snap.fortress.name;
   if (id.startsWith("event:")) return snap.event?.kind === "colosse" ? "Colosse" : "Caravane";
   if (id.startsWith("mine:")) return "Filon";
   if (id.startsWith("treasure:")) return "Trésor";
-  if (id.startsWith("camp:")) return "Camp de bandits";
+  if (id.startsWith("camp:") || snap.s2?.camps?.some((k) => k.id === id)) return "Camp de bandits";
   if (id.startsWith("convoy:")) return "Convoi";
   if (id.startsWith("siege:")) return "Beffroi";
   if (id.startsWith("hall:")) return snap.map?.halls?.find((h) => `hall:${h.id}` === id)?.name ?? "Halle";
@@ -1662,7 +1667,7 @@ interface MoveRow {
   recall?: string;
 }
 
-const MARCH_ICON: Record<string, string> = { raid: "⚔️", reinforce: "🛡️", station: "🛡️", hall_station: "🛡️", fortress: "🏰", hall_siege: "🏛️", event: "🎪", pillage: "⛏️", contract: "📜" };
+const MARCH_ICON: Record<string, string> = { raid: "⚔️", reinforce: "🛡️", station: "🛡️", hall_station: "🛡️", fortress: "🏰", hall_siege: "🏛️", event: "🎪", pillage: "⛏️", contract: "📜", intercept: "🏇", camp: "🏕️" };
 
 /** U1 : tableau des mouvements, visible depuis tous les onglets. */
 export function Movements({ snap, live, now, run }: { snap: GameSnapshot; live: PlayerState; now: number; run: ReturnType<typeof useGame>["run"] }) {
@@ -1790,7 +1795,7 @@ export function Movements({ snap, live, now, run }: { snap: GameSnapshot; live: 
 function Spies({ snap, live, now, run }: { snap: GameSnapshot; live: PlayerState; now: number; run: ReturnType<typeof useGame>["run"] }) {
   const [busy, setBusy] = useState(false);
   const moles = (live.moles ?? []).filter((m) => m.until > now);
-  const nameOf = (key: string) => (key === "fortress" ? snap.fortress.name : key.startsWith("hall:") ? "une halle" : (snap.rivals.find((r) => r.id === key)?.name ?? "?"));
+  const nameOf = (key: string) => (key === "fortress" || key.startsWith("fortress:") ? ((snap.fortresses ?? []).find((f) => `fortress:${f.idx}` === key)?.name ?? snap.fortress.name) : key.startsWith("hall:") ? "une halle" : (snap.rivals.find((r) => r.id === key)?.name ?? "?"));
   const base = spyBase(live, worldFrom(snap.worksite), now);
   const purse = live.s2 ? live.s2.gold : live.stone;
   const coin = live.s2 ? "🪙" : "🪨";
@@ -2347,9 +2352,21 @@ function Wars({ snap, run, now }: { snap: GameSnapshot; run: ReturnType<typeof u
   );
 }
 
-/** La forteresse : la prendre, la garder. */
+/** Les forteresses (une en saison 1, quatre en saison 2) : les prendre, les garder. */
 function Fortress({ snap, live, now, run }: { snap: GameSnapshot; live: PlayerState; now: number; run: ReturnType<typeof useGame>["run"] }) {
-  const f = snap.fortress;
+  const list = snap.fortresses?.length ? snap.fortresses : [snap.fortress];
+  return (
+    <>
+      {list.map((f, i) => (
+        <FortressCard key={f.idx ?? 0} snap={snap} live={live} now={now} run={run} f={f} first={i === 0} many={list.length > 1} />
+      ))}
+    </>
+  );
+}
+
+function FortressCard({ snap, live, now, run, f, first, many }: { snap: GameSnapshot; live: PlayerState; now: number; run: ReturnType<typeof useGame>["run"]; f: GameSnapshot["fortress"]; first: boolean; many: boolean }) {
+  const idx = f.idx ?? 0;
+  const key = idx === 0 ? "fortress" : `fortress:${idx}`;
   const spyPrice = spyCost(live, worldFrom(snap.worksite), now);
   const intel = f.intelUntil !== null && f.intelUntil > now;
   const [busy, setBusy] = useState(false);
@@ -2365,10 +2382,12 @@ function Fortress({ snap, live, now, run }: { snap: GameSnapshot; live: PlayerSt
   const hasGarrison = Object.keys(f.myGarrison).length > 0;
   return (
     <>
-      <BlockHead
-        title="Forteresse"
-        info="La forteresse n'est défendue que par les troupes que les membres de l'alliance qui la tient y envoient. L'alliance qui la tient gagne +20 % de production."
-      />
+      {first && (
+        <BlockHead
+          title={many ? "Forteresses" : "Forteresse"}
+          info={many ? "Quatre forteresses aux points cardinaux. Chacune n'est défendue que par les troupes que les membres de l'alliance qui la tient y envoient. Tenir une forteresse donne +20 % de production à l'alliance (sans cumul entre forteresses), et ouvre une route commerciale depuis vos châteaux." : "La forteresse n'est défendue que par les troupes que les membres de l'alliance qui la tient y envoient. L'alliance qui la tient gagne +20 % de production."}
+        />
+      )}
       <div className="row">
         <div className="row-icon" aria-hidden>
           🏰
@@ -2382,11 +2401,11 @@ function Fortress({ snap, live, now, run }: { snap: GameSnapshot; live: PlayerSt
           <div className="row-desc army-line num">
             {intel ? `🕵️ ${armyIcons(f.army)} · ${duration(f.intelUntil! - now)}` : f.exact ? armyIcons(f.army) : `≈ ${armyIcons(f.army)}`}
           </div>
-          {!f.mine && !f.blocker && <TravelTo place="fortress" army={live.troops as Record<string, number>} />}
+          {!f.mine && !f.blocker && <TravelTo place="fortress" pos={f.pos} army={live.troops as Record<string, number>} />}
         </div>
         {!f.mine && (
           <div className="row-actions">
-            <Btn className="btn btn-primary" busy={busy} reason={f.blocker} onClick={() => act({ type: "fortress_attack" })}>
+            <Btn className="btn btn-primary" busy={busy} reason={f.blocker} onClick={() => act({ type: "fortress_attack", fort: idx })}>
               ⚔️ Siège
               <span className="cost num">
                 {f.exact ? "" : "~"}
@@ -2394,7 +2413,7 @@ function Fortress({ snap, live, now, run }: { snap: GameSnapshot; live: PlayerSt
               </span>
             </Btn>
             {!intel && (
-              <Btn busy={busy} reason={(live.s2 ? live.s2.gold : live.stone) < spyPrice ? "Pas assez pour payer l'espion." : null} onClick={() => act({ type: "spy", target: "fortress" })} title="L'espion part sur la route ; son rapport montre la garnison et les murs pendant 1 h. Il peut être repéré.">
+              <Btn busy={busy} reason={(live.s2 ? live.s2.gold : live.stone) < spyPrice ? "Pas assez pour payer l'espion." : null} onClick={() => act({ type: "spy", target: key })} title="L'espion part sur la route ; son rapport montre la garnison et les murs pendant 1 h. Il peut être repéré.">
                 🕵️ Espion
                 <span className="cost num">{formatNumber(spyPrice)} 🪨</span>
               </Btn>
@@ -2425,11 +2444,11 @@ function Fortress({ snap, live, now, run }: { snap: GameSnapshot; live: PlayerSt
                 ))}
               </select>
               <input className="input input-qty" type="number" min={1} value={qty} onChange={(e) => setQty(Math.max(1, Math.floor(Number(e.target.value) || 1)))} aria-label="Nombre" />
-              <TravelTo place="fortress" army={{ [chosen.id]: Math.min(qty, live.troops[chosen.id] ?? 0) }} reinforce />
+              <TravelTo place="fortress" pos={f.pos} army={{ [chosen.id]: Math.min(qty, live.troops[chosen.id] ?? 0) }} reinforce />
               <button
                 className="btn btn-primary"
                 disabled={busy}
-                onClick={() => act({ type: "fortress_station", unit: chosen.id, qty: Math.min(qty, live.troops[chosen.id] ?? 0) })}
+                onClick={() => act({ type: "fortress_station", unit: chosen.id, qty: Math.min(qty, live.troops[chosen.id] ?? 0), fort: idx })}
               >
                 Poster
               </button>
@@ -2440,7 +2459,7 @@ function Fortress({ snap, live, now, run }: { snap: GameSnapshot; live: PlayerSt
         </>
       )}
       {hasGarrison && (
-        <button className="btn" disabled={busy} onClick={() => act({ type: "fortress_recall" })}>
+        <button className="btn" disabled={busy} onClick={() => act({ type: "fortress_recall", fort: idx })}>
           ↩️ Rappeler ({armyIcons(f.myGarrison)})
         </button>
       )}

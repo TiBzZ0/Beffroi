@@ -673,4 +673,22 @@ export const CHANGELOG: ChangeEntry[] = [
       "📜 Contrats : la récompense dépend du seigneur (un duc paie deux fois plus qu'un baron) et du contrat (un camp de bandits paie plus qu'une escorte, et une interception plus encore). Une armée sans aucune chance ne peut plus partir.",
     ],
   },
+  {
+    id: 76,
+    date: "19 novembre",
+    minSeason: 2,
+    items: [
+      "🏇 Interception : la carte liste les convois des autres joueurs qui passent près de tes terres. Ton armée leur tend une embuscade au premier point qu'elle atteint avant eux, et se bat contre leur escorte. Butin : un tiers de la charge (+10 % pour un château du Désert), 2 renom (10 par jour). Un convoi ne subit qu'une attaque de joueur.",
+      "🕯️ Sabotage : un saboteur payé en or retarde un convoi de 15 min et en détruit 15 % (60 % de réussite, +10 % en Forêt).",
+      "🔭 Vision : tu vois les convois des autres à 5 cases de ton château et de tes concessions, 9 cases après « La tour de guet ».",
+      "🛤️ Routes commerciales : propose une route au château d'un autre joueur (ou à une forteresse de ton alliance). Ouverte quand il la propose aussi, elle envoie un convoi par heure qui rapporte de l'or selon sa longueur (+10 % en Côte). Trois routes au plus.",
+      "🏕️ Camps de bandits : trois camps apparaissent près des routes. Ils attaquent les convois qui passent à une case (15 %). Détruis-en un avec ton armée pour 1 h de fer ; un autre apparaît ailleurs 6 h plus tard.",
+      "⚔️ Les expéditions des seigneurs vident vraiment leur garnison le temps de l'aller-retour, et une expédition battue par ton escorte ne revient qu'avec la reformation (12 h).",
+      "🏰 Les quatre forteresses sont ouvertes (Nord, Est, Sud, Ouest). Chacune se prend et se garde à part ; leur bonus de production ne se cumule pas.",
+      "⚖️ Rivalités : chaque seigneur a au plus un rival voisin. Te fâcher avec l'un apaise l'autre, et 30 points apaisés t'offrent un sauf-conduit de 24 h chez lui.",
+      "🗡️ Mercenaires : un seigneur neutre ou ton vassal te loue une compagnie pour 12 h, qui escorte la concession de ton choix avec son propre entraînement.",
+      "👑 Chute : une alliance qui fait trois fois d'un même seigneur son vassal l'annexe jusqu'à la fin de la saison. Sa production est partagée entre ses membres et sa zone laisse passer leurs convois. Le battre le libère, et sa garnison ne se reforme qu'à moitié.",
+      "🏜️ Le désert donne désormais +10 % de butin sur les convois interceptés, à la place de l'or en plus sur chaque convoi arrivé.",
+    ],
+  },
 ];

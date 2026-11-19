@@ -36,7 +36,7 @@ const PAGES: { icon: string; title: string; text: string[] }[] = [
     text: [
       "Touche une case marquée d'un point blanc sur la carte : hors du tourbillon central, à deux cases au moins des sites, des seigneurs et des autres châteaux.",
       "Tu reçois une carrière proche, 1 000 pierre pour bâtir tout de suite et une compagnie de miliciens.",
-      "La région compte : ⛰️ Montagne +10 % sur les carrières, ⛏️ Collines +10 % sur les mines, ⚓ Côte +10 % d'or, 🌾 Plaine armées et convois 10 % plus rapides, 🌲 Forêt espions moins souvent repérés. ❄️ Froid (défense) et 🏜️ Désert (butin sur les convois) serviront quand les raids entre joueurs reviendront.",
+      "La région compte : ⛰️ Montagne +10 % sur les carrières, ⛏️ Collines +10 % sur les mines, ⚓ Côte +10 % d'or, 🌾 Plaine armées et convois 10 % plus rapides, 🌲 Forêt espions moins souvent repérés. ❄️ Froid +10 % de points de vie au combat, 🏜️ Désert +10 % de butin sur les convois interceptés.",
       "Reste près de plusieurs sites : tes convois feront moins de route (30 secondes par case).",
     ],
   },

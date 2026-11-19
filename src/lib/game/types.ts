@@ -276,8 +276,17 @@ export interface S2WorldView {
   castles: { id: string; name: string; pos: [number, number]; allianceId: number | null; me: boolean }[];
   /** Places prises sur chaque site par les autres (joueurs et seigneurs), par identifiant de site. */
   taken: Record<number, number>;
-  lords: { id: string; name: string; rank: Rank; pos: [number, number]; companies: number; home: number; patrol: UnitId; train: number; fief: number; reformAt: number; vassal?: { owner: string; alliance: number | null; until: number; name: string } }[];
-  convoys: { from: [number, number]; to: [number, number]; depart: number; arrive: number; res: Resource; size: "petite" | "moyenne" | "grosse"; mine: boolean }[];
+  lords: { id: string; name: string; rank: Rank; pos: [number, number]; companies: number; home: number; patrol: UnitId; train: number; fief: number; reformAt: number; vassal?: { owner: string; alliance: number | null; until: number; name: string }; annexed?: { alliance: number; name: string; since: number; members: number }; rival?: string; away?: number }[];
+  /** Mes convois et ceux de mon alliance, et ceux des autres qui passent à portée de mes sites (S8 : « La tour de guet »). */
+  convoys: { from: [number, number]; to: [number, number]; depart: number; arrive: number; res: Resource; size: "petite" | "moyenne" | "grosse"; mine: boolean; owner?: string; ownerName?: string; conc?: string; escort?: boolean; hit?: boolean; sabotaged?: boolean; ally?: boolean; why?: string }[];
+  /** Portée de vision des convois des autres, en cases. */
+  vision?: number;
+  /** Camps de bandits (présents, ou à venir avec leur heure d'apparition). */
+  camps?: { id: string; pos: [number, number]; from: number; train: number; loot: number }[];
+  /** Routes commerciales : les miennes (actives ou proposées) et celles qu'on me propose. */
+  trades?: { to: string; name: string; pos: [number, number]; active: boolean; mine: boolean; theirs: boolean; since?: number }[];
+  /** Les quatre forteresses (position, alliance qui la tient). */
+  forts?: { idx: number; name: string; pos: [number, number]; holder: number | null; holderName: string | null }[];
   /** Vague B : concessions des autres joueurs (pour le pillage), avec la raison d'un refus. */
   occupants?: { owner: string; name: string; conc: string; site: number; level: number; escort: boolean; why?: string }[];
 }
@@ -300,6 +309,8 @@ export interface GameSnapshot {
   alliances: AllianceSummary[];
   war: WarView | null;
   fortress: FortressView;
+  /** Saison 2 : les quatre forteresses (la première est aussi dans `fortress`). */
+  fortresses?: FortressView[];
   event: EventView | null;
   /** Mes titres gagnés à la saison précédente. */
   myTitles: string[];
@@ -387,11 +398,17 @@ export type GameAction =
   | { type: "rift"; op: "send" | "fight" | "return"; ids?: string[] }
   | { type: "captain"; op: "draw" | "pick" | "assign" | "relic" | "drop"; id?: string; company?: string | null; trait?: string; target?: string }
   | { type: "company"; op: "create" | "dissolve" | "retype" | "recruit" | "train" | "barracks" | "fort"; id?: string; unit?: string; qty?: number }
-  | { type: "s2"; op: "place" | "take" | "drop" | "upgrade" | "build" | "buy" | "exchange" | "set" | "supply" | "ship" | "cbuild" | "escort" | "safe"; x?: number; y?: number; site?: number; id?: string; building?: string; from?: string; to?: string; amount?: number; pace?: string; dest?: string; manual?: boolean; company?: string }
+  | { type: "s2"; op: "place" | "take" | "drop" | "upgrade" | "build" | "buy" | "exchange" | "set" | "supply" | "ship" | "cbuild" | "escort" | "safe" | "trade" | "merc"; x?: number; y?: number; site?: number; id?: string; building?: string; from?: string; to?: string; amount?: number; pace?: string; dest?: string; manual?: boolean; company?: string; on?: boolean }
   /** Vague B : piller une concession d'un autre joueur (l'armée part du château vers le site). */
   | { type: "pillage"; target: string; conc: string; troops?: Record<string, number> }
   /** Vague B : remplir un contrat d'un seigneur (l'armée part du château). */
   | { type: "contract"; id: string; troops?: Record<string, number> }
+  /** S8 : intercepter un convoi d'un autre joueur (identifié par sa concession et son départ). */
+  | { type: "intercept"; target: string; conc: string; depart: number; troops?: Record<string, number> }
+  /** S8 : saboter un convoi d'un autre joueur (un espion payé en or). */
+  | { type: "convoy_sabotage"; target: string; conc: string; depart: number }
+  /** Détruire un camp de bandits de la carte. */
+  | { type: "camp"; id: string; troops?: Record<string, number> }
   | { type: "contribute"; amount: number }
   | { type: "raid"; target: string; troops?: Record<string, number>; allies?: boolean }
   | { type: "spy"; target: string }
@@ -403,9 +420,9 @@ export type GameAction =
   | { type: "reinforce"; target: string; unit: string; qty: number }
   | { type: "recall"; host: string }
   | { type: "war_declare"; alliance: number }
-  | { type: "fortress_attack" }
-  | { type: "fortress_station"; unit: string; qty: number }
-  | { type: "fortress_recall" }
+  | { type: "fortress_attack"; fort?: number }
+  | { type: "fortress_station"; unit: string; qty: number; fort?: number }
+  | { type: "fortress_recall"; fort?: number }
   | { type: "event_attack"; troops?: Record<string, number> }
   | { type: "research"; id: string }
   | { type: "research_cancel"; endsAt: number }
@@ -475,6 +492,9 @@ export interface WarView {
 }
 
 export interface FortressView {
+  /** Saison 2 : 0 à 3 (Nord, Est, Sud, Ouest). */
+  idx?: number;
+  pos?: [number, number];
   name: string;
   holderId: number | null;
   holderName: string | null;

@@ -567,6 +567,31 @@ export let MAP_SIZE = 15;
 export type MapPos = readonly [number, number];
 export let BELFRY_POS: MapPos = [8, 8];
 export let FORTRESS_POS: MapPos = [8, 4];
+/** Saison 2 (S5) : quatre forteresses aux points cardinaux ; la saison 1 n'en a qu'une. */
+export const S2_FORTRESSES: { pos: MapPos; name: string }[] = [
+  { pos: [20, 13], name: "Forteresse du Nord" },
+  { pos: [27, 20], name: "Forteresse de l'Est" },
+  { pos: [20, 27], name: "Forteresse du Sud" },
+  { pos: [13, 20], name: "Forteresse de l'Ouest" },
+];
+export function fortressCount(): number {
+  return s2Geometry ? S2_FORTRESSES.length : 1;
+}
+export function fortressPos(i: number): MapPos {
+  return s2Geometry ? (S2_FORTRESSES[i]?.pos ?? S2_FORTRESSES[0].pos) : FORTRESS_POS;
+}
+export function fortressName(i: number): string {
+  return s2Geometry ? (S2_FORTRESSES[i]?.name ?? S2_FORTRESSES[0].name) : FORTRESS_NAME;
+}
+/** Une marche vers une forteresse vise « fortress » (la première) ou « fortress:<n> ». */
+export function fortressIdx(target: string): number {
+  if (target === "fortress") return 0;
+  const n = Number(target.slice(9));
+  return target.startsWith("fortress:") && Number.isInteger(n) && n >= 0 && n < fortressCount() ? n : -1;
+}
+export function fortressKey(i: number): string {
+  return i === 0 ? "fortress" : `fortress:${i}`;
+}
 /** Un joueur arrive à 2 cases au moins de tout lieu et à 5 cases au plus du centre. */
 export const MAP_MIN_GAP = 2;
 export const MAP_SPAWN_RADIUS = 5;

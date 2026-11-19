@@ -80,8 +80,13 @@ export function banditSide(seasonStart: number, at: number): Side {
   return { army: company("milicien"), levels: trainLevels(lordTrain("hobereau", seasonStart, at)) };
 }
 /** Expédition de rancune : de vraies compagnies de la garnison, une (hobereau, baron) ou deux (comte, duc). */
+export function expeditionCompanies(l: MapLord): number {
+  return l.rank === "comte" || l.rank === "duc" ? 2 : 1;
+}
+/** Compagnies d'une expédition battue par l'escorte : elles ne reviennent qu'avec la reformation (12 h). */
+export const EXPEDITION_REFORM_MS = 12 * H;
 export function expeditionSide(l: MapLord, seasonStart: number, at: number): Side {
-  const n = l.rank === "comte" || l.rank === "duc" ? 2 : 1;
+  const n = expeditionCompanies(l);
   const army: Record<string, number> = {};
   for (const u of garrisonUnits(l.id, l.rank, l.companies).slice(0, n)) army[u] = (army[u] ?? 0) + COMPANY_CAP[u];
   return { army: army as Army, levels: trainLevels(lordTrain(l.rank, seasonStart, at)) };
@@ -189,6 +194,42 @@ export function addHostility(s: S2State, map: S2Map, lord: MapLord, amount: numb
   if (amount > 0 && hostilityLevel(before) >= 3) {
     for (const other of map.lords) if (other.id !== lord.id && cheb(other.pos, lord.pos) <= HOSTILITY_SPREAD_RADIUS) set(other, (amount / 2) * HOSTILITY_RANK[other.rank]);
   }
+  // Vague C : le rival se réjouit. Son hostilité baisse d'autant ; à 30 points baissés, il offre un sauf-conduit de 24 h.
+  const rival = amount > 0 ? rivalOf(map, lord.id) : undefined;
+  if (rival) {
+    const drop = Math.min(d, hostilityAt(s, rival.id, t));
+    if (drop > 0) set(rival, -drop);
+    const total = (s.rivalDrop?.[rival.id] ?? 0) + drop;
+    const rivalDrop = { ...(s.rivalDrop ?? {}) };
+    if (total >= RIVAL_GIFT_AT) {
+      delete rivalDrop[rival.id];
+      s.safe = { ...(s.safe ?? {}), [rival.id]: Math.max(s.safe?.[rival.id] ?? 0, t + RIVAL_SAFE_MS) };
+    } else if (total > 0) rivalDrop[rival.id] = total;
+    s.rivalDrop = rivalDrop;
+  }
+}
+
+/** Vague C : rivalités. Paires de seigneurs voisins (8 cases au plus), un rival au plus par seigneur. */
+export const RIVAL_RADIUS = 8;
+export const RIVAL_GIFT_AT = 30;
+export const RIVAL_SAFE_MS = 24 * H;
+const rivalCache = new WeakMap<S2Map, Map<string, MapLord>>();
+export function rivalOf(map: S2Map, lordId: string): MapLord | undefined {
+  let pairs = rivalCache.get(map);
+  if (!pairs) {
+    pairs = new Map();
+    // Les paires les plus proches d'abord ; à distance égale, l'ordre des identifiants (même tirage partout).
+    const cand: { a: MapLord; b: MapLord; d: number }[] = [];
+    for (const a of map.lords) for (const b of map.lords) if (a.id < b.id && cheb(a.pos, b.pos) <= RIVAL_RADIUS) cand.push({ a, b, d: cheb(a.pos, b.pos) });
+    cand.sort((x, y) => x.d - y.d || (x.a.id + x.b.id).localeCompare(y.a.id + y.b.id));
+    for (const { a, b } of cand) {
+      if (pairs.has(a.id) || pairs.has(b.id)) continue;
+      pairs.set(a.id, b);
+      pairs.set(b.id, a);
+    }
+    rivalCache.set(map, pairs);
+  }
+  return pairs.get(lordId);
 }
 /** Version pure de `addHostility`. */
 export function withHostility(s: S2State, map: S2Map, lord: MapLord, amount: number, t: number): S2State {
@@ -270,6 +311,22 @@ export function setVassals(v: Record<string, Vassal>): void {
   vassalOf = v;
 }
 
+/** Vague C : seigneurs annexés par une alliance (chute), avec le nombre de ses membres pour partager la production. */
+export interface Annexed {
+  alliance: number;
+  since: number;
+  members: number;
+}
+let annexedBy: Record<string, Annexed> = {};
+export function setAnnexed(a: Record<string, Annexed>): void {
+  annexedBy = a;
+}
+export function annexedOf(lordId: string): Annexed | undefined {
+  return annexedBy[lordId];
+}
+/** Chute : une alliance qui fait trois fois d'un même seigneur son vassal l'annexe jusqu'à la fin de la saison. */
+export const ANNEX_AFTER = 3;
+
 // ---------------------------------------------------------------------------
 // Ce qui arrive à un convoi en route
 // ---------------------------------------------------------------------------
@@ -279,14 +336,18 @@ export interface RouteContext {
   seasonStart: number;
   stagesDone: number;
   /** Escorte de la concession (état courant), ou null. */
-  escort: (concId: string) => Side | null;
+  escort: (concId: string, at?: number) => Side | null;
   /** Pertes de l'escorte d'une concession (morts, et blessés qui rentrent au château). */
   hurt: (concId: string, lost: Army, won: boolean, at: number) => void;
+  /** Durée de marche d'une expédition de seigneur (par défaut 10 min par case). */
+  march?: (from: Pos, to: Pos) => number;
 }
 
 const fmt = (n: number) => Math.round(n).toLocaleString("fr-FR");
 const siteName = (map: S2Map, st: S2State, v: Convoy) => {
-  if (v.conc.startsWith("vassal:")) return `du tribut de ${v.conc.slice(7)}`;
+  if (v.conc.startsWith("vassal:")) return `du tribut de ${lordName({ id: v.conc.slice(7) })}`;
+  if (v.conc.startsWith("annex:")) return `du fief de ${lordName({ id: v.conc.slice(6) })}`;
+  if (v.conc.startsWith("trade:")) return "de commerce";
   const c = st.conc.find((x) => x.id === v.conc);
   const site = c ? map.sites[c.site] : undefined;
   return site ? `de ${site.name || site.type}` : "";
@@ -294,6 +355,8 @@ const siteName = (map: S2Map, st: S2State, v: Convoy) => {
 
 /** Passage libre dans la zone d'un seigneur : vassal du joueur ou de son alliance, ou sauf-conduit. */
 export function freePass(st: S2State, lordId: string, t: number): boolean {
+  const a = annexedBy[lordId];
+  if (a && a.since <= t && st.who?.alliance !== null && st.who?.alliance === a.alliance) return true;
   const v = vassalOf[lordId];
   if (v && v.until > t && st.who && (v.owner === st.who.id || (v.alliance !== null && v.alliance === st.who.alliance))) return true;
   if ((st.vassals?.[lordId] ?? 0) > t && (!v || v.owner === st.who?.id)) return true;
@@ -326,7 +389,7 @@ export function convoyRisk(st: S2State, v: Convoy, rc: RouteContext): number {
     const chance = Math.min(PATROL_CHANCE_MAX, PATROL_CHANCE[lord.rank] * lv.chance);
     const key = `p:${v.conc}:${v.depart}:${lord.id}`;
     if (rollAt(key, 0) >= chance) continue;
-    const fight = routeFight(rc.escort(v.conc), patrolSide(lord, rc.seasonStart, at), key);
+    const fight = routeFight(rc.escort(v.conc, at), patrolSide(lord, rc.seasonStart, at), key);
     if (armySize(fight.lost) > 0) rc.hurt(v.conc, fight.lost, fight.won, at);
     const taken = fight.won ? 0 : lose();
     const name = lordName(lord);
@@ -336,6 +399,19 @@ export function convoyRisk(st: S2State, v: Convoy, rc: RouteContext): number {
       amount: taken,
       render: (sum, n) => `🛡️ ${n > 1 ? `${n} convois attaqués` : `${what} attaqué`} par les patrouilles de ${name} : ${sum > 0 ? `−${fmt(sum)} ${RESOURCE_ICON[res]}` : "repoussées par l'escorte"}.`,
     });
+    if (lost >= cap - 1e-9) return lost;
+  }
+  // Camps de bandits à une case de la route : 15 % d'attaque par camp.
+  const cells = line(v.from, v.to);
+  for (const camp of camps) {
+    const i = cells.findIndex((c) => cheb(c, camp.pos) <= CAMP_REACH);
+    if (i < 0) continue;
+    const at = Math.round(v.depart + (cells.length > 1 ? i / (cells.length - 1) : 0) * span);
+    if (!campActive(camp, at) || rollAt(`camp:${camp.id}:${v.conc}:${v.depart}`, 0) >= CAMP_CHANCE) continue;
+    const fight = routeFight(rc.escort(v.conc, at), campSide(camp, at), `cf:${camp.id}:${v.conc}:${v.depart}`);
+    if (armySize(fight.lost) > 0) rc.hurt(v.conc, fight.lost, fight.won, at);
+    const taken = fight.won ? 0 : lose();
+    pushLog(st, at, `🏕️ ${what} : attaqué par les bandits d'un camp ${fight.won ? "et défendu par l'escorte" : `, −${fmt(taken)} ${RESOURCE_ICON[res]}`}.`.replace(" ,", ","), { cat: "combats" });
     if (lost >= cap - 1e-9) return lost;
   }
   // Rancune échue, ou expédition régulière d'un seigneur hostile.
@@ -357,8 +433,13 @@ export function convoyRisk(st: S2State, v: Convoy, rc: RouteContext): number {
   if (foe) {
     st.expAt = { ...(st.expAt ?? {}), [foe.id]: v.arrive };
     const key = `x:${v.conc}:${v.depart}:${foe.id}`;
-    const fight = routeFight(rc.escort(v.conc), expeditionSide(foe, rc.seasonStart, v.arrive), key);
+    const side = expeditionSide(foe, rc.seasonStart, v.arrive);
+    const fight = routeFight(rc.escort(v.conc, v.arrive), side, key);
     if (armySize(fight.lost) > 0) rc.hurt(v.conc, fight.lost, fight.won, v.arrive);
+    // Le fief garde une garnison réduite le temps de l'aller-retour ; battues par l'escorte, ses compagnies attendent la reformation.
+    const trip = rc.march ? rc.march(foe.pos, v.to) : cheb(foe.pos, v.to) * 10 * 60_000;
+    const n = expeditionCompanies(foe);
+    st.sent = [...(st.sent ?? []).filter((x) => x.back > v.arrive - DAY), { lord: foe.id, at: v.arrive - trip, back: fight.won ? v.arrive + EXPEDITION_REFORM_MS : v.arrive + trip, n }].slice(-10);
     const taken = fight.won ? 0 : lose();
     pushLog(st, v.arrive, `⚔️ ${what} : expédition de ${lordName(foe)} ${fight.won ? "repoussée par l'escorte" : `, −${fmt(taken)} ${RESOURCE_ICON[res]}`}.`.replace(" ,", ","), { cat: "combats" });
   }
@@ -368,7 +449,7 @@ export function convoyRisk(st: S2State, v: Convoy, rc: RouteContext): number {
 /** Brigands sur un stock plein : l'escorte de la concession défend comme contre une patrouille de hobereau. */
 export function banditGuard(st: S2State, c: Concession, at: number, rc: RouteContext): boolean {
   const key = `b:${c.id}:${at}`;
-  const fight = routeFight(rc.escort(c.id), banditSide(rc.seasonStart, at), key);
+  const fight = routeFight(rc.escort(c.id, at), banditSide(rc.seasonStart, at), key);
   if (armySize(fight.lost) > 0) rc.hurt(c.id, fight.lost, fight.won, at);
   return fight.won;
 }
@@ -394,6 +475,90 @@ export function vassalConvoys(st: S2State, map: S2Map, seasonStart: number, from
       }
     }
   }
+}
+
+/** Vague C : un fief annexé partage toute sa production entre les membres de l'alliance, en convois horaires. */
+export function annexConvoys(st: S2State, map: S2Map, seasonStart: number, from: number, to: number, travel: (a: Pos, b: Pos) => number): void {
+  if (!st.castle || st.who?.alliance === null || st.who?.alliance === undefined) return;
+  for (const lord of map.lords) {
+    const a = annexedBy[lord.id];
+    if (!a || a.alliance !== st.who.alliance) continue;
+    for (let h = Math.ceil(Math.max(from, a.since) / H) * H; h <= to; h += H) {
+      if (h <= from) continue;
+      const day = Math.max(0, (h - seasonStart) / DAY);
+      const byRes: Partial<Record<Resource, number>> = {};
+      for (const siteId of lord.conc) {
+        const res = map.sites[siteId]?.type ?? "pierre";
+        byRes[res] = (byRes[res] ?? 0) + REF(day) / VALUE[res] / Math.max(1, a.members);
+      }
+      for (const [res, load] of Object.entries(byRes) as [Resource, number][]) st.convoys.push({ conc: `annex:${lord.id}`, res, load, depart: h, arrive: h + travel(lord.pos, st.castle), from: lord.pos, to: st.castle });
+    }
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Camps de bandits sur la carte
+// ---------------------------------------------------------------------------
+
+/** Trois camps à la fois, à 3 cases au plus d'une route active ; un camp détruit réapparaît ailleurs 6 h plus tard. */
+export const CAMP_COUNT = 3;
+export const CAMP_CHANCE = 0.15;
+export const CAMP_REACH = 1;
+export const CAMP_SPAWN_RANGE = 3;
+export const CAMP_RESPAWN_MS = 6 * H;
+/** Entraînement de la garnison : 0, +1 tous les 4 jours depuis l'apparition du camp. */
+export const CAMP_TRAIN_EVERY_MS = 4 * DAY;
+/** Butin : 1 h × REF(j) en fer. */
+export const CAMP_IRON_HOURS = 1;
+
+export interface Camp {
+  id: string;
+  pos: Pos;
+  /** Apparition (le camp n'attaque pas avant). */
+  from: number;
+  /** Destruction, s'il a été détruit. */
+  until?: number;
+}
+let camps: Camp[] = [];
+export function setCamps(c: Camp[]): void {
+  camps = c;
+}
+export function campsList(): Camp[] {
+  return camps;
+}
+export function campActive(c: Camp, t: number): boolean {
+  return c.from <= t && (c.until === undefined || t < c.until);
+}
+export function campTrain(c: Camp, t: number): number {
+  return Math.floor(Math.max(0, t - c.from) / CAMP_TRAIN_EVERY_MS);
+}
+export function campSide(c: Camp, t: number): Side {
+  return { army: company("milicien"), levels: trainLevels(campTrain(c, t)) };
+}
+export function campLoot(seasonStart: number, t: number): number {
+  return Math.round((CAMP_IRON_HOURS * REF(Math.max(0, (t - seasonStart) / DAY))) / VALUE.fer);
+}
+
+/** Une case libre à 3 cases au plus d'une des routes, hors du centre et loin des sites, seigneurs, châteaux et camps. */
+export function campSpot(map: S2Map, routes: { from: Pos; to: Pos }[], taken: Pos[], seed: string): Pos | null {
+  const size = 41;
+  const center: Pos = [20, 20];
+  const busy = [...map.sites.map((x) => x.pos), ...map.lords.map((l) => l.pos), ...taken];
+  for (let k = 0; k < 60; k++) {
+    const r = (i: number) => rollAt(`${seed}:${k}:${i}`, 0);
+    let p: Pos;
+    if (routes.length > 0) {
+      const route = routes[Math.floor(r(0) * routes.length)];
+      const cells = line(route.from, route.to);
+      const c = cells[Math.floor(r(1) * cells.length)];
+      p = [c[0] + Math.floor(r(2) * (2 * CAMP_SPAWN_RANGE + 1)) - CAMP_SPAWN_RANGE, c[1] + Math.floor(r(3) * (2 * CAMP_SPAWN_RANGE + 1)) - CAMP_SPAWN_RANGE];
+    } else p = [Math.floor(r(2) * size), Math.floor(r(3) * size)];
+    if (p[0] < 0 || p[1] < 0 || p[0] >= size || p[1] >= size) continue;
+    if (cheb(p, center) <= 7) continue;
+    if (busy.some((b) => cheb(b, p) <= 1)) continue;
+    return p;
+  }
+  return null;
 }
 
 /** Nom d'un seigneur pour les rapports (renseigné par le serveur et le navigateur). */

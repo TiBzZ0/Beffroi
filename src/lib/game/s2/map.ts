@@ -19,15 +19,15 @@ export const S2_RIFTS: { id: "normale" | "changeante" | "abyssale"; pos: Pos; na
   { id: "abyssale", pos: [18, 21], name: "Faille abyssale" },
 ];
 export const S2_FORTRESSES: Pos[] = [[20, 13], [27, 20], [20, 27], [13, 20]];
-/** Vague A : une seule forteresse (au nord) ; les trois autres arrivent en vague B. */
-export const S2_FORTRESSES_OPEN = 1;
+/** Les quatre forteresses sont ouvertes (vague 2). */
+export const S2_FORTRESSES_OPEN = 4;
 
 export const REGIONS: { id: RegionId; name: string; icon: string; bonus: string }[] = [
   { id: "froid", name: "Froid", icon: "❄️", bonus: "+10 % de points de vie pour tes troupes au combat" },
   { id: "montagne", name: "Montagne", icon: "⛰️", bonus: "+10 % de production des carrières" },
   { id: "plaine", name: "Plaine", icon: "🌾", bonus: "+10 % de vitesse des armées et des convois" },
   { id: "collines", name: "Collines", icon: "⛏️", bonus: "+10 % de production des mines" },
-  { id: "desert", name: "Désert", icon: "🏜️", bonus: "+10 % d'or sur chaque convoi arrivé" },
+  { id: "desert", name: "Désert", icon: "🏜️", bonus: "+10 % de butin sur les convois interceptés" },
   { id: "cote", name: "Côte", icon: "⚓", bonus: "+10 % d'or des marchés et des routes commerciales" },
   { id: "foret", name: "Forêt", icon: "🌲", bonus: "espions, saboteurs et taupes 10 % moins souvent repérés" },
 ];

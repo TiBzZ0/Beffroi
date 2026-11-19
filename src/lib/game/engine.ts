@@ -124,11 +124,12 @@ import { armySize, armyValue, battle, cleanArmy, type Army, type BattleOptions, 
 import { settleRift, type RiftState } from "./rift";
 import { armyBoost, hasTrait, type Captain, type Relic, type TraitId } from "./captains";
 import { BANDIT_GRACE_MS, convoyTravelMs, productionValue, settleS2, VALUE as S2_VALUE, type S2State } from "./s2/economy";
-import type { S2Map } from "./s2/map";
+import { cheb, type Pos, type S2Map } from "./s2/map";
 import type { LordS2State } from "./s2/lords";
 import { s2Map } from "./s2/rules";
-import { combatLevels, companyLevels, lockedMen, refRate, settleArmy, type ArmyWorks, type Company, type Escort, type RecruitOrder } from "./companies";
-import { banditGuard, convoyRisk, vassalConvoys, WATCH_ESCORT_BONUS, WATCH_STAGE, type RouteContext } from "./s2/convoys";
+import { combatLevels, companyLevels, lockedMen, trainLevels, refRate, settleArmy, type ArmyWorks, type Company, type Escort, type RecruitOrder } from "./companies";
+import { annexConvoys, banditGuard, convoyRisk, vassalConvoys, WATCH_ESCORT_BONUS, WATCH_STAGE, type RouteContext, type Side } from "./s2/convoys";
+import { tradeConvoys } from "./s2/players";
 import { lin, LIN_ATTACK, LIN_ATTACK_LOSSES, LIN_CAVE_SECONDS, LIN_DONOR_TIERS, LIN_FORT_DAMAGE, LIN_FORTUNE, LIN_PRODUCTION, LIN_PROTECTED, LIN_PVP_CAP, LIN_RESEARCH_SPEED, LIN_REVENGE_MS, LIN_SABOTAGE, LIN_SPEED, LIN_SPY_SPEED, LIN_WOUNDED, type LineageState } from "./lineage";
 
 export interface PlayerState {
@@ -349,9 +350,11 @@ export function extraSecured(state: PlayerState): number {
 export interface March {
   id: string;
   /** Raid, renforts envoyés à un allié, assaut ou garnison de la forteresse (T6). */
-  kind: "raid" | "reinforce" | "fortress" | "station" | "event" | "hall_station" | "hall_siege" | "pillage" | "contract";
-  /** Vague B : concession visée par un pillage. */
+  kind: "raid" | "reinforce" | "fortress" | "station" | "event" | "hall_station" | "hall_siege" | "pillage" | "contract" | "intercept" | "camp";
+  /** Vague B : concession visée par un pillage, ou dont on intercepte un convoi. */
   conc?: string;
+  /** S8 : départ du convoi intercepté (avec `conc`, il l'identifie). */
+  convoy?: number;
   /** Vague B : contrat d'un seigneur que l'armée part remplir. */
   contract?: { lord: string; kind: "escorte" | "interception" | "camp"; rival?: string; gold: number };
   /** H5 : aile visée par un assaut de halle. */
@@ -645,7 +648,12 @@ export function advance(state: PlayerState, now: number, world: WorldState, opts
     const perked = { ...state.s2, stockBonusHours: lin(state, "cave") ? 0.5 : 0, convoySpeed: lin(state, "charpentiers") ? 0.1 : 0, loadBonus: lin(state, "fondations") ? 0.25 : 0 };
     // Vague B : escortes, patrouilles, brigands et expéditions, réglés à l'arrivée des convois.
     const route = routeOf(state, map, stagesDoneAt(world, now));
-    const { s: s2, arrived } = settleS2(perked, { map, stageConcessions: stagesDoneAt(world, now) >= 1 ? 1 : 0, multiplier, breakpoints: events.filter((t) => t > state.s2!.at && t < now), belfryDone: stagesDoneAt(world, now) >= TOTAL_STAGES, banditsFrom: (state.seasonStart || 0) + BANDIT_GRACE_MS, risk: (st, v) => convoyRisk(st, v, route.rc), guard: (st, c, at) => banditGuard(st, c, at, route.rc), extra: (st, from, to) => vassalConvoys(st, map, state.seasonStart || 0, from, to, (a, b) => convoyTravelMs(st, a, b)) }, now);
+    const { s: s2, arrived } = settleS2(perked, { map, stageConcessions: stagesDoneAt(world, now) >= 1 ? 1 : 0, multiplier, breakpoints: events.filter((t) => t > state.s2!.at && t < now), belfryDone: stagesDoneAt(world, now) >= TOTAL_STAGES, banditsFrom: (state.seasonStart || 0) + BANDIT_GRACE_MS, risk: (st, v) => convoyRisk(st, v, route.rc), guard: (st, c, at) => banditGuard(st, c, at, route.rc), extra: (st, from, to) => {
+      const travel = (a: Pos, b: Pos) => convoyTravelMs(st, a, b);
+      vassalConvoys(st, map, state.seasonStart || 0, from, to, travel);
+      annexConvoys(st, map, state.seasonStart || 0, from, to, travel);
+      tradeConvoys(st, state.seasonStart || 0, from, to, travel);
+    } }, now);
     if (route.changed()) state = route.apply(state, now);
     const toBelfry = stagesDoneAt(world, now) < TOTAL_STAGES ? arrived.pierre * tithe : 0;
     const value = arrived.pierre + arrived.fer * 2 + arrived.or * 4;
@@ -682,33 +690,71 @@ export function advance(state: PlayerState, now: number, world: WorldState, opts
  */
 function routeOf(state: PlayerState, map: S2Map, stagesDone: number) {
   const escorts = (state.escorts ?? []).map((e) => ({ ...e }));
+  // Vague C : les mercenaires escortent aussi, avec leur propre entraînement (ils n'ont pas de blessés qui rentrent).
+  const mercs = (state.s2?.mercs ?? []).map((m) => ({ ...m }));
   const wounded: Army = {};
   let touched = false;
   const rc: RouteContext = {
     map,
     seasonStart: state.seasonStart || 0,
     stagesDone,
-    escort: (concId) => {
+    march: (a, b) => travelMs({ piquier: 1 } as Army, cheb(a, b)),
+    escort: (concId, at) => escortSide(state, escorts, mercs, concId, stagesDone, at ?? state.lastUpdate),
+    hurt: (concId, lost, won, at) => {
       const e = escorts.find((x) => x.conc === concId && x.men > 0);
       const c = e ? state.companies?.find((x) => x.id === e.company) : undefined;
-      if (!e || !c) return null;
-      return { army: { [c.unit]: e.men } as Army, levels: companyLevels(state, [c.id], { [c.id]: e.men }), boost: escortBoost(state, c.unit, stagesDone) };
-    },
-    hurt: (concId, lost, won) => {
-      const e = escorts.find((x) => x.conc === concId);
-      const c = e ? state.companies?.find((x) => x.id === e.company) : undefined;
-      if (!e || !c) return;
+      const m = mercs.find((x) => x.conc === concId && x.until > at && x.men > 0);
+      const own = e && c ? e.men : 0;
+      const hired = m ? m.men : 0;
+      if (own + hired <= 0) return;
       touched = true;
-      e.men = Math.max(0, e.men - ((lost as Record<string, number>)[c.unit] ?? 0));
-      const w = woundedOf(lost, won ? WOUNDED_WINNER : WOUNDED_DEFENDER_BEATEN);
-      for (const [id, n] of Object.entries(w) as [CombatantId, number][]) (wounded as Record<string, number>)[id] = ((wounded as Record<string, number>)[id] ?? 0) + n;
+      const dead = lost as Record<string, number>;
+      // Les pertes d'un même type se partagent au prorata entre la compagnie et les mercenaires.
+      const share = (unit: string, men: number, other: number) => (dead[unit] ?? 0) * (men / Math.max(1, men + other));
+      const ownDead = e && c ? Math.min(e.men, Math.round(share(c.unit, own, m && m.unit === c.unit ? hired : 0))) : 0;
+      const mercDead = m ? Math.min(m.men, Math.round(share(m.unit, hired, e && c && c.unit === m.unit ? own : 0))) : 0;
+      if (e && c) {
+        e.men = Math.max(0, e.men - ownDead);
+        const w = woundedOf({ [c.unit]: ownDead } as Army, won ? WOUNDED_WINNER : WOUNDED_DEFENDER_BEATEN);
+        for (const [id, n] of Object.entries(w) as [CombatantId, number][]) (wounded as Record<string, number>)[id] = ((wounded as Record<string, number>)[id] ?? 0) + n;
+      }
+      if (m) m.men = Math.max(0, m.men - mercDead);
     },
   };
   return {
     rc,
     changed: () => touched,
-    apply: (s: PlayerState, now: number): PlayerState => addWounded({ ...s, escorts: escorts.filter((e) => e.men > 0) }, wounded, now),
+    apply: (s: PlayerState, now: number): PlayerState => addWounded({ ...s, escorts: escorts.filter((e) => e.men > 0), ...(s.s2 ? { s2: { ...s.s2, mercs: mercs.filter((m) => m.men > 0 && m.until > now) } } : {}) }, wounded, now),
   };
+}
+
+/** Ce qui défend les convois d'une concession : sa compagnie d'escorte et ses mercenaires (chacun à son entraînement). */
+export function escortSide(state: PlayerState, escorts: Escort[], mercs: NonNullable<S2State["mercs"]>, concId: string, stagesDone: number, t: number): Side | null {
+  const e = escorts.find((x) => x.conc === concId && x.men > 0);
+  const c = e ? state.companies?.find((x) => x.id === e.company) : undefined;
+  const m = mercs.find((x) => x.conc === concId && x.men > 0 && x.until > t);
+  if (!(e && c) && !m) return null;
+  const army: Record<string, number> = {};
+  const levels: Record<string, number> = { ...(state.levels as Record<string, number>) };
+  if (e && c) {
+    army[c.unit] = e.men;
+    Object.assign(levels, { [c.unit]: (companyLevels(state, [c.id], { [c.id]: e.men }) as Record<string, number>)[c.unit] ?? 0 });
+  }
+  if (m) {
+    const mine = army[m.unit] ?? 0;
+    const theirs = (trainLevels(m.train) as Record<string, number>)[m.unit] ?? 0;
+    levels[m.unit] = mine > 0 ? ((levels[m.unit] ?? 0) * mine + theirs * m.men) / (mine + m.men) : theirs;
+    army[m.unit] = mine + m.men;
+  }
+  const units = Object.keys(army) as UnitId[];
+  const boost = units.reduce<Boost | undefined>((b, u) => mergeBoost(b, escortBoost(state, u, stagesDone)), undefined);
+  return { army: army as Army, levels: levels as Levels, boost };
+}
+
+function mergeBoost(a: Boost | undefined, b: Boost | undefined): Boost | undefined {
+  if (!a) return b;
+  if (!b) return a;
+  return { ...a, ...b, atk: { ...(a.atk ?? {}), ...(b.atk ?? {}) } } as Boost;
 }
 
 /** Bonus d'une escorte : région (froid), et « La tour de guet » (+15 % de dégâts). */

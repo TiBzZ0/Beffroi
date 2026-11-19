@@ -54,21 +54,35 @@ Comptes de test gardés (saison d'essais) : `essai_claude_a` et `essai_claude_b`
 
 Les rapports de route vont dans `S2State.log` (catégorie « combats »), regroupés par heure pour les patrouilles (`pushLog` avec une clé).
 
+## Vague 2, fin : ce qui est livré (19 novembre)
+
+| Chantier | Où |
+|---|---|
+| Interception (S8) : point d'embuscade, combat contre l'escorte, tiers de la charge, Désert +10 %, renom `intercept` (2, 10 par jour) | `s2/players.ts` (`interceptPoint`, `interceptTake`, `hitConvoy`), action `intercept`, marche `kind: "intercept"`, `settleIntercept` (server.ts) |
+| Sabotage : 1 h × REF / 4 en or, 60 % (+10 % Forêt, moins la vigilance de la cible), 15 % détruits, 15 min de retard | `sabotaged`, action `convoy_sabotage` (server.ts) |
+| Vision des convois : 5 cases autour du château et des concessions, +4 avec « La tour de guet » ; mes convois et ceux de l'alliance toujours | `visionRange`, `watchPoints`, filtre dans `s2WorldView` |
+| Routes commerciales : proposées des deux côtés (`S2State.trade`), ou vers une forteresse de l'alliance (`fort:<n>`) ; un convoi par heure (`dest: "commerce"`) | `setTradeOffer`, `activeTrades` (registre `setTrades`, rempli dans `syncRoutes`), `tradeConvoys` (`ctx.extra`) |
+| Camps de bandits : trois à la fois, près d'une route active, 15 % d'attaque à une case, 1 h × REF en fer, réapparition 6 h plus tard | `Camp`, `campSpot`, `campSide` (convoys.ts) ; stockés dans `season_maps.world` (`ensureCamps`, `destroyCamp`), action `camp`, `settleCamp` |
+| Expéditions qui vident la garnison | `S2State.sent` (écrit par `convoyRisk`), registre `setLordAway` (lords.ts), lu par `garrison` et la vue des seigneurs |
+| Quatre forteresses | Table `fortresses` avec `idx` (0 à 3), fonction SQL `apply_fortress_at`, `fortressCount/Pos/Name/Key/Idx` (config.ts), `Conflicts.forts`, actions `fortress_*` avec `fort` |
+| Rivalités (C) | `rivalOf` (paires voisines, 8 cases), dans `addHostility` ; `S2State.rivalDrop` |
+| Mercenaires (C) | `s2/mercs.ts`, op `merc`, `S2State.mercs`, `escortSide` (engine.ts) qui mêle escorte et mercenaires |
+| Chute (C) | `afterVassal` (lords.ts), `LordS2State.byAlliance/annexed/halved`, registre `setAnnexed`, `annexConvoys`, passage libre dans `freePass` |
+
+La migration `20261119100000_wave2_world.sql` ajoute `season_maps.world` et `world_version`, la colonne `fortresses.idx` (clé primaire `(season_id, idx)`) et la fonction `apply_fortress_at`. Elle ne supprime rien.
+
+Écarts avec la spécification : les mercenaires servent d'escorte de concession (ils ne partent pas en attaque) ; une expédition ne se voit pas sur la carte, seule la garnison réduite du seigneur se voit.
+
 ## Ce qui reste à faire
 
 | Chantier | Où le brancher |
 |---|---|
-| Interception et sabotage des convois des joueurs (S8) | Les convois des autres sont dans `S2WorldView.convoys` ; une marche `kind: "intercept"` réglée comme `settlePillage`, avec `Convoy.lost` pour la règle du tiers |
-| Routes commerciales | Un convoi sans charge entre deux châteaux, payé à l'arrivée dans `settleS2` |
-| Camps de bandits sur la carte | Les contrats les simulent ; un vrai camp serait une entité de la carte avec sa garnison |
-| Expéditions qui vident la garnison du seigneur | Aujourd'hui l'expédition se règle sans toucher au fief ; il faudrait enregistrer son départ dans `LordS2State` |
-| Vision des convois (« La tour de guet ») | Filtrer `S2WorldView.convoys` selon la distance aux sites du joueur |
-| Trois forteresses de plus | La forteresse est une ligne de la table `fortresses` et une position (`FORTRESS_POS`) : passer à une liste |
-| Rivalités, mercenaires, chute des seigneurs (vague C) | `LordS2State` et `contractsFor` |
+| Tours de site, nœuds de Lignée du commerce (vague C) | `S2State`, `lineage.ts` |
+| Expéditions visibles sur la carte | `S2State.sent` contient déjà leur départ et leur retour |
 
-## Régions : bonus provisoires
+## Régions
 
-Les régions froid et désert ont reçu un bonus simple, en attendant la vague 2. Froid donne +10 % de PV au combat (`regionBoost`, engine.ts). Désert donne +10 % d'or par convoi arrivé (`DESERT_GOLD_BONUS`, economy.ts). Leurs textes sont dans `REGIONS` (s2/map.ts).
+Froid donne +10 % de PV au combat (`regionBoost`, engine.ts). Désert donne +10 % de butin sur les convois interceptés (`DESERT_LOOT_BONUS`, economy.ts), comme le prévoit la spécification. Leurs textes sont dans `REGIONS` (s2/map.ts).
 
 ## Restes de la saison 1 encore en place
 

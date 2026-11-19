@@ -5,9 +5,11 @@
 import { useEffect, useRef, useState } from "react";
 import { guideDone, openTutorial } from "@/components/s2-tutorial";
 import { armySize, estimateChance } from "@/lib/game/battle";
-import { attackArmy, playerAttackOpts } from "@/lib/game/engine";
+import { armySpeedBonus, attackArmy, playerAttackOpts, travelMs } from "@/lib/game/engine";
+import { interceptPoint, sabotagePrice, tradePay, TRADE_MAX } from "@/lib/game/s2/players";
+import { mercBlocker, mercOffer, mercPrice, mercsNow } from "@/lib/game/s2/mercs";
 import { garrisonOfView } from "@/lib/game/s2/lords";
-import { CONTRACT_MIN_CHANCE, CONTRACT_TEXT, contractFoe, contractsFor, fightChance, HOSTILITY_LEVELS, hostilityAt, hostilityLevel, safeBlocker, safePrice } from "@/lib/game/s2/convoys";
+import { campSide, CONTRACT_MIN_CHANCE, CONTRACT_TEXT, contractFoe, contractsFor, fightChance, HOSTILITY_LEVELS, hostilityAt, hostilityLevel, safeBlocker, safePrice } from "@/lib/game/s2/convoys";
 import { dailyDay } from "@/lib/game/daily";
 import { drawBelfry, drawCastle, drawFort, drawLord, drawMap, drawRift, drawSite, toCell, type Layers, type View } from "@/components/s2-canvas";
 import { UNITS } from "@/lib/game/config";
@@ -15,10 +17,10 @@ import { formatNumber } from "@/lib/game/format";
 import type { PlayerState } from "@/lib/game/engine";
 import type { GameAction, GameSnapshot, S2WorldView } from "@/lib/game/types";
 import { tierOf, RESOURCE_ICON, RESOURCE_LABEL, takeConcessionBlocker } from "@/lib/game/s2/economy";
-import { castleBlocker, cheb, inCentre, RANKS, REGIONS, S2_SIZE, type Pos } from "@/lib/game/s2/map";
+import { castleBlocker, cheb, inCentre, RANKS, REGIONS, S2_FORTRESSES, S2_SIZE, type Pos } from "@/lib/game/s2/map";
 
 type Run = (action: GameAction) => Promise<unknown>;
-type Pick = { kind: "cell"; pos: Pos } | { kind: "site"; id: number } | { kind: "lord"; id: string } | { kind: "castle"; id: string };
+type Pick = { kind: "cell"; pos: Pos } | { kind: "site"; id: number } | { kind: "lord"; id: string } | { kind: "castle"; id: string } | { kind: "camp"; id: string } | { kind: "fort"; idx: number };
 
 const unitOf = (id: string) => UNITS.find((u) => u.id === id);
 /** Durée lisible : « 12 s », « 3 min 05 », « 1 h 20 ». */
@@ -54,7 +56,7 @@ export function S2MapScreen({ snap, live, now, run }: { snap: GameSnapshot; live
   const castlesOthers = world.castles.filter((c) => !c.me).map((c) => c.pos as Pos);
   const pickedPos: Pos | null = !s2 || !picked
     ? null
-    : picked.kind === "cell" ? picked.pos : picked.kind === "site" ? world.map.sites[picked.id]?.pos ?? null : picked.kind === "lord" ? world.lords.find((l) => l.id === picked.id)?.pos ?? null : world.castles.find((c) => c.id === picked.id)?.pos ?? null;
+    : picked.kind === "cell" ? picked.pos : picked.kind === "site" ? world.map.sites[picked.id]?.pos ?? null : picked.kind === "lord" ? world.lords.find((l) => l.id === picked.id)?.pos ?? null : picked.kind === "camp" ? (world.camps ?? []).find((k) => k.id === picked.id)?.pos ?? null : picked.kind === "fort" ? S2_FORTRESSES[picked.idx] ?? null : world.castles.find((c) => c.id === picked.id)?.pos ?? null;
 
   // Largeur du conteneur suivie en direct : la carte reste carrée et nette sur tous les écrans.
   useEffect(() => {
@@ -128,7 +130,9 @@ export function S2MapScreen({ snap, live, now, run }: { snap: GameSnapshot; live
     const site = world.map.sites.find((s) => s.pos[0] === p[0] && s.pos[1] === p[1]);
     const lord = world.lords.find((l) => l.pos[0] === p[0] && l.pos[1] === p[1]);
     const other = world.castles.find((c) => c.pos[0] === p[0] && c.pos[1] === p[1]);
-    setPicked(site ? { kind: "site", id: site.id } : lord ? { kind: "lord", id: lord.id } : other ? { kind: "castle", id: other.id } : { kind: "cell", pos: p });
+    const camp = (world.camps ?? []).find((k) => k.pos[0] === p[0] && k.pos[1] === p[1]);
+    const fort = S2_FORTRESSES.findIndex((f) => f[0] === p[0] && f[1] === p[1]);
+    setPicked(site ? { kind: "site", id: site.id } : lord ? { kind: "lord", id: lord.id } : other ? { kind: "castle", id: other.id } : camp ? { kind: "camp", id: camp.id } : fort >= 0 ? { kind: "fort", idx: fort } : { kind: "cell", pos: p });
   };
   const toggles: [keyof Layers, string][] = [
     ["sites", "Sites"],
@@ -241,7 +245,9 @@ function S2Panel({ snap, live, now, world, picked, busy, act, castlesOthers }: {
   const castle = s2.castle;
   if (!picked) return (
     <>
-      <p className="row-desc s2-panel">Touche une case, un site ou un seigneur pour le voir ici.</p>
+      <p className="row-desc s2-panel">Touche une case, un site, un seigneur, un camp ou une forteresse pour le voir ici.</p>
+      {castle && <ConvoysInSight snap={snap} live={live} now={now} busy={busy} act={act} />}
+      {castle && <TradeRoutes snap={snap} live={live} now={now} busy={busy} act={act} />}
       {castle && <Contracts snap={snap} live={live} now={now} busy={busy} act={act} />}
     </>
   );
@@ -297,16 +303,194 @@ function S2Panel({ snap, live, now, world, picked, busy, act, castlesOthers }: {
           Fief : environ {formatNumber(l.fief)} en valeur pierre (une victoire en emporte 60 %, plus du fer par compagnie battue).
           {l.reformAt > now ? ` La garnison se reforme : complète dans ${dur(l.reformAt - now)}.` : ""}
         </div>
+        {l.away ? <div className="row-desc">⚔️ {l.away} compagnie{l.away > 1 ? "s" : ""} parti{l.away > 1 ? "es" : "e"} en expédition : la garnison est réduite d&apos;autant.</div> : null}
+        {l.annexed && <div className="row-desc">👑 Annexé par {l.annexed.name} jusqu&apos;à la fin de la saison : sa production est partagée entre ses membres, sa zone laisse passer leurs convois. Battre sa garnison le libère.</div>}
+        {l.rival && <div className="row-desc">⚖️ Rival de {world.lords.find((x) => x.id === l.rival)?.name ?? "?"} : t&apos;en prendre à l&apos;un apaise l&apos;autre (à 30 points apaisés, sauf-conduit offert pour 24 h).</div>}
         <LordRelations snap={snap} live={live} lord={l} now={now} busy={busy} act={act} />
-        {castle && <LordAttack live={live} lord={l} busy={busy} attack={() => void act({ type: "raid", target: l.id })} />}
+        {castle && <Mercs snap={snap} live={live} lord={l} now={now} busy={busy} act={act} />}
+        {castle && !(l.annexed && snap.alliance && l.annexed.alliance === snap.alliance.id) && <LordAttack live={live} lord={l} busy={busy} attack={() => void act({ type: "raid", target: l.id })} />}
+      </div>
+    );
+  }
+  if (picked.kind === "camp") {
+    const k = (world.camps ?? []).find((x) => x.id === picked.id);
+    if (!k) return null;
+    return <CampPanel live={live} camp={k} now={now} busy={busy} act={act} />;
+  }
+  if (picked.kind === "fort") {
+    const f = (world.forts ?? []).find((x) => x.idx === picked.idx);
+    const fp = S2_FORTRESSES[picked.idx];
+    const mineHeld = !!f && f.holder !== null && !!snap.alliance && f.holder === snap.alliance.id;
+    const key = `fort:${picked.idx}`;
+    const offered = (s2.trade ?? []).some((t) => t.to === key);
+    return (
+      <div className="s2-panel">
+        <div className="row-title">🏰 {f?.name ?? "Forteresse"}</div>
+        <div className="row-desc">{f?.holderName ? `Tenue par ${f.holderName}.` : "Gardée par une garnison neutre."}{castle ? ` À ${cheb(fp, castle)} cases de ton château.` : ""} Assaut, espion et garnison : onglet Alliance.</div>
+        {castle && mineHeld && (
+          <div className="s2-settings">
+            <span>🛤️ Route commerciale vers la forteresse de ton alliance : un convoi par heure, {formatNumber(tradePay(s2, castle, fp, live.seasonStart || now, now))} 🪙 chacun.</span>
+            <button className="btn btn-small" disabled={busy} onClick={() => void act({ type: "s2", op: "trade", to: key, on: !offered })}>{offered ? "Fermer" : "Ouvrir"}</button>
+          </div>
+        )}
       </div>
     );
   }
   const c = world.castles.find((x) => x.id === picked.id)!;
+  const route = (world.trades ?? []).find((t) => t.to === c.id);
+  const offered = (s2.trade ?? []).some((t) => t.to === c.id);
   return (
     <div className="s2-panel">
       <div className="row-title">{c.me ? "🏰 Ton château" : `🏠 ${c.name}`}</div>
       {castle && !c.me && <div className="row-desc">À {cheb(c.pos, castle)} cases de ton château.</div>}
+      {castle && !c.me && (
+        <div className="s2-settings">
+          <span>
+            🛤️ {route?.active ? "Route commerciale ouverte" : offered ? "Route commerciale proposée, en attente de sa réponse" : route?.theirs ? `${c.name} te propose une route commerciale` : "Route commerciale"} : un convoi par heure dans chaque sens, {formatNumber(tradePay(s2, castle, c.pos, live.seasonStart || now, now))} 🪙 pour toi à chaque arrivée.
+          </span>
+          <button className="btn btn-small" disabled={busy} onClick={() => void act({ type: "s2", op: "trade", to: c.id, on: !offered })}>
+            {offered ? (route?.active ? "Fermer" : "Retirer") : route?.theirs ? "Accepter" : "Proposer"}
+          </button>
+        </div>
+      )}
+    </div>
+  );
+}
+
+/** S8 : les convois des autres à portée de mes sites ; les intercepter ou les saboter. */
+function ConvoysInSight({ snap, live, now, busy, act }: { snap: GameSnapshot; live: PlayerState; now: number; busy: boolean; act: (a: GameAction) => Promise<void> }) {
+  const world = snap.s2!;
+  const s2 = live.s2!;
+  const list = world.convoys.filter((v) => !v.mine && !v.ally && v.owner && v.arrive > now);
+  const mine = attackArmy(live);
+  const price = sabotagePrice(live.seasonStart || now, now);
+  const [sure, setSure] = useState<string | null>(null);
+  return (
+    <div className="s2-panel s2-contracts">
+      <div className="row-title">🔭 Convois en vue</div>
+      <p className="row-desc">Les convois des autres joueurs qui passent à {world.vision ?? 5} cases ou moins de ton château et de tes concessions{(world.vision ?? 5) > 5 ? " (« La tour de guet » incluse)" : ""}.</p>
+      {list.length === 0 ? (
+        <p className="row-desc">Aucun convoi en vue pour le moment.</p>
+      ) : (
+        <ul>
+          {list.map((v) => {
+            const id = `${v.owner}:${v.conc}:${v.depart}`;
+            const point = s2.castle && armySize(mine) > 0 ? interceptPoint(v, s2.castle, (cells) => travelMs(mine, cells, armySpeedBonus(live)), now) : null;
+            const why = v.why ?? (armySize(mine) === 0 ? "Aucune troupe au château." : !point ? "Ton armée ne peut pas le rattraper." : null);
+            const sabWhy = v.why && !v.hit ? v.why : v.sabotaged ? "Déjà saboté." : s2.gold < price ? `Il faut ${formatNumber(price)} 🪙.` : null;
+            return (
+              <li key={id}>
+                <div>
+                  <b>{RESOURCE_ICON[v.res]} {v.ownerName}</b> · convoi {v.size} · {v.escort ? "🛡️ escorté" : "sans escorte"} · arrivée dans {dur(v.arrive - now)}
+                  {v.hit ? " · déjà attaqué" : ""}
+                </div>
+                {point && !v.why && <div className="row-desc">Embuscade possible en ({point.cell[0]}, {point.cell[1]}), combat dans {dur(point.at - now)}. Butin : un tiers de la charge{s2.region === "desert" ? " (+10 % Désert)" : ""}.</div>}
+                <div className="s2-settings">
+                  {v.escort && sure !== id && !why ? (
+                    <button className="btn btn-small" disabled={busy} onClick={() => setSure(id)}>🏇 Intercepter…</button>
+                  ) : (
+                    <button className="btn btn-small btn-primary" disabled={busy || !!why} title={why ?? "Toutes tes troupes au château partent en embuscade."} onClick={() => void act({ type: "intercept", target: v.owner!, conc: v.conc!, depart: v.depart })}>
+                      {v.escort ? "🏇 Intercepter quand même" : "🏇 Intercepter"}
+                    </button>
+                  )}
+                  <button className="btn btn-small" disabled={busy || !!sabWhy} title={sabWhy ?? "Un saboteur : 60 % de réussite (Forêt +10 %). Le convoi perd 15 % de sa charge et arrive 15 min plus tard."} onClick={() => void act({ type: "convoy_sabotage", target: v.owner!, conc: v.conc!, depart: v.depart })}>
+                    🕯️ Saboter · 🪙 {formatNumber(price)}
+                  </button>
+                </div>
+              </li>
+            );
+          })}
+        </ul>
+      )}
+    </div>
+  );
+}
+
+/** S8 : mes routes commerciales et celles qu'on me propose. */
+function TradeRoutes({ snap, live, now, busy, act }: { snap: GameSnapshot; live: PlayerState; now: number; busy: boolean; act: (a: GameAction) => Promise<void> }) {
+  const list = snap.s2!.trades ?? [];
+  const s2 = live.s2!;
+  return (
+    <div className="s2-panel s2-contracts">
+      <div className="row-title">🛤️ Routes commerciales</div>
+      {list.length === 0 ? (
+        <p className="row-desc">Aucune route. Touche le château d&apos;un autre joueur pour lui en proposer une (elle s&apos;ouvre quand il la propose aussi), ou une forteresse tenue par ton alliance. Un convoi par heure rapporte de l&apos;or selon la longueur de la route (+10 % en Côte) ; il peut être attaqué. {TRADE_MAX} routes au plus.</p>
+      ) : (
+        <ul>
+          {list.map((t) => (
+            <li key={t.to}>
+              <span>
+                {t.name} · {t.active ? `ouverte, ${formatNumber(tradePay(s2, s2.castle!, t.pos, live.seasonStart || now, now))} 🪙 par convoi` : t.mine ? "proposée, en attente" : "te propose une route"}
+              </span>
+              <button className="btn btn-small" disabled={busy} onClick={() => void act({ type: "s2", op: "trade", to: t.to, on: !t.mine })}>
+                {t.mine ? (t.active ? "Fermer" : "Retirer") : "Accepter"}
+              </button>
+            </li>
+          ))}
+        </ul>
+      )}
+    </div>
+  );
+}
+
+/** Camp de bandits : sa garnison, son butin, l'assaut. */
+function CampPanel({ live, camp, now, busy, act }: { live: PlayerState; camp: NonNullable<S2WorldView["camps"]>[number]; now: number; busy: boolean; act: (a: GameAction) => Promise<void> }) {
+  const [sure, setSure] = useState(false);
+  const mine = attackArmy(live);
+  const opts = playerAttackOpts(live);
+  const chance = armySize(mine) > 0 ? fightChance({ army: mine, levels: opts.attackerLevels, boost: opts.attackerBoost }, campSide({ id: camp.id, pos: camp.pos, from: camp.from }, now)) : 0;
+  const pct = Math.round(chance * 100);
+  const waiting = camp.from > now;
+  return (
+    <div className="s2-panel">
+      <div className="row-title">🏕️ Camp de bandits</div>
+      <div className="row-desc">
+        Une compagnie de miliciens, entraînement {camp.train}. Ses bandits attaquent les convois qui passent à une case (15 %). Détruit, il rapporte ⚔️ {formatNumber(camp.loot)} fer et un autre camp apparaît ailleurs 6 h plus tard.
+        {waiting ? ` Il s'installe : actif dans ${dur(camp.from - now)}.` : ""}
+      </div>
+      {!waiting && live.s2?.castle && (
+        chance < 0.6 && !sure ? (
+          <button className="btn" disabled={busy || armySize(mine) === 0} onClick={() => setSure(true)}>Attaquer… ({pct} %)</button>
+        ) : (
+          <button className="btn btn-primary" disabled={busy || armySize(mine) === 0} onClick={() => void act({ type: "camp", id: camp.id })}>{chance < 0.6 ? `Attaquer quand même (${pct} %)` : `Attaquer (${pct} %)`}</button>
+        )
+      )}
+    </div>
+  );
+}
+
+/** Vague C : louer une compagnie du seigneur pour escorter une concession pendant 12 h. */
+function Mercs({ snap, live, lord, now, busy, act }: { snap: GameSnapshot; live: PlayerState; lord: S2WorldView["lords"][number]; now: number; busy: boolean; act: (a: GameAction) => Promise<void> }) {
+  const s2 = live.s2!;
+  const ml = snap.s2!.map.lords.find((x) => x.id === lord.id);
+  const [conc, setConc] = useState(s2.conc[0]?.id ?? "");
+  if (!ml || s2.conc.length === 0) return null;
+  const price = mercPrice(ml, live.seasonStart || now, now);
+  const offer = mercOffer(ml, live.seasonStart || now, now);
+  const why = mercBlocker(s2, ml, conc, price, now);
+  const hired = mercsNow(s2, now).find((m) => m.lord === lord.id);
+  const unit = unitOf(offer.unit);
+  const site = (id: string) => {
+    const c = s2.conc.find((x) => x.id === id);
+    return c ? snap.s2!.map.sites[c.site]?.name ?? "concession" : "concession";
+  };
+  return (
+    <div className="s2-settings">
+      {hired ? (
+        <span>⚔️ Ses mercenaires escortent {site(hired.conc)} encore {dur(hired.until - now)} ({hired.men} hommes).</span>
+      ) : (
+        <>
+          <span>⚔️ Mercenaires : {offer.men} {unit ? unit.plural.toLowerCase() : offer.unit}, entraînement {offer.train}, pour 12 h d&apos;escorte</span>
+          <select className="input" value={conc} onChange={(e) => setConc(e.target.value)} aria-label="Concession à escorter">
+            {s2.conc.map((c) => (
+              <option key={c.id} value={c.id}>{site(c.id)}</option>
+            ))}
+          </select>
+          <button className="btn btn-small" disabled={busy || !!why} title={why ?? undefined} onClick={() => void act({ type: "s2", op: "merc", id: lord.id, to: conc })}>
+            Louer · 🪙 {formatNumber(price)}
+          </button>
+        </>
+      )}
     </div>
   );
 }

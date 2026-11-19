@@ -29,6 +29,41 @@ export interface LordS2State {
   gifts?: number;
   /** Vague B : suzerain pendant 24 h après une défaite. */
   vassal?: { owner: string; alliance: number | null; until: number };
+  /** Vague C : nombre de vassalités par alliance dans la saison (trois : annexion). */
+  byAlliance?: Record<string, number>;
+  /** Vague C : annexé par une alliance jusqu'à la fin de la saison, ou jusqu'à ce qu'on batte sa garnison. */
+  annexed?: { alliance: number; at: number };
+  /** Vague C : libéré d'une annexion, sa garnison ne se reforme qu'à moitié. */
+  halved?: boolean;
+}
+
+/** Compagnies d'un seigneur : la moitié après une libération (chute). */
+export function lordCompanies(lord: Pick<MapLord, "companies">, ls: Pick<LordS2State, "halved">): number {
+  return ls.halved ? Math.ceil(lord.companies / 2) : lord.companies;
+}
+
+/** Expéditions parties du fief (fixées par le serveur d'après les états des joueurs) : compagnies absentes jusqu'à `back`. */
+let awayOf: Record<string, { at: number; back: number; n: number }[]> = {};
+export function setLordAway(a: Record<string, { at: number; back: number; n: number }[]>): void {
+  awayOf = a;
+}
+export function lordAway(lordId: string, now: number): number {
+  return (awayOf[lordId] ?? []).filter((x) => x.at <= now && now < x.back).reduce((a, x) => a + x.n, 0);
+}
+
+/** Après une victoire : vassalité comptée pour l'alliance, annexion à la troisième ; une annexion tombe si un autre la bat. */
+export function afterVassal(ls: LordS2State, alliance: number | null, now: number, annexAfter: number): LordS2State {
+  const next: LordS2State = { ...ls };
+  if (ls.annexed && ls.annexed.alliance !== alliance) {
+    delete next.annexed;
+    next.halved = true;
+  }
+  if (alliance === null) return next;
+  const k = String(alliance);
+  const n = (ls.byAlliance?.[k] ?? 0) + 1;
+  next.byAlliance = { ...(ls.byAlliance ?? {}), [k]: n };
+  if (n >= annexAfter && !next.annexed) next.annexed = { alliance, at: now };
+  return next;
 }
 
 export function newLordS2State(now: number): LordS2State {
@@ -70,7 +105,8 @@ export function companiesHome(n: number, ls: LordS2State, now: number): number {
 
 /** Garnison : troupes, fortifications (ducs), niveaux de combat. */
 export function garrison(lord: MapLord, ls: LordS2State, seasonStart: number, now: number): { army: Army; levels: Levels; companies: number } {
-  const units = garrisonUnits(lord.id, lord.rank, lord.companies).slice(0, companiesHome(lord.companies, ls, now));
+  const total = lordCompanies(lord, ls);
+  const units = garrisonUnits(lord.id, lord.rank, lord.companies).slice(0, Math.max(0, companiesHome(total, ls, now) - lordAway(lord.id, now)));
   const army: Record<string, number> = {};
   for (const u of units) army[u] = (army[u] ?? 0) + COMPANY_CAP[u];
   const forts = RANKS[lord.rank].forts;
@@ -126,7 +162,7 @@ export function fiefLoot(ls: LordS2State, companiesBeaten: number, seasonStart: 
 
 /** Après une victoire : le fief perd sa part, la garnison se reforme à partir de maintenant. */
 export function afterDefeat(ls: LordS2State, now: number, vassal?: LordS2State["vassal"]): LordS2State {
-  return { fief: { pierre: ls.fief.pierre * (1 - FIEF_LOOT_SHARE), fer: ls.fief.fer * (1 - FIEF_LOOT_SHARE), or: ls.fief.or * (1 - FIEF_LOOT_SHARE) }, at: ls.at, beatenAt: now, ...(ls.gifts ? { gifts: ls.gifts * (1 - FIEF_LOOT_SHARE) } : {}), ...(vassal ? { vassal } : ls.vassal ? { vassal: ls.vassal } : {}) };
+  return { ...ls, fief: { pierre: ls.fief.pierre * (1 - FIEF_LOOT_SHARE), fer: ls.fief.fer * (1 - FIEF_LOOT_SHARE), or: ls.fief.or * (1 - FIEF_LOOT_SHARE) }, at: ls.at, beatenAt: now, ...(ls.gifts ? { gifts: ls.gifts * (1 - FIEF_LOOT_SHARE) } : {}), ...(vassal ? { vassal } : ls.vassal ? { vassal: ls.vassal } : {}) };
 }
 
 export function cleanLordS2(raw: unknown, now: number): LordS2State {
@@ -135,7 +171,10 @@ export function cleanLordS2(raw: unknown, now: number): LordS2State {
   const f = (r.fief ?? {}) as Partial<Arrivals>;
   const v = r.vassal as { owner?: unknown; alliance?: unknown; until?: unknown } | undefined;
   const vassal = v && typeof v.owner === "string" && num(v.until) > 0 ? { owner: v.owner, alliance: v.alliance === null || v.alliance === undefined ? null : Number(v.alliance), until: num(v.until) } : undefined;
-  return { fief: { pierre: num(f.pierre), fer: num(f.fer), or: num(f.or) }, at: num(r.at) || now, beatenAt: num(r.beatenAt), ...(num(r.gifts) > 0 ? { gifts: num(r.gifts) } : {}), ...(vassal ? { vassal } : {}) };
+  const by = r.byAlliance && typeof r.byAlliance === "object" ? Object.fromEntries(Object.entries(r.byAlliance as Record<string, unknown>).filter(([, n]) => num(n) > 0).slice(0, 20).map(([k, n]) => [k, Math.floor(num(n))])) : {};
+  const ax = r.annexed as { alliance?: unknown; at?: unknown } | undefined;
+  const annexed = ax && Number.isFinite(Number(ax.alliance)) && ax.alliance !== null ? { alliance: Number(ax.alliance), at: num(ax.at) } : undefined;
+  return { fief: { pierre: num(f.pierre), fer: num(f.fer), or: num(f.or) }, at: num(r.at) || now, beatenAt: num(r.beatenAt), ...(num(r.gifts) > 0 ? { gifts: num(r.gifts) } : {}), ...(vassal ? { vassal } : {}), ...(Object.keys(by).length ? { byAlliance: by } : {}), ...(annexed ? { annexed } : {}), ...(r.halved === true ? { halved: true } : {}) };
 }
 
 /** Garnison telle que le joueur la voit sur la carte (compagnies présentes, entraînement) : pour estimer un combat côté navigateur. */
