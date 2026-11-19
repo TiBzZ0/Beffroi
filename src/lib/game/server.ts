@@ -3872,7 +3872,7 @@ async function settleAmbushHit(
   const aText = f.won ? `🗡️ Embuscade de ${foe.name} délogée (${Math.round(f.chance * 100)} % de chance)${armySize(f.lost) > 0 ? `, ${armySize(f.lost)} hommes perdus` : ""}.` : `🗡️ L'embuscade de ${foe.name} a tenu (${Math.round(f.chance * 100)} % de chance) : ${armySize(f.lost)} hommes perdus.`;
   if (healed.s2) healed = { ...healed, s2: { ...healed.s2, log: [...(healed.s2.log ?? []), { at, text: aText, cat: "combats" as const }].slice(-40) } };
   const back: March = { ...m, troops: survivors, status: "back", returnAt: at + outMs, outcome: f.won ? "won" : "lost" };
-  const written = await writeStates(admin, seasonId, [{ e: owner, state: replace(healed, armySize(survivors) > 0 ? back : null) }, { e: foe, state: fState }], "ambush_hit", { target: foe.id, id: am.id, success: f.won });
+  const written = await writeStates(admin, seasonId, [{ e: owner, state: replace(healed, armySize(survivors) > 0 ? back : null) }, { e: foe, state: fState }], "ambush_hit_fight", { target: foe.id, id: am.id, success: f.won });
   if (written === "conflict") return "conflict";
   await addChronicle(admin, seasonId, { kind: "raid", actor_id: owner.id, target_id: foe.id, details: { success: f.won, chance: f.chance, ambushHit: true, attackerLost: f.lost, defenderLost: f.foeLost } });
   if (f.won) await grantRenown(admin, seasonId, owner, "intercept", `Embuscade de ${foe.name} délogée`);
@@ -3900,7 +3900,9 @@ function armySide(state: PlayerState, troops: Army, at: number): { side: Side; s
       const dead = { ...(lost as Record<string, number>) };
       const mercDead = Math.min(mm.men, Math.round(((dead[mm.unit] ?? 0) * mm.men) / (mine + mm.men)));
       dead[mm.unit] = Math.max(0, (dead[mm.unit] ?? 0) - mercDead);
-      const s2 = s.s2 && mercDead > 0 ? { ...s.s2, mercs: (s.s2.mercs ?? []).map((x) => (x.lord === mm.lord && x.conc === MERC_ARMY ? { ...x, men: x.men - mercDead } : x)).filter((x) => x.men > 0) } : s.s2;
+      const left = mm.men - mercDead;
+      const note = mercDead > 0 ? [{ at, text: `⚔️ Tes mercenaires ont combattu avec ton armée : ${mercDead} tués${left > 0 ? `, ${left} restent` : ", la compagnie est perdue"}.`, cat: "combats" as const }] : [];
+      const s2 = s.s2 && mercDead > 0 ? { ...s.s2, mercs: (s.s2.mercs ?? []).map((x) => (x.lord === mm.lord && x.conc === MERC_ARMY ? { ...x, men: x.men - mercDead } : x)).filter((x) => x.men > 0), log: [...(s.s2.log ?? []), ...note].slice(-40) } : s.s2;
       return { state: { ...s, s2 }, own: cleanArmy(dead as Army) };
     },
   };
@@ -4969,7 +4971,7 @@ async function placeMole(
   if (caught) return { cost, caught, target, state: paid, message: `🐀 Ta taupe a été démasquée en s'installant chez ${target.name}.` };
   const t = target.state;
   const mole: Mole = { id: marchId(), target: key, until: now + MOLE_MS * (lin(current, "taupe") ? LIN_MOLE : 1), distance, seen: (t.marches ?? []).map((m) => m.id), shielded: t.shieldUntil > now, curfew: false };
-  return { cost, caught, target, state: { ...paid, moles: [...moles, mole] }, message: `🐀 Ta taupe est en place chez ${target.name} pour ${lin(current, "taupe") ? "3" : "2"} h : elle te préviendra de ses départs d'armée, de son bouclier et de son couvre-feu.` };
+  return { cost, caught, target, state: { ...paid, moles: [...moles, mole] }, message: `🐀 Ta taupe est en place chez ${target.name} pour ${lin(current, "taupe") ? "3" : "2"} h : elle te préviendra de ses départs d'armée et de son bouclier.` };
 }
 
 /** E4 : une taupe repérée ; la cible est prévenue comme pour un espion. */
