@@ -30,12 +30,12 @@ describe("Vague C : tours de site", () => {
 
   it("les gardes de la tour se joignent à l'escorte, et leurs pertes ne touchent pas l'escorte", () => {
     expect(withTower(null, 0)).toBeNull();
-    const alone = withTower(null, 2)!;
-    expect((alone.army as Record<string, number>).arbaletrier).toBe(400);
-    const mixed = withTower({ army: { arbaletrier: 300 } as never, levels: { arbaletrier: 2 } }, 1)!;
-    expect((mixed.army as Record<string, number>).arbaletrier).toBe(500);
-    const dead = lossesBeyondTower({ arbaletrier: 100 } as never, mixed, 1) as Record<string, number>;
-    expect(dead.arbaletrier).toBe(60);
+    const alone = withTower(null, 2)!.army as Record<string, number>;
+    expect(alone).toEqual({ piquier: 400, arbaletrier: 300 });
+    const mixed = withTower({ army: { arbaletrier: 150 } as never, levels: { arbaletrier: 2 } }, 1)!;
+    expect((mixed.army as Record<string, number>).arbaletrier).toBe(300);
+    const dead = lossesBeyondTower({ arbaletrier: 100, piquier: 50 } as never, mixed, 1) as Record<string, number>;
+    expect(dead).toEqual({ arbaletrier: 50, piquier: 0 });
   });
 });
 

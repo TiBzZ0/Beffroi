@@ -717,4 +717,10 @@ export const CHANGELOG: ChangeEntry[] = [
       "🌙 Le couvre-feu de la saison 1 ne bloque plus rien.",
     ],
   },
+  {
+    id: 79,
+    date: "21 novembre",
+    minSeason: 2,
+    items: ["🗼 Tour de site renforcée : chaque niveau garde maintenant 200 piquiers (contre les chevaliers) et 150 arbalétriers. Il faut environ deux fois plus de chevaliers pour piller une concession à tour."],
+  },
 ];

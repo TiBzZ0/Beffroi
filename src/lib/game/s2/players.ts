@@ -52,29 +52,36 @@ export function convoyVisible(points: WatchPoint[], range: number, at: Pos): boo
 // Tours de site (vague C)
 // ---------------------------------------------------------------------------
 
-/** Chaque niveau de tour : +1 case de vue autour du site, et 200 arbalétriers qui gardent le stock contre le pillage. */
+/** Chaque niveau de tour : +1 case de vue autour du site, et des gardes (piquiers et arbalétriers) qui défendent le stock contre le pillage. */
 export const TOWER_VISION = 1;
-export const TOWER_GUARDS = 200;
+/** Gardes par niveau de tour : des piquiers contre les chevaux, des arbalétriers contre l'infanterie. */
+export const TOWER_GUARDS: Record<string, number> = { piquier: 200, arbaletrier: 150 };
+export function towerGuards(level: number): Record<string, number> {
+  return Object.fromEntries(Object.entries(TOWER_GUARDS).map(([u, n]) => [u, n * Math.max(0, level)]));
+}
+
 /** Le camp qui défend une concession pillée : son escorte (et ses mercenaires), plus les gardes de sa tour. */
 export function withTower(side: Side | null, level: number): Side | null {
   if (level <= 0) return side;
-  const guards = TOWER_GUARDS * level;
-  const lv = (trainLevels(level * 2) as Record<string, number>).arbaletrier ?? 0;
-  if (!side) return { army: { arbaletrier: guards } as Army, levels: { arbaletrier: lv } };
-  const army = { ...(side.army as Record<string, number>) };
-  const levels = { ...((side.levels ?? {}) as Record<string, number>) };
-  const mine = army.arbaletrier ?? 0;
-  levels.arbaletrier = mine > 0 ? ((levels.arbaletrier ?? 0) * mine + lv * guards) / (mine + guards) : lv;
-  army.arbaletrier = mine + guards;
-  return { ...side, army: army as Army, levels };
+  const train = trainLevels(level * 2) as Record<string, number>;
+  const army = { ...((side?.army ?? {}) as Record<string, number>) };
+  const levels = { ...((side?.levels ?? {}) as Record<string, number>) };
+  for (const [u, guards] of Object.entries(towerGuards(level))) {
+    const mine = army[u] ?? 0;
+    const lv = train[u] ?? 0;
+    levels[u] = mine > 0 ? ((levels[u] ?? 0) * mine + lv * guards) / (mine + guards) : lv;
+    army[u] = mine + guards;
+  }
+  return { ...(side ?? {}), army: army as Army, levels };
 }
 
 /** Pertes de la défense sans celles des gardes de la tour (qui se relèvent toujours). */
 export function lossesBeyondTower(lost: Army, side: Side, level: number): Army {
-  const guards = TOWER_GUARDS * Math.max(0, level);
-  const total = (side.army as Record<string, number>).arbaletrier ?? 0;
   const dead = { ...(lost as Record<string, number>) };
-  if (guards > 0 && total > 0 && dead.arbaletrier) dead.arbaletrier = Math.round(dead.arbaletrier * Math.max(0, total - guards) / total);
+  for (const [u, guards] of Object.entries(towerGuards(level))) {
+    const total = (side.army as Record<string, number>)[u] ?? 0;
+    if (guards > 0 && total > 0 && dead[u]) dead[u] = Math.round((dead[u] * Math.max(0, total - guards)) / total);
+  }
   return dead as Army;
 }
 

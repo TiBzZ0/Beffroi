@@ -131,7 +131,7 @@ export const CONC_BUILDINGS: Record<ConcBuildingId, { name: string; icon: string
   atelier: { name: "Atelier", icon: "⚒️", per: 0.08, text: "+8 % de production de cette concession par niveau" },
   ecurie: { name: "Écurie", icon: "🐴", per: 0.1, text: "+10 % de charge des convois de cette concession par niveau" },
   grenier: { name: "Grenier", icon: "🌾", per: 0.25, text: "+25 % de stock local de cette concession par niveau" },
-  tour: { name: "Tour de site", icon: "🗼", per: 1, text: "+1 case de vue autour du site, et 200 arbalétriers qui gardent le stock contre le pillage, par niveau (5 au plus, dès le niveau 1 de la concession)" },
+  tour: { name: "Tour de site", icon: "🗼", per: 1, text: "+1 case de vue autour du site, et 200 piquiers et 150 arbalétriers qui gardent le stock contre le pillage, par niveau (5 au plus, dès le niveau 1 de la concession)" },
 };
 export const CONC_BUILDING_IDS = Object.keys(CONC_BUILDINGS) as ConcBuildingId[];
 export const CONC_BUILDING_MAX = 10;
