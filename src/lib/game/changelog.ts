@@ -727,4 +727,15 @@ export const CHANGELOG: ChangeEntry[] = [
       "🏆 Deux nouveaux podiums de fin de saison : 🏹 Brigands des routes (valeur prise aux convois et aux concessions) et 🛤️ Grands marchands (or des routes commerciales). Les gardiens comptent le temps tenu sur les quatre forteresses.",
     ],
   },
+  {
+    id: 80,
+    date: "21 novembre",
+    minSeason: 2,
+    items: [
+      "😠 Hostilité des seigneurs corrigée : elle montait à chaque convoi, si bien qu'une route traversant une zone rendait le seigneur « ennemi juré » en moins d'un jour (patrouilles doublées, expéditions toutes les 3 h). Le passage ne compte plus qu'une fois par heure, et l'hostilité s'efface de 40 % par jour : une route régulière se stabilise vers « méfiant ». Les hostilités actuelles redescendent d'elles-mêmes.",
+      "🏇 Interception et embuscade : le convoi perd toujours un tiers de sa charge, mais l'attaquant rapporte trois fois ce tiers (un convoi seul pesait trop peu pour déplacer une armée).",
+      "🕯️ Sabotage 4 fois moins cher.",
+      "🛤️ Routes commerciales : deux fois plus d'or par convoi.",
+    ],
+  },
 ];

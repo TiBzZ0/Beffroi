@@ -93,12 +93,21 @@ describe("S2 vague B : routes", () => {
     expect(freePass({ ...state(), vassals: { [duke().id]: T0 + H } }, duke().id, T0)).toBe(true);
   });
 
-  it("hostilité : multipliée par le rang, elle baisse de 10 par jour", () => {
+  it("hostilité : multipliée par le rang, elle s'efface de 40 % par jour", () => {
     const st = state();
     addHostility(st, MAP, duke(), 10, T0);
     expect(hostilityAt(st, duke().id, T0)).toBe(15);
-    expect(hostilityAt(st, duke().id, T0 + 12 * H)).toBeCloseTo(10);
-    expect(hostilityAt(st, duke().id, T0 + 3 * 24 * H)).toBe(0);
+    expect(hostilityAt(st, duke().id, T0 + 24 * H)).toBeCloseTo(15 * Math.exp(-0.5));
+    expect(hostilityAt(st, duke().id, T0 + 10 * 24 * H)).toBe(0);
+  });
+
+  it("une route régulière ne fait plus monter l'hostilité qu'une fois par heure : elle se stabilise sous « hostile »", () => {
+    const l = MAP.lords.find((x) => x.rank === "baron")!;
+    const from: [number, number] = [Math.max(0, l.pos[0] - 6), l.pos[1]];
+    const to: [number, number] = [Math.min(40, l.pos[0] + 6), l.pos[1]];
+    const st = { ...state(), castle: to };
+    for (let t = T0; t < T0 + 6 * 24 * H; t += 5 * 60_000) convoyRisk(st, { conc: "c1", res: "pierre", load: 300, depart: t, arrive: t + 5 * 60_000, from, to }, { map: MAP, seasonStart: T0, stagesDone: 0, escort: () => null, hurt: () => {} });
+    expect(hostilityAt(st, l.id, T0 + 6 * 24 * H)).toBeLessThan(50);
   });
 
   it("sauf-conduit : payé en or, hostilité −10, refusé à un ennemi juré", () => {

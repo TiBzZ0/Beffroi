@@ -55,7 +55,7 @@ describe("Vague 2, fin : interception et sabotage (S8)", () => {
     expect(interceptTake(convoy([0, 0], [5, 0], T0, 900), 0)).toBe(300);
     expect(interceptTake({ ...convoy([0, 0], [5, 0], T0, 800), lost: 100 }, 0)).toBe(200);
     expect(interceptTake({ ...convoy([0, 0], [5, 0], T0, 600), lost: 300 }, 0)).toBe(0);
-    expect(interceptLoot(300, { ...newS2State(T0), region: "desert" })).toBeCloseTo(330);
+    expect(interceptLoot(300, { ...newS2State(T0), region: "desert" })).toBeCloseTo(990);
   });
 
   it("sabotage : 15 % détruits et 15 min de retard", () => {

@@ -370,7 +370,7 @@ function AmbushHere({ world, live, pos, now, busy, act }: { world: S2WorldView; 
   const why = inCentre(pos) ? "Pas d'embuscade dans le centre du royaume." : taken ? "Case occupée." : placed ? "Tu as déjà une embuscade en place." : armySize(mine) === 0 ? "Aucune troupe au château." : null;
   return (
     <div className="s2-settings">
-      <span>🏹 Embuscade : toutes tes troupes au château s&apos;y postent 4 h et attaquent chaque convoi ennemi qui passe à une case (un tiers de sa charge, contre son escorte). Les voisins dont la vue couvre la case la repèrent.</span>
+      <span>🏹 Embuscade : toutes tes troupes au château s&apos;y postent 4 h et attaquent chaque convoi ennemi qui passe à une case (il perd un tiers de sa charge, tu en rapportes trois fois plus ; contre son escorte). Les voisins dont la vue couvre la case la repèrent.</span>
       <button className="btn btn-small" disabled={busy || !!why} title={why ?? undefined} onClick={() => void act({ type: "ambush", x: pos[0], y: pos[1] })}>Poster ici</button>
     </div>
   );
@@ -450,7 +450,7 @@ function ConvoysInSight({ snap, live, now, busy, act }: { snap: GameSnapshot; li
                   <b>{RESOURCE_ICON[v.res]} {v.ownerName}</b> · convoi {v.size} · {v.escort ? "🛡️ escorté" : "sans escorte"} · arrivée dans {dur(v.arrive - now)}
                   {v.hit ? " · déjà attaqué" : ""}
                 </div>
-                {point && !v.why && <div className="row-desc">Embuscade possible en ({point.cell[0]}, {point.cell[1]}), combat dans {dur(point.at - now)}. Butin : un tiers de la charge{s2.region === "desert" ? " (+10 % Désert)" : ""}.</div>}
+                {point && !v.why && <div className="row-desc">Embuscade possible en ({point.cell[0]}, {point.cell[1]}), combat dans {dur(point.at - now)}. Le convoi perd un tiers de sa charge ; tu en rapportes trois fois plus{s2.region === "desert" ? " (+10 % Désert)" : ""}.</div>}
                 <div className="s2-settings">
                   {v.escort && sure !== id && !why ? (
                     <button className="btn btn-small" disabled={busy} onClick={() => setSure(id)}>🏇 Intercepter…</button>

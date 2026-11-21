@@ -155,8 +155,12 @@ export const PATROL_CHANCE_MAX = 0.6;
 // Hostilité, sauf-conduits, rancunes, vassalité
 // ---------------------------------------------------------------------------
 
-export const HOSTILITY = { cross: 2, intercept: 10, pillage: 15, vassal: 10, betray: 30, safe: -10 } as const;
-export const HOSTILITY_DECAY_PER_DAY = 10;
+/** Hausses d'hostilité. Le passage compte au plus une fois par heure et par seigneur (le trafic, pas chaque convoi). */
+export const HOSTILITY = { cross: 0.6, intercept: 10, pillage: 15, vassal: 10, betray: 30, safe: -10 } as const;
+export const CROSS_EVERY_MS = H;
+/** L'hostilité s'efface d'elle-même : elle perd 40 % par jour (constante de temps de 2 jours). Une route régulière se stabilise
+ *  vers 15 × 2 = 30 points × rang : neutre pour un hobereau, méfiant pour un baron ou plus. */
+export const HOSTILITY_TAU_MS = 2 * DAY;
 export const HOSTILITY_RANK: Record<Rank, number> = { hobereau: 0.75, baron: 1, comte: 1.25, duc: 1.5 };
 /** Ennemi juré : la moitié de chaque hausse gagne les seigneurs à 8 cases ou moins. */
 export const HOSTILITY_SPREAD_RADIUS = 8;
@@ -173,11 +177,12 @@ export function hostilityLevel(v: number): number {
   });
   return lv;
 }
-/** Hostilité d'un seigneur à l'instant `t` : elle baisse de 10 par jour. */
+/** Hostilité d'un seigneur à l'instant `t` : elle s'efface de 40 % par jour. */
 export function hostilityAt(s: S2State, lordId: string, t: number): number {
   const h = s.host?.[lordId];
   if (!h) return 0;
-  return Math.max(0, Math.min(100, h.v - (HOSTILITY_DECAY_PER_DAY * Math.max(0, t - h.at)) / DAY));
+  const v = h.v * Math.exp(-Math.max(0, t - h.at) / HOSTILITY_TAU_MS);
+  return v < 0.5 ? 0 : Math.min(100, v);
 }
 /** Change l'hostilité (hausses multipliées par le rang, et propagées par un ennemi juré). Écrit dans `s`. */
 export function addHostility(s: S2State, map: S2Map, lord: MapLord, amount: number, t: number): void {
@@ -401,7 +406,10 @@ export function convoyRisk(st: S2State, v: Convoy, rc: RouteContext): number {
     const at = Math.round(v.depart + t * span);
     if (freePass(st, lord.id, at)) continue;
     if (sheltered(cells[Math.min(cells.length - 1, Math.round(t * (cells.length - 1)))])) continue;
-    addHostility(st, rc.map, lord, HOSTILITY.cross, at);
+    if (at - (st.crossAt?.[lord.id] ?? 0) >= CROSS_EVERY_MS) {
+      addHostility(st, rc.map, lord, HOSTILITY.cross, at);
+      st.crossAt = { ...(st.crossAt ?? {}), [lord.id]: at };
+    }
     const lv = HOSTILITY_LEVELS[hostilityLevel(hostilityAt(st, lord.id, at))];
     const chance = Math.min(PATROL_CHANCE_MAX, PATROL_CHANCE[lord.rank] * lv.chance) * (1 - (st.patrolCut ?? 0));
     const key = `p:${v.conc}:${v.depart}:${lord.id}`;

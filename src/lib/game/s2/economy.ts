@@ -221,6 +221,8 @@ export interface S2State {
   safe?: Record<string, number>;
   /** Rancunes : expéditions promises contre un convoi du joueur, à partir de `due`. */
   grudge?: { lord: string; due: number }[];
+  /** Dernier passage compté dans la zone de chaque seigneur (l'hostilité de passage monte au plus une fois par heure). */
+  crossAt?: Record<string, number>;
   /** Dernière expédition de chaque seigneur hostile (rythme des expéditions). */
   expAt?: Record<string, number>;
   /** Seigneurs dont le joueur est le suzerain : seigneur → fin de la vassalité. */
@@ -776,15 +778,15 @@ const RES: Resource[] = ["pierre", "fer", "or"];
 const REGION_IDS: RegionId[] = ["froid", "montagne", "plaine", "collines", "desert", "cote", "foret"];
 
 /** Vague B : hostilité, sauf-conduits, rancunes, expéditions et vassaux (clés limitées aux identifiants courts). */
-function cleanRelations(r: Record<string, unknown>): Pick<S2State, "host" | "safe" | "grudge" | "expAt" | "vassals" | "contracts" | "trade" | "sent" | "rivalDrop" | "mercs" | "ambushed"> {
-  const out: Pick<S2State, "host" | "safe" | "grudge" | "expAt" | "vassals" | "contracts" | "trade" | "sent" | "rivalDrop" | "mercs" | "ambushed"> = {};
+function cleanRelations(r: Record<string, unknown>): Pick<S2State, "host" | "safe" | "grudge" | "expAt" | "vassals" | "contracts" | "trade" | "sent" | "rivalDrop" | "mercs" | "ambushed" | "crossAt"> {
+  const out: Pick<S2State, "host" | "safe" | "grudge" | "expAt" | "vassals" | "contracts" | "trade" | "sent" | "rivalDrop" | "mercs" | "ambushed" | "crossAt"> = {};
   const rec = (v: unknown) => (v && typeof v === "object" && !Array.isArray(v) ? Object.entries(v as Record<string, unknown>).slice(0, 40) : []);
   const host = rec(r.host).flatMap(([k, v]) => {
     const x = (v ?? {}) as { v?: unknown; at?: unknown };
     return num(x.v) > 0 ? [[k, { v: Math.min(100, num(x.v)), at: num(x.at) }] as const] : [];
   });
   if (host.length) out.host = Object.fromEntries(host);
-  for (const key of ["safe", "expAt", "vassals", "rivalDrop"] as const) {
+  for (const key of ["safe", "expAt", "vassals", "rivalDrop", "crossAt"] as const) {
     const list = rec(r[key]).filter(([, v]) => num(v) > 0).map(([k, v]) => [k, num(v)] as const);
     if (list.length) out[key] = Object.fromEntries(list);
   }

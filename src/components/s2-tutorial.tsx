@@ -126,7 +126,7 @@ const PAGES: { icon: string; title: string; text: string[] }[] = [
     title: "Attaquer sur les routes",
     text: [
       "Tu vois les convois des autres à 5 cases de ton château et de tes concessions (+4 avec « La tour de guet » du beffroi, +1 par niveau de tour de site).",
-      "🏇 Intercepter : ton armée attend le convoi sur sa route et combat son escorte ; victoire, un tiers de la charge. 🕯️ Saboter : un espion payé en or (60 % de réussite) détruit 15 % de la charge et retarde le convoi.",
+      "🏇 Intercepter : ton armée attend le convoi sur sa route et combat son escorte ; victoire, le convoi perd un tiers de sa charge et tu rapportes trois fois ce tiers. 🕯️ Saboter : un espion payé en or (60 % de réussite) détruit 15 % de la charge et retarde le convoi.",
       "🏹 Embuscade : touche une case libre et « Poster ici » ; ton armée y reste 4 h et attaque chaque convoi ennemi qui passe à une case. Les voisins qui voient la case peuvent la 🗡️ déloger.",
       "⛏️ Piller une concession : 25 % de son stock et 15 % de sa réserve, au plus une fois toutes les 6 h, contre son escorte et sa tour. Détruire un camp de bandits rapporte du fer ; les contrats des seigneurs, de l'or.",
       "Les 48 premières heures d'un joueur, ses convois et ses concessions sont protégés.",

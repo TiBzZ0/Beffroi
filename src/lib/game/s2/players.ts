@@ -89,7 +89,7 @@ export function lossesBeyondTower(lost: Army, side: Side, level: number): Army {
 // Interception
 // ---------------------------------------------------------------------------
 
-/** Butin d'une interception : un tiers de la charge de départ (règle du tiers), +10 % pour un attaquant du Désert. */
+/** Perte d'un convoi intercepté : un tiers de la charge de départ (règle du tiers). */
 export const INTERCEPT_SHARE = 1 / 3;
 
 /**
@@ -130,9 +130,11 @@ export function interceptTake(v: Convoy, stagesDone: number): number {
   return Math.max(0, Math.min(v.load, room, load0 * INTERCEPT_SHARE));
 }
 
-/** Butin de l'attaquant : ce qui est pris, +10 % s'il est du Désert. */
+/** L'attaquant rapporte trois fois ce que le convoi perd (bourse des marchands, chariots revendus) : un convoi seul pèse peu. */
+export const INTERCEPT_LOOT_MULT = 3;
+/** Butin de l'attaquant : trois fois ce qui est pris, +10 % s'il est du Désert. */
 export function interceptLoot(taken: number, attacker: S2State | undefined): number {
-  return taken * (attacker?.region === "desert" ? 1 + DESERT_LOOT_BONUS : 1);
+  return taken * INTERCEPT_LOOT_MULT * (attacker?.region === "desert" ? 1 + DESERT_LOOT_BONUS : 1);
 }
 
 /** Applique une interception au convoi visé (identifié par sa concession et son départ). */
@@ -148,9 +150,9 @@ export const SABOTAGE_CHANCE = 0.6;
 export const SABOTAGE_DELAY_MS = 15 * 60_000;
 export const SABOTAGE_SHARE = 0.15;
 
-/** Prix d'un sabotage : 1 h × REF(j) / 4 en or. */
+/** Prix d'un sabotage : REF(j) / 16 en valeur (un quart d'heure de production d'une concession), payé en or. */
 export function sabotagePrice(seasonStart: number, now: number): number {
-  return Math.round(REF(Math.max(0, (now - seasonStart) / DAY)) / 4 / VALUE.or);
+  return Math.round(REF(Math.max(0, (now - seasonStart) / DAY)) / 16 / VALUE.or);
 }
 
 /** Chance de réussite : 60 %, +10 % pour un saboteur de la Forêt, moins la vigilance de la cible (sentinelles, Lignée). */
@@ -184,8 +186,8 @@ export function sabotaged(s: S2State, conc: string, depart: number, stagesDone: 
 // Routes commerciales
 // ---------------------------------------------------------------------------
 
-/** Or par case de longueur et par convoi (un par heure) : 0,05 h × REF(j) / 4, +10 % en Côte. */
-export const TRADE_HOURS_PER_CELL = 0.05;
+/** Or par case de longueur et par convoi (un par heure) : 0,1 h × REF(j) / 4, +10 % en Côte. */
+export const TRADE_HOURS_PER_CELL = 0.1;
 export const TRADE_MAX = 3;
 
 /** Une route active : l'autre bout (château d'un joueur consentant, ou forteresse de l'alliance), depuis quand. */
