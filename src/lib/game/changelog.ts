@@ -736,6 +736,7 @@ export const CHANGELOG: ChangeEntry[] = [
       "🏇 Interception et embuscade : le convoi perd toujours un tiers de sa charge, mais l'attaquant rapporte trois fois ce tiers (un convoi seul pesait trop peu pour déplacer une armée).",
       "🕯️ Sabotage 4 fois moins cher.",
       "🛤️ Routes commerciales : deux fois plus d'or par convoi.",
+      "👑 Fief annexé : chaque membre de l'alliance reçoit un quart de la production du fief (comme un vassal) ; au-delà de 4 membres, le fief entier est partagé. Une petite alliance recevait jusqu'ici le fief entier.",
     ],
   },
 ];

@@ -182,7 +182,7 @@ export function hostilityAt(s: S2State, lordId: string, t: number): number {
   const h = s.host?.[lordId];
   if (!h) return 0;
   const v = h.v * Math.exp(-Math.max(0, t - h.at) / HOSTILITY_TAU_MS);
-  return v < 0.5 ? 0 : Math.min(100, v);
+  return v < 0.05 ? 0 : Math.min(100, v);
 }
 /** Change l'hostilité (hausses multipliées par le rang, et propagées par un ennemi juré). Écrit dans `s`. */
 export function addHostility(s: S2State, map: S2Map, lord: MapLord, amount: number, t: number): void {
@@ -519,6 +519,11 @@ export function vassalConvoys(st: S2State, map: S2Map, seasonStart: number, from
 }
 
 /** Vague C : un fief annexé partage toute sa production entre les membres de l'alliance, en convois horaires. */
+/** Part de la production d'un site du fief annexé versée à chaque membre : un quart (comme un vassal), le fief entier partagé au-delà de 4 membres. */
+export const ANNEX_SHARE = 0.25;
+export function annexShare(members: number): number {
+  return Math.min(ANNEX_SHARE, 1 / Math.max(1, members));
+}
 export function annexConvoys(st: S2State, map: S2Map, seasonStart: number, from: number, to: number, travel: (a: Pos, b: Pos) => number): void {
   if (!st.castle || st.who?.alliance === null || st.who?.alliance === undefined) return;
   for (const lord of map.lords) {
@@ -530,7 +535,7 @@ export function annexConvoys(st: S2State, map: S2Map, seasonStart: number, from:
       const byRes: Partial<Record<Resource, number>> = {};
       for (const siteId of lord.conc) {
         const res = map.sites[siteId]?.type ?? "pierre";
-        byRes[res] = (byRes[res] ?? 0) + REF(day) / VALUE[res] / Math.max(1, a.members);
+        byRes[res] = (byRes[res] ?? 0) + (REF(day) / VALUE[res]) * annexShare(a.members);
       }
       for (const [res, load] of Object.entries(byRes) as [Resource, number][]) st.convoys.push({ conc: `annex:${lord.id}`, res, load, depart: h, arrive: h + travel(lord.pos, st.castle), from: lord.pos, to: st.castle });
     }

@@ -4,6 +4,7 @@ import { MAP, s2Player, useS2 } from "./fixture";
 import {
   addHostility,
   annexConvoys,
+  annexShare,
   campActive,
   campSpot,
   convoyRisk,
@@ -184,6 +185,8 @@ describe("Vague C : rivalités, mercenaires, chute", () => {
     expect(freePass({ ...st, who: { id: "b", alliance: 8 } }, lord.id, T0 + H)).toBe(false);
     annexConvoys(st, MAP, T0, T0, T0 + 3 * H, () => 60_000);
     expect(st.convoys.length).toBeGreaterThanOrEqual(3);
+    expect(annexShare(1)).toBe(0.25);
+    expect(annexShare(8)).toBe(0.125);
     expect(zonesOnRoute(MAP, [0, 0], [1, 1])).toBeDefined();
   });
 });

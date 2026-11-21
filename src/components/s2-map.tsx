@@ -308,7 +308,7 @@ function S2Panel({ snap, live, now, world, picked, busy, act, castlesOthers }: {
           {l.reformAt > now ? ` La garnison se reforme : complète dans ${dur(l.reformAt - now)}.` : ""}
         </div>
         {l.away ? <div className="row-desc">⚔️ {l.away} compagnie{l.away > 1 ? "s" : ""} parti{l.away > 1 ? "es" : "e"} en expédition : la garnison est réduite d&apos;autant.</div> : null}
-        {l.annexed && <div className="row-desc">👑 Annexé par {l.annexed.name} jusqu&apos;à la fin de la saison : sa production est partagée entre ses membres, sa zone laisse passer leurs convois. Battre sa garnison le libère.</div>}
+        {l.annexed && <div className="row-desc">👑 Annexé par {l.annexed.name} jusqu&apos;à la fin de la saison : chaque membre reçoit un quart de sa production (le fief entier partagé au-delà de 4 membres), sa zone laisse passer leurs convois. Battre sa garnison le libère.</div>}
         {l.rival && <div className="row-desc">⚖️ Rival de {world.lords.find((x) => x.id === l.rival)?.name ?? "?"} : t&apos;en prendre à l&apos;un apaise l&apos;autre (à 30 points apaisés, sauf-conduit offert pour 24 h).</div>}
         <LordRelations snap={snap} live={live} lord={l} now={now} busy={busy} act={act} />
         {castle && <Mercs snap={snap} live={live} lord={l} now={now} busy={busy} act={act} />}

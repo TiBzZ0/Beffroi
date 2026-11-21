@@ -98,7 +98,7 @@ describe("S2 vague B : routes", () => {
     addHostility(st, MAP, duke(), 10, T0);
     expect(hostilityAt(st, duke().id, T0)).toBe(15);
     expect(hostilityAt(st, duke().id, T0 + 24 * H)).toBeCloseTo(15 * Math.exp(-0.5));
-    expect(hostilityAt(st, duke().id, T0 + 10 * 24 * H)).toBe(0);
+    expect(hostilityAt(st, duke().id, T0 + 14 * 24 * H)).toBe(0);
   });
 
   it("une route régulière ne fait plus monter l'hostilité qu'une fois par heure : elle se stabilise sous « hostile »", () => {

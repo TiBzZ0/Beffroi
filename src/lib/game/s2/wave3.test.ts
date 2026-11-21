@@ -106,3 +106,15 @@ describe("Vague C : mercenaires avec l'armée, passage libre des forteresses", (
     expect(shel).toBe(0);
   });
 });
+
+describe("Équilibrage : hostilité d'un hobereau", () => {
+  useS2();
+  it("chaque passage d'heure en heure s'additionne, même petit", async () => {
+    const { addHostility, hostilityAt, HOSTILITY } = await import("./convoys");
+    const l = MAP.lords.find((x) => x.rank === "hobereau")!;
+    const st = { ...newS2State(T0), castle: [0, 0] as Pos };
+    addHostility(st, MAP, l, HOSTILITY.cross, T0);
+    addHostility(st, MAP, l, HOSTILITY.cross, T0 + H);
+    expect(hostilityAt(st, l.id, T0 + H)).toBeGreaterThan(0.8);
+  });
+});
