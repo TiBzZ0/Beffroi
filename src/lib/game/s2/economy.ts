@@ -255,6 +255,8 @@ export interface S2State {
   archShield?: boolean;
   /** Forteresses tenues par l'alliance (fixé à chaque calcul) : 4 cases de passage libre autour de chacune. */
   safeZones?: Pos[];
+  /** Or rapporté par les routes commerciales sur la saison (classement des marchands). */
+  traded?: number;
   /** Jour (UTC, en jours depuis 1970) où l'Architecte royal a déjà protégé un convoi. */
   archDay?: number;
 }
@@ -463,6 +465,7 @@ export function settleS2(s: S2State, ctx: S2Context, now: number): { s: S2State;
       if (v.dest === "commerce") {
         // Route commerciale : le convoi ne porte rien, il rapporte de l'or à l'arrivée.
         arrived.or += v.load;
+        st.traded = (st.traded ?? 0) + v.load;
         continue;
       }
       if (v.dest === "beffroi") arrived.beffroi += v.load * VALUE[v.res];
@@ -844,6 +847,7 @@ export function cleanS2(raw: unknown, now: number): S2State {
     ...(num(r.giftOwed) > 0 ? { giftOwed: num(r.giftOwed) } : {}),
     ...(num(r.launchUntil) > 0 ? { launchUntil: num(r.launchUntil) } : {}),
     ...(num(r.archDay) > 0 ? { archDay: Math.floor(num(r.archDay)) } : {}),
+    ...(num(r.traded) > 0 ? { traded: num(r.traded) } : {}),
     ...(Array.isArray(r.log) ? { log: (r.log as Record<string, unknown>[]).filter((l) => l && typeof l.text === "string").slice(-LOG_MAX).map((l) => ({ at: num(l.at), text: String(l.text).slice(0, 200), ...(l.cat === "combats" ? { cat: "combats" as const } : {}), ...(typeof l.key === "string" ? { key: l.key.slice(0, 80), sum: num(l.sum), n: Math.max(1, Math.floor(num(l.n, 1))) } : {}) })) } : {}),
     ...cleanRelations(r),
   };

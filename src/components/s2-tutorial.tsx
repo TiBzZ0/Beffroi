@@ -77,7 +77,7 @@ const PAGES: { icon: string; title: string; text: string[] }[] = [
     text: [
       "Une concession s'améliore avec ce qu'elle a sur place : sa réserve de chantier d'abord, puis son stock. Remplis la réserve avec « Ravitailler » (pierre, fer ×2, or ×4) ; elle accepte au plus le coût des deux prochains niveaux.",
       "Chaque niveau : +15 % de production et de charge. Paliers : ⛺ Campement (1-4), 🏚️ Exploitation (5-9), 🏭 Manufacture (10-14), 🏰 Grand domaine (15, +10 % et ta bannière sur la carte).",
-      "Bâtiments de concession, jusqu'au niveau 10 et jamais au-dessus du niveau de la concession : ⚒️ atelier (+8 % de production par niveau), et dès l'Exploitation 🐴 écurie (+10 % de charge) et 🌾 grenier (+25 % de stock).",
+      "Bâtiments de concession, jusqu'au niveau 10 et jamais au-dessus du niveau de la concession : ⚒️ atelier (+8 % de production par niveau), et dès l'Exploitation 🐴 écurie (+10 % de charge) et 🌾 grenier (+25 % de stock). 🗼 La tour de site (5 niveaux, dès le niveau 1) voit une case plus loin par niveau et garde le stock contre le pillage (200 piquiers et 150 arbalétriers par niveau).",
       "Les premiers niveaux se bâtissent en quelques secondes ; les derniers prennent des heures. Lance les longs chantiers avant de partir.",
     ],
   },
@@ -108,6 +108,38 @@ const PAGES: { icon: string; title: string; text: string[] }[] = [
       "Une défaite coûte des hommes. Les seigneurs n'attaquent jamais : rien ne presse, attends d'avoir une bonne chance (au-dessus de 60 %).",
       "Une victoire emporte 60 % de leur fief (pierre, fer, or) et du fer pour chaque compagnie battue. La garnison se reforme ensuite, puis le fief se remplit à nouveau.",
       "Commence par les hobereaux loin du centre ; les ducs se battent en alliance.",
+    ],
+  },
+  {
+    icon: "🛤️",
+    title: "Les routes et leurs dangers",
+    text: [
+      "Tes convois traversent les zones des seigneurs : leurs patrouilles attaquent parfois, d'autant plus que le seigneur t'en veut (chaque passage fait monter son hostilité). Un sauf-conduit payé en or, ou un seigneur vassal, laisse passer.",
+      "Un seigneur très hostile envoie aussi des expéditions contre tes convois ; elles se voient sur la carte en pointillé, et son fief reste moins gardé jusqu'à leur retour.",
+      "Les camps de bandits (🏕️) attaquent les convois qui passent à une case, et les autres joueurs peuvent intercepter, saboter ou tendre une embuscade sur ta route.",
+      "Règle du tiers : un convoi ne perd jamais plus d'un tiers de sa charge (un quart après l'étape 5), et un seul joueur peut l'attaquer.",
+      "Affecte une compagnie à l'escorte d'une concession (section « Route et escorte ») : sans escorte, tout combat sur la route est perdu. La même section signale les embuscades et camps repérés sur la route.",
+    ],
+  },
+  {
+    icon: "🏹",
+    title: "Attaquer sur les routes",
+    text: [
+      "Tu vois les convois des autres à 5 cases de ton château et de tes concessions (+4 avec « La tour de guet » du beffroi, +1 par niveau de tour de site).",
+      "🏇 Intercepter : ton armée attend le convoi sur sa route et combat son escorte ; victoire, un tiers de la charge. 🕯️ Saboter : un espion payé en or (60 % de réussite) détruit 15 % de la charge et retarde le convoi.",
+      "🏹 Embuscade : touche une case libre et « Poster ici » ; ton armée y reste 4 h et attaque chaque convoi ennemi qui passe à une case. Les voisins qui voient la case peuvent la 🗡️ déloger.",
+      "⛏️ Piller une concession : 25 % de son stock et 15 % de sa réserve, au plus une fois toutes les 6 h, contre son escorte et sa tour. Détruire un camp de bandits rapporte du fer ; les contrats des seigneurs, de l'or.",
+      "Les 48 premières heures d'un joueur, ses convois et ses concessions sont protégés.",
+    ],
+  },
+  {
+    icon: "⚖️",
+    title: "Commerce, mercenaires et forteresses",
+    text: [
+      "Routes commerciales : propose-en une au château d'un autre joueur (elle s'ouvre quand il la propose aussi) ou à une forteresse de ton alliance. Un convoi d'or part chaque heure, d'autant plus riche que la route est longue. 3 routes au plus.",
+      "Mercenaires : un seigneur neutre ou vassal loue une compagnie pour 12 h, à l'escorte d'une concession ou avec ton armée (elle se joint alors à tes pillages, interceptions, camps, contrats et délogements).",
+      "Quatre forteresses entourent le centre ; chacune donne un bonus à l'alliance qui la tient : Nord +10 % de production, Est convois +15 % de vitesse, Sud escortes +15 % de dégâts, Ouest patrouilles −25 %. À 4 cases autour, vos convois passent sans patrouille, embuscade ni bandits.",
+      "La Lignée du Marchand (🎖️) renforce le commerce : une route de plus, plus d'or, plus de vue, de meilleures escortes, moins de patrouilles.",
     ],
   },
   {

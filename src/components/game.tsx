@@ -1177,6 +1177,7 @@ function formatValue(v: number, unit: HallUnit): string {
   if (unit === "percent") return `${v.toLocaleString("fr-FR", { maximumFractionDigits: 1 })} %`;
   if (unit === "ratio") return `×${v.toLocaleString("fr-FR", { maximumFractionDigits: 1 })}`;
   if (unit === "count") return String(v);
+  if (unit === "gold") return `${formatNumber(v)} 🪙`;
   return formatNumber(v);
 }
 

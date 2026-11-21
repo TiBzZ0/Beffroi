@@ -721,6 +721,10 @@ export const CHANGELOG: ChangeEntry[] = [
     id: 79,
     date: "21 novembre",
     minSeason: 2,
-    items: ["🗼 Tour de site renforcée : chaque niveau garde maintenant 200 piquiers (contre les chevaliers) et 150 arbalétriers. Il faut environ deux fois plus de chevaliers pour piller une concession à tour."],
+    items: [
+      "🗼 Tour de site renforcée : chaque niveau garde maintenant 200 piquiers (contre les chevaliers) et 150 arbalétriers. Il faut environ deux fois plus de chevaliers pour piller une concession à tour.",
+      "📖 Règles : trois nouvelles pages sur les routes (dangers, attaques, commerce, mercenaires et forteresses).",
+      "🏆 Deux nouveaux podiums de fin de saison : 🏹 Brigands des routes (valeur prise aux convois et aux concessions) et 🛤️ Grands marchands (or des routes commerciales). Les gardiens comptent le temps tenu sur les quatre forteresses.",
+    ],
   },
 ];

@@ -3827,7 +3827,7 @@ async function settleAmbush(
   const value = loot.pierre + loot.fer + loot.or;
   const back: March = { ...m, troops: survivors, status: "back", returnAt: at + outMs, outcome: hits > 0 ? "won" : fights > 0 ? "lost" : "turned", ...(value > 0 ? { lootS2: loot } : {}) };
   list.unshift({ e: owner, state: replace(healed, armySize(survivors) > 0 || value > 0 ? back : null) });
-  if ((await writeStates(admin, seasonId, list, "ambush_end", { id: m.id, hits, fights })) === "conflict") return "conflict";
+  if ((await writeStates(admin, seasonId, list, "ambush_end", { id: m.id, hits, fights, stolen: Math.floor(loot.pierre * VALUE.pierre + loot.fer * VALUE.fer + loot.or * VALUE.or) })) === "conflict") return "conflict";
   for (let i = 0; i < hits; i++) await grantRenown(admin, seasonId, owner, "intercept", "Embuscade");
   if (fights > 0) notify(admin, [owner.id], { title: "🏹 Embuscade levée", body: text.slice(3), tag: "raid" });
   return "changed";
@@ -4130,16 +4130,19 @@ function mapView(positions: Map<string, MapPos>): MapView {
 
 /** Classements d'une saison dans toutes les catégories, arrêtés à `until` (fin de saison ou maintenant). */
 async function seasonStandings(admin: SupabaseClient, seasonId: number, until: number): Promise<Standing[]> {
-  const [{ data: players }, { data: events }, { data: captures }, { data: wars }, { data: alliances }, { data: lordWins }, { data: history }] = await Promise.all([
-    admin.from("player_states").select("user_id, total_contributed, total_produced, domain:military->s2->produced, profiles(username, is_bot)").eq("season_id", seasonId),
+  const [{ data: players }, { data: events }, { data: captures }, { data: wars }, { data: alliances }, { data: lordWins }, { data: history }, { data: robs }, { data: ambushEnds }] = await Promise.all([
+    admin.from("player_states").select("user_id, total_contributed, total_produced, domain:military->s2->produced, traded:military->s2->traded, profiles(username, is_bot)").eq("season_id", seasonId),
     admin.from("events").select("kind, attackers").eq("season_id", seasonId),
     admin.from("chronicle").select("created_at, details").eq("season_id", seasonId).eq("kind", "fortress").order("created_at", { ascending: true }),
     admin.from("wars").select("winner").eq("season_id", seasonId).eq("settled", true).not("winner", "is", null),
     admin.from("alliances").select("id, name").eq("season_id", seasonId),
     admin.from("chronicle").select("actor_id").eq("season_id", seasonId).eq("kind", "raid").eq("details->>success", "true").in("target_id", [...LORD_BY_ID.keys()]).lte("created_at", iso(until)),
     admin.from("rate_history").select("user_id, day, rate").eq("season_id", seasonId).order("day", { ascending: true }),
+    // Vague 2 : interceptions et pillages réussis (valeur prise), et embuscades levées (butin relevé).
+    admin.from("chronicle").select("actor_id, details").eq("season_id", seasonId).eq("kind", "raid").eq("details->>success", "true").or("details->>intercept.eq.true,details->>pillage.eq.true").lte("created_at", iso(until)),
+    admin.from("action_log").select("user_id, details").eq("season_id", seasonId).eq("action", "ambush_end").lte("created_at", iso(until)),
   ]);
-  type Row = { user_id: string; total_contributed: number; total_produced: number; domain: number | null; profiles: { username: string; is_bot: boolean } | null };
+  type Row = { user_id: string; total_contributed: number; total_produced: number; domain: number | null; traded: number | null; profiles: { username: string; is_bot: boolean } | null };
   const humans = ((players ?? []) as unknown as Row[]).filter((r) => r.profiles && !r.profiles.is_bot);
   const names = new Map(humans.map((r) => [r.user_id, r.profiles!.username]));
   const allianceNames = new Map((alliances ?? []).map((a) => [String(a.id), a.name as string]));
@@ -4161,12 +4164,19 @@ async function seasonStandings(admin: SupabaseClient, seasonId: number, until: n
     progress,
     colossus: new Map(),
     domain: new Map(humans.map((r) => [r.user_id, Number(r.domain ?? 0)])),
+    routes: new Map(),
+    merchant: new Map(humans.map((r) => [r.user_id, Math.floor(Number(r.traded ?? 0))])),
     fortress: new Map(),
     war: new Map(),
     plunderer: new Map(),
     defender: new Map(),
   };
   for (const r of (lordWins ?? []) as { actor_id: string | null }[]) if (r.actor_id) totals.lords.set(r.actor_id, (totals.lords.get(r.actor_id) ?? 0) + 1);
+  const rob = (id: string | null, v: unknown) => {
+    if (id && Number(v) > 0) totals.routes.set(id, (totals.routes.get(id) ?? 0) + Math.floor(Number(v)));
+  };
+  for (const r of (robs ?? []) as { actor_id: string | null; details: { stolen?: number } | null }[]) rob(r.actor_id, r.details?.stolen);
+  for (const r of (ambushEnds ?? []) as { user_id: string | null; details: { stolen?: number } | null }[]) rob(r.user_id, r.details?.stolen);
   for (const e of events ?? []) {
     if (e.kind !== "colosse") continue;
     for (const [id, v] of Object.entries((e.attackers ?? {}) as Record<string, number>)) totals.colossus.set(id, (totals.colossus.get(id) ?? 0) + Number(v));

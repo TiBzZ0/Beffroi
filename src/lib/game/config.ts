@@ -472,8 +472,8 @@ export const COLOSSUS_KILL_SECONDS = 15 * 60;
 export const ONLINE_MS = 2.5 * 60 * 1000;
 
 // Panthéon : catégories figées à la fin de chaque saison (podium de 3), titres pour les premiers.
-export type HallUnit = "stone" | "time" | "count" | "percent" | "ratio";
-export type HallId = "generous" | "lords" | "progress" | "colossus" | "domain" | "fortress" | "war" | "plunderer" | "defender";
+export type HallUnit = "stone" | "gold" | "time" | "count" | "percent" | "ratio";
+export type HallId = "generous" | "lords" | "progress" | "colossus" | "domain" | "routes" | "merchant" | "fortress" | "war" | "plunderer" | "defender";
 export type HallDef = { id: HallId; icon: string; label: string; title: string; unit: HallUnit; alliance: boolean; ecus?: readonly number[] };
 /** Catégories de la saison en cours. */
 export const HALL: readonly HallDef[] = [
@@ -482,7 +482,9 @@ export const HALL: readonly HallDef[] = [
   { id: "progress", icon: "📈", label: "Meilleure progression (production multipliée sur 7 jours)", title: "Étoile montante", unit: "ratio", alliance: false, ecus: [30, 20, 10] },
   { id: "colossus", icon: "🗿", label: "Chasseurs de colosses (dégâts)", title: "Tueur de colosses", unit: "stone", alliance: false, ecus: [30, 20, 10] },
   { id: "domain", icon: "🏞️", label: "Plus grand domaine (production livrée)", title: "Grand propriétaire", unit: "stone", alliance: false, ecus: [30, 20, 10] },
-  { id: "fortress", icon: "🏰", label: "Gardiens de Pierre-Haute (temps tenu)", title: "Gardiens de Pierre-Haute", unit: "time", alliance: true, ecus: [30, 20, 10] },
+  { id: "routes", icon: "🏹", label: "Brigands des routes (valeur prise aux convois et aux concessions)", title: "Fléau des routes", unit: "stone", alliance: false, ecus: [30, 20, 10] },
+  { id: "merchant", icon: "🛤️", label: "Grands marchands (or des routes commerciales)", title: "Prince marchand", unit: "gold", alliance: false, ecus: [30, 20, 10] },
+  { id: "fortress", icon: "🏰", label: "Gardiens des forteresses (temps tenu, toutes forteresses)", title: "Gardiens de Pierre-Haute", unit: "time", alliance: true, ecus: [30, 20, 10] },
   { id: "war", icon: "🏆", label: "Guerres gagnées", title: "Seigneurs de guerre", unit: "count", alliance: true, ecus: [30, 20, 10] },
 ];
 /** Catégories retirées (saison 1), gardées pour afficher les anciens podiums du Panthéon. */
